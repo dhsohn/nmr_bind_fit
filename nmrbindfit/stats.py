@@ -41,6 +41,8 @@ def gaussian_loglik(
 ) -> Tuple[float, int, int]:
     res = np.asarray(residuals, dtype=float)
     if sigma is None:
+        if not np.all(np.isfinite(res)):
+            return float("nan"), 0, 0
         if per_peak and res.ndim == 2:
             n_peaks = int(res.shape[1])
             loglik = 0.0
@@ -89,6 +91,15 @@ def bic_from_loglik(loglik: float, n: int, p: int) -> float:
     if n <= 0 or not np.isfinite(loglik):
         return float("nan")
     return float(-2.0 * loglik + p * np.log(n))
+
+
+def aicc_from_loglik(loglik: float, n: int, p: int) -> float:
+    if n <= 0 or not np.isfinite(loglik):
+        return float("nan")
+    denom = n - p - 1
+    if denom <= 0:
+        return float("nan")
+    return float(-2.0 * loglik + 2.0 * p + (2.0 * p * (p + 1)) / denom)
 
 
 def f_test(rss_small: float, rss_large: float, p_small: int, p_large: int, n: int) -> Optional[FTestResult]:

@@ -11,7 +11,7 @@ from scipy.optimize import least_squares
 
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
-from .stats import bic_from_loglik, covariance_from_jacobian, gaussian_loglik, param_ci
+from .stats import aicc_from_loglik, bic_from_loglik, covariance_from_jacobian, gaussian_loglik, param_ci
 
 
 @dataclass
@@ -38,6 +38,7 @@ class FitResult:
     r2: float
     reduced_chi2: float
     bic: float
+    aicc: float
     n: int
     p: int
     dof: int
@@ -261,6 +262,7 @@ def fit_model(
     if n_loglik <= 0:
         raise RuntimeError("BIC calculation failed: no valid log-likelihood terms.")
     bic = bic_from_loglik(loglik_total, n_loglik, bic_p)
+    aicc = aicc_from_loglik(loglik_total, n_loglik, bic_p)
 
     cov = covariance_from_jacobian(best_res.jac, rss_weighted, dof)
     ci = param_ci(best_params, cov, dof)
@@ -292,6 +294,7 @@ def fit_model(
         r2=r2,
         reduced_chi2=reduced_chi2,
         bic=bic,
+        aicc=aicc,
         n=n,
         p=p,
         dof=dof,

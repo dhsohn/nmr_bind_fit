@@ -119,6 +119,10 @@ def load_dataset(
 
     h_tot = data[host_col].to_numpy(dtype=float)
     g_tot = data[guest_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(h_tot)) or np.any(h_tot <= 0):
+        raise ValueError("Host concentration values must be positive and finite.")
+    if not np.all(np.isfinite(g_tot)) or np.any(g_tot < 0):
+        raise ValueError("Guest concentration values must be non-negative and finite.")
 
     y = data[ppm_cols].to_numpy(dtype=float)
     sigma = None

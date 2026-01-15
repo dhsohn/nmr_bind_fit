@@ -60,14 +60,14 @@ def _auto_output_dir(paths: List[Path]) -> Path:
     if len(paths) == 1:
         base = paths[0].stem
     else:
-        base = f"{paths[0].stem}_plus{len(paths) - 1}"
+        base = "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
 
 def _dataset_key(result) -> str:
     if len(result.datasets) == 1:
         return result.datasets[0].name
-    return "GLOBAL"
+    return "Simultaneous Fitting"
 
 
 SUMMARY_LABELS = {
@@ -79,6 +79,7 @@ SUMMARY_LABELS = {
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
     "BIC": "Bayesian Information Criterion",
+    "AICc": "Corrected Akaike Information Criterion",
 }
 
 
@@ -86,6 +87,7 @@ STATS_LABELS = {
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
     "BIC": "Bayesian Information Criterion",
+    "AICc": "Corrected Akaike Information Criterion",
 }
 
 
@@ -377,6 +379,7 @@ def run_fit(args: argparse.Namespace) -> None:
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
                 "BIC": f"{res.bic:.6g}",
+                "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
             }
             if solver_stats is not None:
                 stats_base.update(
@@ -437,6 +440,7 @@ def run_fit(args: argparse.Namespace) -> None:
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
                 "BIC": f"{res.bic:.6g}",
+                "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
             }
             summary_rows.append({_label_summary_key(k): v for k, v in summary_base.items()})
 
@@ -449,6 +453,12 @@ def run_fit(args: argparse.Namespace) -> None:
         if args.bootstrap > 0
         else "Bootstrap confidence intervals were not computed."
     )
+    replicate_note = ""
+    if args.global_replicates and len(datasets) > 1:
+        replicate_note = (
+            "Replicate datasets were fit simultaneously with shared binding constants and "
+            "replicate-specific chemical shifts. "
+        )
     methods_text = (
         "Chemical shift data were fit under a fast-exchange assumption, with observed shifts modeled as "
         "population-weighted averages of species. The 1:1 model was solved analytically, while 1:2 and 2:1 "
@@ -456,12 +466,15 @@ def run_fit(args: argparse.Namespace) -> None:
         "balance constraints, with bisection fallback when Newton-Raphson did not converge; solver "
         "success and failure counts were recorded. Nonlinear least squares fitting used binding constants and multi-start "
         "initialization; for multi-peak data, binding constants were shared across peaks with peak-specific "
-        "chemical shifts. Uncertainty was quantified using bootstrap resampling, and parameter standard "
+        "chemical shifts. "
+        + replicate_note
+        + "Uncertainty was quantified using bootstrap resampling, and parameter standard "
         "errors are reported from the bootstrap distributions. Residual bootstrap uses "
         "sigma-standardized residuals when sigma is provided, while parametric bootstrap "
         "draws Gaussian noise scaled by sigma. Bayesian Information Criterion(BIC) is computed from the Gaussian "
         "log-likelihood (including sigma terms when provided); when sigma is not provided, variance "
-        "is estimated per peak and counted as additional parameters. Model selection prioritized BIC. "
+        "is estimated per peak and counted as additional parameters. Corrected Akaike Information Criterion (AICc) "
+        "is reported as a supplementary metric for small-sample validation. Model selection prioritized BIC. "
         "When the 1:1 model is selected, "
         "a nested-model F test versus the non-binding model is reported. "
         + bootstrap_note
@@ -487,7 +500,7 @@ def run_fit(args: argparse.Namespace) -> None:
             decisions.append(f"- next best BIC: {bic_sorted[1].bic:.6g}")
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
             if best.bootstrap.param_samples.size > 0:
-                k_samples = 10 ** best.bootstrap.param_samples[:, : best.model.n_logk]
+                k_samples = _safe_pow10(best.bootstrap.param_samples[:, : best.model.n_logk])
                 k_ci_low = np.percentile(k_samples, 2.5, axis=0)
                 k_ci_high = np.percentile(k_samples, 97.5, axis=0)
                 width = k_ci_high - k_ci_low
@@ -548,7 +561,13 @@ def build_parser() -> argparse.ArgumentParser:
     fit_p.add_argument("--k-starts", default=None, help="Comma-separated K starts")
     fit_p.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
     fit_p.add_argument("--k-max", type=float, default=None, help="Maximum K bound")
-    fit_p.add_argument("--global-replicates", action="store_true", help="Global replicate fit")
+    fit_p.add_argument(
+        "--global-replicates",
+        "--replicates",
+        dest="global_replicates",
+        action="store_true",
+        help="Fit replicate inputs with shared binding constants",
+    )
     fit_p.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
     fit_p.add_argument("--seed", type=int, default=None, help="Random seed")
     fit_p.add_argument(

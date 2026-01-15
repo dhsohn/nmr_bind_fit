@@ -51,10 +51,10 @@ If you see optimizer overflow warnings, constrain K:
 python -m nmrbindfit.cli fit --input data.csv --k-min 1e0 --k-max 1e12
 ```
 
-Multiple files with shared binding constants (global replicates):
+Multiple replicate files with shared binding constants:
 
 ```
-python -m nmrbindfit.cli fit --input data1.xlsx data2.xlsx --global-replicates
+python -m nmrbindfit.cli fit --input data1.xlsx data2.xlsx --replicates
 ```
 
 ## Outputs
@@ -68,7 +68,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_<input_name>` and conta
 
 ## Notes
 
-- BIC is reported for model comparison using Gaussian log-likelihood (including sigma terms when provided); when sigma is not provided, variance is estimated per peak and counted as additional parameters. The nested-model F test is reported when the 1:1 model is selected.
+- BIC is reported for model comparison using Gaussian log-likelihood (including sigma terms when provided); when sigma is not provided, variance is estimated per peak and counted as additional parameters. Corrected Akaike Information Criterion (AICc) is reported as a supplementary metric. The nested-model F test is reported when the 1:1 model is selected.
 - 1:2 and 2:1 equilibrium points are solved with Newton-Raphson on free guest.
 - summary.csv includes confidence intervals and standard errors.
 - Residual bootstrap uses sigma-standardized residuals when sigma is provided; parametric bootstrap draws Gaussian noise scaled by sigma.
