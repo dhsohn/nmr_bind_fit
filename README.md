@@ -66,6 +66,34 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_<input_name>` and conta
 - report.html (plots + summary)
 - model_*/ (plots, bootstrap correlation matrix, bootstrap histograms)
 
+## Methods summary (manuscript-ready)
+
+NMR chemical shift titration data are analyzed under a fast-exchange assumption, where the observed chemical
+shift at each titration point is modeled as a population-weighted average of all species present in solution.
+Four candidate models are considered: 1:1 binding (H + G <-> HG), 1:2 binding (H + G <-> HG; HG + G <-> HG2),
+2:1 binding (H + G <-> HG; H + HG <-> H2G), and a non-binding control model (linear drift).
+
+Model parameters are estimated by nonlinear least-squares fitting with multiple initializations to mitigate
+local-minimum sensitivity. For multi-peak datasets, binding constants are shared across peaks while peak-specific
+chemical shifts are fit separately. The 1:1 model is solved analytically, whereas 1:2 and 2:1 models are solved
+point-wise using Newton-Raphson on the free guest concentration with mass-balance constraints; when
+Newton-Raphson does not converge, a bracketing (bisection) fallback is used. Solver success and failure counts
+are recorded to document numerical stability.
+
+Uncertainty in fitted parameters is quantified by bootstrap resampling (default 1000 iterations). When
+measurement uncertainties (sigma) are available, residuals are standardized by sigma prior to resampling;
+otherwise, unweighted residuals are used. Standard errors and 95% confidence intervals are derived from the
+bootstrap distributions, and bootstrap failure counts are reported as warnings when present.
+
+Model selection prioritizes the Bayesian Information Criterion (BIC), computed from the Gaussian log-likelihood
+(including sigma terms when provided). When sigma is not provided, per-peak variance is estimated and counted as
+additional parameters. Corrected Akaike Information Criterion (AICc) is reported as a supplementary metric for
+small-sample validation. For nested comparison of non-binding vs 1:1 models, an F test is reported when the 1:1
+model is selected.
+
+For replicate titration datasets, a simultaneous fitting is performed in which binding constants are shared
+across replicates while chemical shifts are allowed to vary by replicate.
+
 ## Notes
 
 - BIC is reported for model comparison using Gaussian log-likelihood (including sigma terms when provided); when sigma is not provided, variance is estimated per peak and counted as additional parameters. Corrected Akaike Information Criterion (AICc) is reported as a supplementary metric. The nested-model F test is reported when the 1:1 model is selected.
