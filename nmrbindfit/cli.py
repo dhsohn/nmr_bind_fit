@@ -16,7 +16,6 @@ from .io import load_datasets
 from .models import split_params_multi
 from .plots import plot_bootstrap_hist, plot_fraction_bound, plot_isotherms, plot_residuals
 from .report import DecisionEntry, ModelEntry, ParamEntry, write_decision_txt, write_report_html, write_summary_csv
-from .stats import f_test
 
 
 MODEL_LABELS = {
@@ -99,14 +98,6 @@ def _label_stats_key(key: str) -> str:
     return STATS_LABELS.get(key, key)
 
 
-def _format_ftest_value(value: object) -> str:
-    if isinstance(value, (int, float, np.floating)) and np.isfinite(value):
-        return f"{float(value):.6g}"
-    if value is None:
-        return "Not available"
-    return str(value)
-
-
 def _safe_pow10(values: np.ndarray) -> np.ndarray:
     log10_max = np.log(np.finfo(float).max) / np.log(10.0)
     log10_min = np.log(np.finfo(float).tiny) / np.log(10.0)
@@ -176,7 +167,6 @@ def run_fit(args: argparse.Namespace) -> None:
         guest_col=args.guest_col,
         ppm_cols=args.ppm_cols,
         sigma_col=args.sigma_col,
-        xaxis=args.xaxis,
     )
 
     model_names = DEFAULT_MODEL_NAMES
@@ -199,7 +189,7 @@ def run_fit(args: argparse.Namespace) -> None:
         datasets,
         model_names,
         logk_starts=logk_starts,
-        global_replicates=args.global_replicates,
+        replicates=args.replicates,
         max_nfev=args.max_nfev,
         bootstrap=args.bootstrap,
         bootstrap_method=args.bootstrap_method,
@@ -215,43 +205,6 @@ def run_fit(args: argparse.Namespace) -> None:
     for res in results:
         key = _dataset_key(res)
         results_by_key.setdefault(key, {})[res.model.name] = res
-
-    # Best model per dataset for conditional F test
-    best_by_key = {
-        key: min(model_map.values(), key=lambda r: r.bic) for key, model_map in results_by_key.items()
-    }
-
-    # F-test (nb vs 1:1) only when 1:1 is the selected model
-    ftest_by_key: Dict[str, dict] = {}
-    for key, model_map in results_by_key.items():
-        if best_by_key[key].model.name != "11":
-            continue
-        entry = {"label": "non-binding vs 1:1"}
-        if "nb" in model_map and "11" in model_map:
-            res_nb = model_map["nb"]
-            res_11 = model_map["11"]
-            if res_nb.p <= res_11.p:
-                res_small, res_large = res_nb, res_11
-            else:
-                res_small, res_large = res_11, res_nb
-            ftest = f_test(res_small.rss_weighted, res_large.rss_weighted, res_small.p, res_large.p, res_large.n)
-            if ftest:
-                entry.update(stat=ftest.f_stat, p=ftest.p_value, crit=ftest.f_crit, note="Nested")
-            else:
-                entry.update(
-                    stat="Not available (insufficient data)",
-                    p="Not available (insufficient data)",
-                    crit="Not available (insufficient data)",
-                    note="Nested",
-                )
-        else:
-            entry.update(
-                stat="Not available (model missing)",
-                p="Not available (model missing)",
-                crit="Not available (model missing)",
-                note="Model missing",
-            )
-        ftest_by_key[key] = entry
 
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
@@ -307,9 +260,9 @@ def run_fit(args: argparse.Namespace) -> None:
                 ds_dir = model_dir
                 if len(res.datasets) > 1:
                     ds_dir = model_dir / f"dataset_{ds.name}"
-                isotherm_files = plot_isotherms(res.model, ds, logk, delta, args.xaxis, ds_dir)
-                residual_files = plot_residuals(res.model, ds, residual, args.xaxis, ds_dir)
-                frac_files = plot_fraction_bound(res.model, ds, logk, delta, args.xaxis, ds_dir)
+                isotherm_files = plot_isotherms(res.model, ds, logk, delta, ds_dir)
+                residual_files = plot_residuals(res.model, ds, residual, ds_dir)
+                frac_files = plot_fraction_bound(res.model, ds, logk, delta, ds_dir)
                 for path in isotherm_files + residual_files + frac_files:
                     if path.suffix.lower() == ".png":
                         plot_paths.append(str(path.relative_to(out_dir)))
@@ -454,7 +407,7 @@ def run_fit(args: argparse.Namespace) -> None:
         else "Bootstrap confidence intervals were not computed."
     )
     replicate_note = ""
-    if args.global_replicates and len(datasets) > 1:
+    if args.replicates and len(datasets) > 1:
         replicate_note = (
             "Replicate datasets were fit simultaneously with shared binding constants and "
             "replicate-specific chemical shifts. "
@@ -471,12 +424,50 @@ def run_fit(args: argparse.Namespace) -> None:
         + "Uncertainty was quantified using bootstrap resampling, and parameter standard "
         "errors are reported from the bootstrap distributions. Residual bootstrap uses "
         "sigma-standardized residuals when sigma is provided, while parametric bootstrap "
-        "draws Gaussian noise scaled by sigma. Bayesian Information Criterion(BIC) is computed from the Gaussian "
-        "log-likelihood (including sigma terms when provided); when sigma is not provided, variance "
-        "is estimated per peak and counted as additional parameters. Corrected Akaike Information Criterion (AICc) "
-        "is reported as a supplementary metric for small-sample validation. Model selection prioritized BIC. "
-        "When the 1:1 model is selected, "
-        "a nested-model F test versus the non-binding model is reported. "
+        "draws Gaussian noise scaled by sigma. Model selection metrics are computed from a Gaussian log-likelihood. "
+        "When sigma is provided, point-specific sigma values are used in the likelihood; when sigma is not provided, "
+        "variance is estimated per peak and counted as additional parameters to reflect potential peak-specific noise "
+        "scales. The effective sample size n used in BIC/AICc is defined as the total number of finite residuals "
+        "across all peaks and titration points (sum of n_points * n_peaks after filtering). BIC is an asymptotic "
+        "approximation and can be sensitive to "
+        "model misspecification, correlated errors, or outliers; therefore, BIC rankings are interpreted alongside "
+        "residual patterns and bootstrap uncertainty. Model selection prioritized BIC, with AICc reported as a "
+        "supplementary small-sample metric. "
+        "For the 1:2 and 2:1 models, extreme binding strengths (very large K) or highly skewed concentration ratios "
+        "can push free-guest solutions toward the lower bound; in such regimes the solver may become stiff and "
+        "convergence can slow or occasionally fail, which is captured by the reported solver failure counts. "
+        "Because the solver enforces a lower bound on free guest (1e-18), solutions that sit on this bound can "
+        "saturate toward a fully bound regime, and K may be driven only toward larger values because the data are "
+        "no longer sensitive to K. This reflects a physical limit on the measurable K range rather than a unique "
+        "estimate. "
+        "Observed chemical shifts are modeled as population-weighted averages of species under fast exchange, "
+        "using host-based fractional weighting (e.g., for the 2:1 model the H2G complex contributes "
+        "2 * [H2G] / H_tot because it contains two host units). This assumes the observed signals are host "
+        "resonances; if guest resonances are fitted, the weighting definition must be revised and stated explicitly. "
+        "Equilibrium concentrations are solved per model: the 1:1 system uses a closed-form solution, while 1:2 and "
+        "2:1 use a one-dimensional free-guest root solved point-wise with Newton-Raphson and multiple starting "
+        "guesses, with a bisection fallback if Newton-Raphson fails. Solver failures at any point raise an exception "
+        "and contribute to the reported failure counts. "
+        "Optimization uses nonlinear least squares via scipy.optimize.least_squares, with weighted residuals "
+        "r = (y_obs - y_calc) / sigma when sigma is provided and unweighted residuals otherwise. Gaussian "
+        "log-likelihoods are computed from these residuals to obtain BIC/AICc; when sigma is not provided, "
+        "a separate variance is estimated per peak as RSS/n and included in the likelihood, and these per-peak "
+        "variances are counted as additional parameters in the BIC/AICc penalty term. "
+        "Each model was fit by nonlinear least squares assuming Gaussian errors, and relative support among "
+        "candidate models was compared using Gaussian log-likelihood-based BIC (and AICc). Replicate datasets "
+        "were handled with simultaneous fitting that shared binding constants across repeats while estimating "
+        "chemical-shift parameters independently for each replicate. "
+        "Nonlinear least-squares fits can converge to different solutions depending on initialization; the code "
+        "uses multiple logK starting values, and the scan range and number of restarts should be reported. For the "
+        "1:2 and 2:1 models, logK1 and logK2 can be strongly correlated, leading to identifiability challenges. In "
+        "such cases, bootstrap distributions may be non-normal or multimodal, and reporting parameter correlations "
+        "and bootstrap distributions provides a more transparent uncertainty assessment. "
+        "Residual bootstrap resamples titration points while applying the same indices across peaks, preserving "
+        "cross-peak covariance structure to some extent. However, whether experimental noise is independent across "
+        "points and peaks depends on the dataset, so the choice of residual vs points vs parametric bootstrap should "
+        "be justified. Bootstrap refits apply small random perturbations (std 0.1 in log10 K) to logK initial "
+        "values to mitigate local-minimum bias, but multimodal solutions can still be under-sampled; reporting "
+        "this limitation remains important. "
         + bootstrap_note
     )
 
@@ -490,11 +481,14 @@ def run_fit(args: argparse.Namespace) -> None:
         best_name = best.model.name
         best_display = _display_model_name(best_name)
         decisions.append(f"Dataset: {key}")
-        decisions.append(f"Recommended model: {best_display} (lowest BIC)")
+        decisions.append(
+            f"Recommended model (relative to tested candidates): {best_display} (lowest BIC among candidates)"
+        )
         reasons: List[str] = []
         reasons.append(
-            f"The selected model has the lowest Bayesian Information Criterion (BIC={best.bic:.6g}); "
-            "BIC penalizes model complexity, so lower values indicate a better balance of fit and parsimony"
+            f"Among the evaluated models, this model has the lowest Bayesian Information Criterion "
+            f"(BIC={best.bic:.6g}); BIC penalizes model complexity, so lower values indicate a better balance "
+            "of fit and parsimony, but this ranking reflects relative support rather than proof of a true model"
         )
         if len(bic_sorted) > 1:
             decisions.append(f"- next best BIC: {bic_sorted[1].bic:.6g}")
@@ -507,24 +501,6 @@ def run_fit(args: argparse.Namespace) -> None:
                 if np.any(width > args.bootstrap_ci_width):
                     decisions.append("- bootstrap CI too wide")
                     reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
-        ftest_entry = ftest_by_key.get(key, {})
-        if isinstance(ftest_entry.get("stat"), (int, float, np.floating)):
-            f_line = (
-                f"F test non-binding vs 1:1: F={_format_ftest_value(ftest_entry.get('stat'))}, "
-                f"p={_format_ftest_value(ftest_entry.get('p'))}, "
-                f"Fcrit={_format_ftest_value(ftest_entry.get('crit'))}."
-            )
-            decisions.append(f"- {f_line}")
-            f_support = ""
-            if isinstance(ftest_entry.get("p"), (int, float, np.floating)):
-                if float(ftest_entry.get("p")) < 0.05:
-                    f_support = "This supports the binding model over the non-binding model at alpha=0.05"
-                else:
-                    f_support = "This does not support a statistically significant improvement for the binding model at alpha=0.05"
-            reasons.append(
-                "The F test compares the nested non-binding and 1:1 binding models; "
-                f"{f_line} {f_support}".strip()
-            )
         decisions.append("")
         decision_entries.append(
             DecisionEntry(
@@ -551,7 +527,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     fit_p = sub.add_parser("fit", help="Fit binding models")
     fit_p.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
-    fit_p.add_argument("--xaxis", choices=["eq", "guest"], default="eq", help="X axis for plots")
     fit_p.add_argument("--host-col", default=None, help="Host concentration column")
     fit_p.add_argument("--guest-col", default=None, help="Guest concentration column")
     fit_p.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
@@ -562,9 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     fit_p.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
     fit_p.add_argument("--k-max", type=float, default=None, help="Maximum K bound")
     fit_p.add_argument(
-        "--global-replicates",
         "--replicates",
-        dest="global_replicates",
         action="store_true",
         help="Fit replicate inputs with shared binding constants",
     )

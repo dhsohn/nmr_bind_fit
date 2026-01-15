@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import warnings
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -62,7 +63,6 @@ def load_dataset(
     guest_col: Optional[str] = None,
     ppm_cols: Optional[Sequence[str]] = None,
     sigma_col: Optional[str] = None,
-    xaxis: str = "eq",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
     if path.suffix.lower() in {".xlsx", ".xls"}:
@@ -115,7 +115,24 @@ def load_dataset(
         use_cols.append(sigma_col)
 
     data = df[use_cols].copy()
-    data = data.dropna(axis=0, how="any")
+    required_cols = [host_col, guest_col]
+    if sigma_col is not None:
+        required_cols.append(sigma_col)
+    data = data.dropna(axis=0, how="any", subset=required_cols)
+
+    dropped_ppm = [col for col in ppm_cols if data[col].isna().any()]
+    if dropped_ppm:
+        warnings.warn(
+            "Dropping ppm columns with missing values: " + ", ".join(dropped_ppm),
+            RuntimeWarning,
+        )
+    ppm_cols = [col for col in ppm_cols if col not in dropped_ppm]
+    if not ppm_cols:
+        raise ValueError("No ppm columns remain after dropping columns with missing values.")
+    use_cols = [host_col, guest_col] + ppm_cols
+    if sigma_col is not None:
+        use_cols.append(sigma_col)
+    data = data[use_cols]
 
     h_tot = data[host_col].to_numpy(dtype=float)
     g_tot = data[guest_col].to_numpy(dtype=float)
@@ -132,11 +149,8 @@ def load_dataset(
             raise ValueError("Sigma values must be positive and finite.")
         sigma = np.repeat(sigma_raw, y.shape[1], axis=1)
 
-    if xaxis == "guest":
-        x = g_tot
-    else:
-        with np.errstate(divide="ignore", invalid="ignore"):
-            x = np.where(h_tot != 0, g_tot / h_tot, 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x = np.where(h_tot != 0, g_tot / h_tot, 0.0)
 
     name = path.stem
     return Dataset(
@@ -157,7 +171,6 @@ def load_datasets(
     guest_col: Optional[str],
     ppm_cols: Optional[str],
     sigma_col: Optional[str],
-    xaxis: str,
 ) -> List[Dataset]:
     """Load multiple datasets."""
     ppm_cols_list = _split_cols(ppm_cols)
@@ -170,7 +183,6 @@ def load_datasets(
                 guest_col=guest_col,
                 ppm_cols=ppm_cols_list,
                 sigma_col=sigma_col,
-                xaxis=xaxis,
             )
         )
     return datasets

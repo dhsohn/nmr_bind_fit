@@ -3,19 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy import stats
-
-
-@dataclass
-class FTestResult:
-    f_stat: float
-    p_value: float
-    f_crit: float
-    df_num: int
-    df_den: int
 
 
 @dataclass
@@ -102,29 +93,6 @@ def aicc_from_loglik(loglik: float, n: int, p: int) -> float:
     return float(-2.0 * loglik + 2.0 * p + (2.0 * p * (p + 1)) / denom)
 
 
-def f_test(rss_small: float, rss_large: float, p_small: int, p_large: int, n: int) -> Optional[FTestResult]:
-    if p_large <= p_small:
-        return None
-    df_num = p_large - p_small
-    df_den = n - p_large
-    if df_den <= 0:
-        return None
-    num = (rss_small - rss_large) / df_num
-    den = rss_large / df_den
-    if den <= 0:
-        return None
-    f_stat = num / den
-    p_val = stats.f.sf(f_stat, df_num, df_den)
-    f_crit = stats.f.ppf(0.95, df_num, df_den)
-    return FTestResult(
-        f_stat=float(f_stat),
-        p_value=float(p_val),
-        f_crit=float(f_crit),
-        df_num=int(df_num),
-        df_den=int(df_den),
-    )
-
-
 def quadratic_nonlinearity(x: np.ndarray, y: np.ndarray) -> QuadraticResult:
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -170,23 +138,3 @@ def svd_diagnosis(y: np.ndarray) -> SVDResult:
         possible = significant
     return SVDResult(significant=significant, possible=possible, ratios=ratios)
 
-
-def covariance_from_jacobian(jac: np.ndarray, rss: float, dof: int) -> Optional[np.ndarray]:
-    if dof <= 0:
-        return None
-    try:
-        jtj = jac.T @ jac
-        cov = (rss / dof) * np.linalg.inv(jtj)
-    except np.linalg.LinAlgError:
-        return None
-    return cov
-
-
-def param_ci(params: np.ndarray, cov: Optional[np.ndarray], dof: int) -> Dict[str, np.ndarray]:
-    if cov is None:
-        return {"se": np.full_like(params, np.nan), "ci_low": np.full_like(params, np.nan), "ci_high": np.full_like(params, np.nan)}
-    se = np.sqrt(np.diag(cov))
-    t_val = stats.t.ppf(0.975, max(dof, 1))
-    ci_low = params - t_val * se
-    ci_high = params + t_val * se
-    return {"se": se, "ci_low": ci_low, "ci_high": ci_high}

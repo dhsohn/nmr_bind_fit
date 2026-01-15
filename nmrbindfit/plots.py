@@ -15,18 +15,12 @@ from .io import Dataset
 from .models import ModelSpec, predict_dataset, fraction_bound
 
 
-def _grid_dataset(ds: Dataset, xaxis: str, n: int = 200) -> Dataset:
-    if xaxis == "guest":
-        g_vals = np.linspace(np.min(ds.g_tot), np.max(ds.g_tot), n)
-        h_ref = float(np.median(ds.h_tot))
-        h_vals = np.full_like(g_vals, h_ref)
-        x_vals = g_vals
-    else:
-        eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
-        h_ref = float(np.median(ds.h_tot))
-        h_vals = np.full_like(eq_vals, h_ref)
-        g_vals = eq_vals * h_ref
-        x_vals = eq_vals
+def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
+    eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
+    h_ref = float(np.median(ds.h_tot))
+    h_vals = np.full_like(eq_vals, h_ref)
+    g_vals = eq_vals * h_ref
+    x_vals = eq_vals
 
     return Dataset(
         name=ds.name,
@@ -45,13 +39,12 @@ def plot_isotherms(
     ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
-    xaxis: str,
     out_dir: Path,
 ) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
 
-    grid_ds = _grid_dataset(ds, xaxis)
+    grid_ds = _grid_dataset(ds)
     y_grid, _ = predict_dataset(model, grid_ds, logk, delta)
 
     for i, peak in enumerate(ds.y_cols):
@@ -59,7 +52,7 @@ def plot_isotherms(
         ax.scatter(ds.x, ds.y[:, i], color="#2b2d42", label="data")
         order = np.argsort(grid_ds.x)
         ax.plot(grid_ds.x[order], y_grid[order, i], color="#d90429", label="fit")
-        ax.set_xlabel("guest" if xaxis == "guest" else "eq")
+        ax.set_xlabel("eq")
         ax.set_ylabel("ppm")
         ax.set_title(f"{model.name} fit - {peak}")
         ax.legend()
@@ -77,7 +70,6 @@ def plot_residuals(
     model: ModelSpec,
     ds: Dataset,
     residuals: np.ndarray,
-    xaxis: str,
     out_dir: Path,
 ) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +78,7 @@ def plot_residuals(
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.axhline(0.0, color="#6c757d", linewidth=1)
         ax.scatter(ds.x, residuals[:, i], color="#2b2d42")
-        ax.set_xlabel("guest" if xaxis == "guest" else "eq")
+        ax.set_xlabel("eq")
         ax.set_ylabel("residual")
         ax.set_title(f"{model.name} residual - {peak}")
         fig.tight_layout()
@@ -130,7 +122,6 @@ def plot_fraction_bound(
     ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
-    xaxis: str,
     out_dir: Path,
 ) -> List[Path]:
     if not model.is_binding:
@@ -140,7 +131,7 @@ def plot_fraction_bound(
     f = fraction_bound(model, species, ds.h_tot)
     fig, ax = plt.subplots(figsize=(6, 3))
     ax.scatter(ds.x, f, color="#2b2d42")
-    ax.set_xlabel("guest" if xaxis == "guest" else "eq")
+    ax.set_xlabel("eq")
     ax.set_ylabel("fraction bound")
     ax.set_ylim(0, 1.05)
     ax.set_title(f"{model.name} fraction bound")

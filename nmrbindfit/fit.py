@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import itertools
 import numpy as np
@@ -11,7 +11,7 @@ from scipy.optimize import least_squares
 
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
-from .stats import aicc_from_loglik, bic_from_loglik, covariance_from_jacobian, gaussian_loglik, param_ci
+from .stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
 
 
 @dataclass
@@ -45,8 +45,6 @@ class FitResult:
     y_pred: List[np.ndarray]
     species: List
     residuals: List[np.ndarray]
-    cov: Optional[np.ndarray]
-    ci: Dict[str, np.ndarray]
     bootstrap: Optional[BootstrapResult]
 
 
@@ -264,9 +262,6 @@ def fit_model(
     bic = bic_from_loglik(loglik_total, n_loglik, bic_p)
     aicc = aicc_from_loglik(loglik_total, n_loglik, bic_p)
 
-    cov = covariance_from_jacobian(best_res.jac, rss_weighted, dof)
-    ci = param_ci(best_params, cov, dof)
-
     param_names = _param_names_multi(model, datasets)
 
     bootstrap_result = None
@@ -301,8 +296,6 @@ def fit_model(
         y_pred=y_pred_list,
         species=species_list,
         residuals=residuals,
-        cov=cov,
-        ci=ci,
         bootstrap=bootstrap_result,
     )
 
@@ -372,6 +365,7 @@ def bootstrap_params(
     rng = np.random.default_rng(seed)
     param_samples = []
     n_success = 0
+    logk_jitter = 0.1
 
     y_pred_list, species_list, residuals = _predict_all(params, model, datasets)
 
@@ -396,9 +390,17 @@ def bootstrap_params(
                 boot = _residual_bootstrap(rng, ds, y_pred, res)
             boot_datasets.append(boot)
 
-        bounds = _param_bounds(params, model, logk_bounds)
+        params0 = params.copy()
+        if model.n_logk:
+            jitter = rng.normal(0.0, logk_jitter, size=model.n_logk)
+            params0[: model.n_logk] = params0[: model.n_logk] + jitter
+            if logk_bounds is not None:
+                params0[: model.n_logk] = np.clip(
+                    params0[: model.n_logk], logk_bounds[0], logk_bounds[1]
+                )
+        bounds = _param_bounds(params0, model, logk_bounds)
         try:
-            params_fit, _ = _fit_with_initial(model, boot_datasets, params, max_nfev=2000, bounds=bounds)
+            params_fit, _ = _fit_with_initial(model, boot_datasets, params0, max_nfev=2000, bounds=bounds)
         except Exception:
             continue
         param_samples.append(params_fit)
@@ -432,7 +434,7 @@ def fit_models(
     datasets: List[Dataset],
     model_names: Sequence[str],
     logk_starts: Sequence[float],
-    global_replicates: bool,
+    replicates: bool,
     max_nfev: int,
     bootstrap: int,
     bootstrap_method: str,
@@ -440,7 +442,7 @@ def fit_models(
     logk_bounds: Optional[Tuple[float, float]],
 ) -> List[FitResult]:
     results = []
-    if global_replicates:
+    if replicates:
         for model_name in model_names:
             results.append(
                 fit_model(
