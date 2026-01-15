@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmrbindfit"
+version = "0.1.0"
+description = "NMR chemical shift titration binding fits"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+]
+
+[project.scripts]
+nmrbindfit = "nmrbindfit.cli:main"
+
+[tool.setuptools]
+packages = ["nmrbindfit"]
