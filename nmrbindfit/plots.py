@@ -31,6 +31,7 @@ def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
         y=np.zeros((len(x_vals), ds.n_peaks)),
         y_cols=ds.y_cols,
         sigma=None,
+        dropped_peaks=ds.dropped_peaks,
     )
 
 

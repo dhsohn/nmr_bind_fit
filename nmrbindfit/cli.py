@@ -7,7 +7,7 @@ import glob
 from datetime import datetime
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -55,7 +55,8 @@ def _safe_output_name(name: str) -> str:
 
 
 def _auto_output_dir(paths: List[Path]) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.now()
+    timestamp = f"{now:%Y%m%d_%H%M%S}_{now.microsecond // 1000:03d}"
     if len(paths) == 1:
         base = paths[0].stem
     else:
@@ -75,8 +76,10 @@ SUMMARY_LABELS = {
     "K": "Binding constant",
     "bootstrap_K_CI": "Confidence Interval(CI)",
     "bootstrap_K_SE": "Standard Error(SE)",
+    "dropped_peaks": "Dropped chemical shift columns with missing values",
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
+    "RMSE_weighted": "Weighted root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
 }
@@ -85,6 +88,7 @@ SUMMARY_LABELS = {
 STATS_LABELS = {
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
+    "RMSE_weighted": "Weighted root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
 }
@@ -125,6 +129,21 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
 
 def _display_model_name(name: str) -> str:
     return MODEL_LABELS.get(name, name)
+
+
+def _format_dropped_peaks(datasets) -> str:
+    items: List[str] = []
+    multi = len(datasets) > 1
+    for ds in datasets:
+        if ds.dropped_peaks:
+            cols = ", ".join(ds.dropped_peaks)
+            if multi:
+                items.append(f"{ds.name}: {cols}")
+            else:
+                items.append(cols)
+    if not items:
+        return "None"
+    return "; ".join(items)
 
 
 def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, object]]:
@@ -174,6 +193,8 @@ def run_fit(args: argparse.Namespace) -> None:
     k_starts = _parse_k_starts(args.k_starts)
     if any(v <= 0 for v in k_starts):
         raise ValueError("All K starts must be positive.")
+    if args.bootstrap_logk_jitter < 0:
+        raise ValueError("--bootstrap-logk-jitter must be non-negative.")
     logk_starts = [float(np.log10(v)) for v in k_starts]
     logk_bounds = None
     if args.k_min is not None or args.k_max is not None:
@@ -195,21 +216,44 @@ def run_fit(args: argparse.Namespace) -> None:
         bootstrap_method=args.bootstrap_method,
         seed=args.seed,
         logk_bounds=logk_bounds,
+        logk_jitter=args.bootstrap_logk_jitter,
     )
 
     out_dir = _auto_output_dir(paths)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Index results
+    # Index results and collect failures
     results_by_key: Dict[str, Dict[str, object]] = {}
+    failures_by_key: Dict[str, List[Tuple[str, str]]] = {}
+    ordered_keys: List[str] = []
     for res in results:
         key = _dataset_key(res)
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+        if not res.success:
+            failures_by_key.setdefault(key, []).append((res.model.name, res.message))
+            continue
         results_by_key.setdefault(key, {})[res.model.name] = res
 
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
+    report_warnings: List[str] = []
 
-    for key, model_map in results_by_key.items():
+    for ds in datasets:
+        if ds.dropped_peaks:
+            report_warnings.append(
+                f"{ds.name}: dropped chemical shift columns with missing values: {', '.join(ds.dropped_peaks)}"
+            )
+
+    for key in ordered_keys:
+        model_map = results_by_key.get(key, {})
+        failures = failures_by_key.get(key, [])
+        for model_name, message in failures:
+            report_warnings.append(
+                f"{key}: excluded {_display_model_name(model_name)} (optimizer did not converge: {message})"
+            )
+        if not model_map:
+            continue
         for model_name, res in model_map.items():
             ds_names = [ds.name for ds in res.datasets]
             ds_label = key
@@ -331,6 +375,7 @@ def run_fit(args: argparse.Namespace) -> None:
             stats_base = {
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
+                "RMSE_weighted": f"{res.rmse_weighted:.6g}",
                 "BIC": f"{res.bic:.6g}",
                 "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
             }
@@ -390,8 +435,10 @@ def run_fit(args: argparse.Namespace) -> None:
                 "K": k_str,
                 "bootstrap_K_CI": boot_k_ci,
                 "bootstrap_K_SE": boot_k_se,
+                "dropped_peaks": _format_dropped_peaks(res.datasets),
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
+                "RMSE_weighted": f"{res.rmse_weighted:.6g}",
                 "BIC": f"{res.bic:.6g}",
                 "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
             }
@@ -413,61 +460,19 @@ def run_fit(args: argparse.Namespace) -> None:
             "replicate-specific chemical shifts. "
         )
     methods_text = (
-        "Chemical shift data were fit under a fast-exchange assumption, with observed shifts modeled as "
-        "population-weighted averages of species. The 1:1 model was solved analytically, while 1:2 and 2:1 "
-        "models were solved per titration point using Newton-Raphson on free guest concentration with mass "
-        "balance constraints, with bisection fallback when Newton-Raphson did not converge; solver "
-        "success and failure counts were recorded. Nonlinear least squares fitting used binding constants and multi-start "
-        "initialization; for multi-peak data, binding constants were shared across peaks with peak-specific "
-        "chemical shifts. "
+        "NMR chemical shift titration data were analyzed under a fast-exchange assumption, with observed shifts "
+        "modeled as host-weighted population averages (host resonances only). Candidate models included 1:1 binding "
+        "(H + G <-> HG), 1:2 binding (H + G <-> HG; HG + G <-> HG2), 2:1 binding (H + G <-> HG; H + HG <-> H2G), "
+        "and a non-binding linear drift. Parameters were estimated by nonlinear least squares "
+        "(scipy.optimize.least_squares), using sigma-weighted residuals when sigma is provided and unweighted "
+        "residuals otherwise. The 1:1 model was solved analytically, while 1:2 and 2:1 were solved point-wise via "
+        "Newton-Raphson on free guest with bisection fallback; solver failures were logged. "
+        "Uncertainty was quantified by bootstrap resampling with small logK initialization perturbations "
+        f"(std {args.bootstrap_logk_jitter:.3g} in log10 K) in each refit. Model comparison used Gaussian "
+        "log-likelihood BIC as the primary "
+        "criterion with AICc as a supplementary metric; n was defined as the total finite residual count across "
+        "peaks and points, and when sigma was absent per-peak variance was estimated and counted as extra parameters. "
         + replicate_note
-        + "Uncertainty was quantified using bootstrap resampling, and parameter standard "
-        "errors are reported from the bootstrap distributions. Residual bootstrap uses "
-        "sigma-standardized residuals when sigma is provided, while parametric bootstrap "
-        "draws Gaussian noise scaled by sigma. Model selection metrics are computed from a Gaussian log-likelihood. "
-        "When sigma is provided, point-specific sigma values are used in the likelihood; when sigma is not provided, "
-        "variance is estimated per peak and counted as additional parameters to reflect potential peak-specific noise "
-        "scales. The effective sample size n used in BIC/AICc is defined as the total number of finite residuals "
-        "across all peaks and titration points (sum of n_points * n_peaks after filtering). BIC is an asymptotic "
-        "approximation and can be sensitive to "
-        "model misspecification, correlated errors, or outliers; therefore, BIC rankings are interpreted alongside "
-        "residual patterns and bootstrap uncertainty. Model selection prioritized BIC, with AICc reported as a "
-        "supplementary small-sample metric. "
-        "For the 1:2 and 2:1 models, extreme binding strengths (very large K) or highly skewed concentration ratios "
-        "can push free-guest solutions toward the lower bound; in such regimes the solver may become stiff and "
-        "convergence can slow or occasionally fail, which is captured by the reported solver failure counts. "
-        "Because the solver enforces a lower bound on free guest (1e-18), solutions that sit on this bound can "
-        "saturate toward a fully bound regime, and K may be driven only toward larger values because the data are "
-        "no longer sensitive to K. This reflects a physical limit on the measurable K range rather than a unique "
-        "estimate. "
-        "Observed chemical shifts are modeled as population-weighted averages of species under fast exchange, "
-        "using host-based fractional weighting (e.g., for the 2:1 model the H2G complex contributes "
-        "2 * [H2G] / H_tot because it contains two host units). This assumes the observed signals are host "
-        "resonances; if guest resonances are fitted, the weighting definition must be revised and stated explicitly. "
-        "Equilibrium concentrations are solved per model: the 1:1 system uses a closed-form solution, while 1:2 and "
-        "2:1 use a one-dimensional free-guest root solved point-wise with Newton-Raphson and multiple starting "
-        "guesses, with a bisection fallback if Newton-Raphson fails. Solver failures at any point raise an exception "
-        "and contribute to the reported failure counts. "
-        "Optimization uses nonlinear least squares via scipy.optimize.least_squares, with weighted residuals "
-        "r = (y_obs - y_calc) / sigma when sigma is provided and unweighted residuals otherwise. Gaussian "
-        "log-likelihoods are computed from these residuals to obtain BIC/AICc; when sigma is not provided, "
-        "a separate variance is estimated per peak as RSS/n and included in the likelihood, and these per-peak "
-        "variances are counted as additional parameters in the BIC/AICc penalty term. "
-        "Each model was fit by nonlinear least squares assuming Gaussian errors, and relative support among "
-        "candidate models was compared using Gaussian log-likelihood-based BIC (and AICc). Replicate datasets "
-        "were handled with simultaneous fitting that shared binding constants across repeats while estimating "
-        "chemical-shift parameters independently for each replicate. "
-        "Nonlinear least-squares fits can converge to different solutions depending on initialization; the code "
-        "uses multiple logK starting values, and the scan range and number of restarts should be reported. For the "
-        "1:2 and 2:1 models, logK1 and logK2 can be strongly correlated, leading to identifiability challenges. In "
-        "such cases, bootstrap distributions may be non-normal or multimodal, and reporting parameter correlations "
-        "and bootstrap distributions provides a more transparent uncertainty assessment. "
-        "Residual bootstrap resamples titration points while applying the same indices across peaks, preserving "
-        "cross-peak covariance structure to some extent. However, whether experimental noise is independent across "
-        "points and peaks depends on the dataset, so the choice of residual vs points vs parametric bootstrap should "
-        "be justified. Bootstrap refits apply small random perturbations (std 0.1 in log10 K) to logK initial "
-        "values to mitigate local-minimum bias, but multimodal solutions can still be under-sampled; reporting "
-        "this limitation remains important. "
         + bootstrap_note
     )
 
@@ -475,12 +480,24 @@ def run_fit(args: argparse.Namespace) -> None:
 
     # Decision text
     decisions: List[str] = []
-    for key, model_map in results_by_key.items():
+    for key in ordered_keys:
+        model_map = results_by_key.get(key, {})
+        failures = failures_by_key.get(key, [])
         bic_sorted = sorted(model_map.values(), key=lambda r: r.bic)
+        decisions.append(f"Dataset: {key}")
+        if failures:
+            decisions.append("Warnings:")
+            for model_name, message in failures:
+                decisions.append(
+                    f"- excluded {_display_model_name(model_name)} (optimizer did not converge: {message})"
+                )
+        if not bic_sorted:
+            decisions.append("No successful model fits; see warnings.")
+            decisions.append("")
+            continue
         best = bic_sorted[0]
         best_name = best.model.name
         best_display = _display_model_name(best_name)
-        decisions.append(f"Dataset: {key}")
         decisions.append(
             f"Recommended model (relative to tested candidates): {best_display} (lowest BIC among candidates)"
         )
@@ -517,6 +534,7 @@ def run_fit(args: argparse.Namespace) -> None:
         model_entries,
         decision_entries=decision_entries,
         methods_text=methods_text,
+        warnings=report_warnings,
         output_path=out_dir / "report.html",
     )
 
@@ -533,6 +551,12 @@ def build_parser() -> argparse.ArgumentParser:
     fit_p.add_argument("--sigma-col", default=None, help="Sigma column for weighting")
     fit_p.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     fit_p.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
+    fit_p.add_argument(
+        "--bootstrap-logk-jitter",
+        type=float,
+        default=0.1,
+        help="Standard deviation for logK jitter per bootstrap refit (log10 units)",
+    )
     fit_p.add_argument("--k-starts", default=None, help="Comma-separated K starts")
     fit_p.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
     fit_p.add_argument("--k-max", type=float, default=None, help="Maximum K bound")

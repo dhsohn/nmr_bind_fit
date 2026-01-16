@@ -53,7 +53,7 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
     for entry in entries:
         rationale = _rationale_text(entry.reasons)
         if entry.dataset == "Simultaneous Fitting":
-            model_name = entry.recommended_model.replace(" : ", ":")
+            model_name = entry.recommended_model
             if model_name == "non-binding":
                 text = (
                     "Based on simultaneous fitting of replicate titration datasets, the non-binding model is "
@@ -112,6 +112,7 @@ def write_report_html(
     model_entries: Sequence[ModelEntry],
     decision_entries: Optional[Sequence[DecisionEntry]],
     methods_text: Optional[str],
+    warnings: Optional[Sequence[str]],
     output_path: Path,
 ) -> None:
     summary_table = _table_from_rows(summary_rows)
@@ -125,6 +126,10 @@ def write_report_html(
         if methods_parts
         else ""
     )
+    warnings_block = ""
+    if warnings:
+        items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+        warnings_block = f"<section><h2>Warnings</h2><ul>{items}</ul></section>"
 
     sections = []
     for entry in model_entries:
@@ -181,6 +186,7 @@ def write_report_html(
 <body>
   <h1>NMR binding fit report</h1>
   {methods_block}
+  {warnings_block}
   {summary_table}
   {''.join(sections)}
 </body>

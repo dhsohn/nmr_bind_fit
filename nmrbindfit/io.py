@@ -22,6 +22,7 @@ class Dataset:
     y: np.ndarray
     y_cols: List[str]
     sigma: Optional[np.ndarray]
+    dropped_peaks: List[str]
 
     @property
     def n_points(self) -> int:
@@ -162,6 +163,7 @@ def load_dataset(
         y=y,
         y_cols=ppm_cols,
         sigma=sigma,
+        dropped_peaks=dropped_ppm,
     )
 
 

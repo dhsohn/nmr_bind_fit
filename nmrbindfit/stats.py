@@ -30,11 +30,13 @@ def gaussian_loglik(
     sigma: Optional[np.ndarray],
     per_peak: bool = False,
 ) -> Tuple[float, int, int]:
+    """Gaussian log-likelihood for residuals (optionally per-peak variance)."""
     res = np.asarray(residuals, dtype=float)
     if sigma is None:
         if not np.all(np.isfinite(res)):
             return float("nan"), 0, 0
         if per_peak and res.ndim == 2:
+            # Estimate a separate variance for each peak when sigma is absent.
             n_peaks = int(res.shape[1])
             loglik = 0.0
             n_total = 0
@@ -79,12 +81,14 @@ def gaussian_loglik(
 
 
 def bic_from_loglik(loglik: float, n: int, p: int) -> float:
+    """Bayesian Information Criterion from log-likelihood."""
     if n <= 0 or not np.isfinite(loglik):
         return float("nan")
     return float(-2.0 * loglik + p * np.log(n))
 
 
 def aicc_from_loglik(loglik: float, n: int, p: int) -> float:
+    """Small-sample corrected AIC from log-likelihood."""
     if n <= 0 or not np.isfinite(loglik):
         return float("nan")
     denom = n - p - 1
@@ -94,6 +98,7 @@ def aicc_from_loglik(loglik: float, n: int, p: int) -> float:
 
 
 def quadratic_nonlinearity(x: np.ndarray, y: np.ndarray) -> QuadraticResult:
+    """Quadratic fit to diagnose curvature in y vs x."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     X = np.column_stack([x**2, x, np.ones_like(x)])
@@ -137,4 +142,3 @@ def svd_diagnosis(y: np.ndarray) -> SVDResult:
     if possible == 0 and significant > 0:
         possible = significant
     return SVDResult(significant=significant, possible=possible, ratios=ratios)
-

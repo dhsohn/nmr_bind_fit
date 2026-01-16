@@ -31,7 +31,7 @@ class SolverStats:
 
 
 def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
-    """Closed form for 1:1 binding."""
+    """Closed form 1:1 solution using the quadratic mass-balance equation."""
     h_tot = np.asarray(h_tot, dtype=float)
     g_tot = np.asarray(g_tot, dtype=float)
     k = float(k)
@@ -39,6 +39,7 @@ def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
     if k <= 0:
         raise ValueError("K must be positive.")
 
+    # Quadratic in [HG], written to avoid catastrophic cancellation.
     term = h_tot + g_tot + 1.0 / k
     discr = term**2 - 4.0 * h_tot * g_tot
     discr = np.maximum(discr, 0.0)
@@ -68,6 +69,7 @@ def _scale_species_from_logs(
     h_tot: float,
     stoich: Tuple[float, ...],
 ) -> Tuple[float, ...]:
+    """Scale log-populations so that weighted host total matches h_tot."""
     if h_tot <= 0 or not math.isfinite(h_tot):
         return tuple(0.0 for _ in log_species)
     log_stoich = np.log(np.asarray(stoich, dtype=float))
@@ -88,6 +90,7 @@ def _newton_1d(
     tol: float = 1e-12,
     max_iter: int = 100,
 ) -> Tuple[Optional[float], str]:
+    """Newton-Raphson with simple safeguards for a 1D root."""
     x = float(np.clip(x0, lower, upper))
     for _ in range(max_iter):
         fx = f(x)
@@ -140,6 +143,7 @@ def _solve_bisection(
     tol: float = 1e-12,
     max_iter: int = 200,
 ) -> Optional[float]:
+    """Bracketed bisection used only when a sign change is available."""
     if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
         return None
     f_low = f(lower)
@@ -179,7 +183,7 @@ def solve_12_point(
     x0: Optional[float] = None,
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
-    """Solve 1:2 binding for a single point."""
+    """Solve 1:2 binding for a single point via free-guest root finding."""
     if h_tot <= 0 and g_tot <= 0:
         return 0.0, 0.0, 0.0, 0.0
     if g_tot <= 0:
@@ -188,6 +192,7 @@ def solve_12_point(
     with np.errstate(over="ignore", invalid="ignore"):
         A = k1 * k2
         prod = A * (2.0 * h_tot - g_tot)
+    # Switch to a rescaled polynomial when k1*k2 overflows.
     use_scaled = not np.isfinite(A) or not np.isfinite(prod)
 
     if use_scaled:
@@ -217,6 +222,7 @@ def solve_12_point(
         def df(g: float) -> float:
             return (3.0 * A * g + 2.0 * B) * g + C
 
+    # Enforce a small lower bound to keep log terms finite.
     lower = 1e-18
     upper = max(g_tot, lower * 10.0)
     guesses = []
@@ -259,7 +265,7 @@ def solve_21_point(
     x0: Optional[float] = None,
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
-    """Solve 2:1 binding for a single point."""
+    """Solve 2:1 binding for a single point via free-guest root finding."""
     if h_tot <= 0 and g_tot <= 0:
         return 0.0, 0.0, 0.0, 0.0
     if g_tot <= 0:
@@ -272,6 +278,7 @@ def solve_21_point(
         if not np.isfinite(b) or b <= 0:
             return 0.0, 0.0
         c = 8.0 * k1 * k2 * h_tot * g
+        # Log-space evaluation stabilizes the quadratic formula at large K.
         log_b = np.log(b)
         log_c = np.log(c) if c > 0 else -np.inf
         log_discr = np.logaddexp(2.0 * log_b, log_c)
@@ -308,6 +315,7 @@ def solve_21_point(
             return float("nan")
         return (f_high - f_low) / (g_high - g_low)
 
+    # Enforce a small lower bound to keep log terms finite.
     lower = 1e-18
     upper = max(g_tot, lower * 10.0)
     guesses = []
@@ -350,19 +358,22 @@ def solve_12(
     k1: float,
     k2: float,
 ) -> SpeciesResult:
-    """Solve 1:2 binding across all points."""
+    """Solve 1:2 binding across all points; aborts on the first failure."""
     h_tot = np.asarray(h_tot, dtype=float)
     g_tot = np.asarray(g_tot, dtype=float)
-    h = np.zeros_like(h_tot)
-    g = np.zeros_like(g_tot)
-    hg = np.zeros_like(h_tot)
-    hg2 = np.zeros_like(h_tot)
+    h = np.full_like(h_tot, np.nan)
+    g = np.full_like(g_tot, np.nan)
+    hg = np.full_like(h_tot, np.nan)
+    hg2 = np.full_like(h_tot, np.nan)
 
     g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
         stats.points += 1
-        h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+        try:
+            h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+        except RuntimeError:
+            break
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i
@@ -378,19 +389,22 @@ def solve_21(
     k1: float,
     k2: float,
 ) -> SpeciesResult:
-    """Solve 2:1 binding across all points."""
+    """Solve 2:1 binding across all points; aborts on the first failure."""
     h_tot = np.asarray(h_tot, dtype=float)
     g_tot = np.asarray(g_tot, dtype=float)
-    h = np.zeros_like(h_tot)
-    g = np.zeros_like(g_tot)
-    hg = np.zeros_like(h_tot)
-    h2g = np.zeros_like(h_tot)
+    h = np.full_like(h_tot, np.nan)
+    g = np.full_like(g_tot, np.nan)
+    hg = np.full_like(h_tot, np.nan)
+    h2g = np.full_like(h_tot, np.nan)
 
     g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
         stats.points += 1
-        h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+        try:
+            h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+        except RuntimeError:
+            break
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i

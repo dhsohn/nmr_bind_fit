@@ -53,6 +53,7 @@ MODEL_SPECS = {
 
 
 def model_param_names(model: ModelSpec, peak_names: List[str]) -> List[str]:
+    """Parameter names in the same order used for optimization."""
     names: List[str] = []
     if model.n_logk == 1:
         names.append("logK")
@@ -92,12 +93,14 @@ def split_params_multi(
 
 
 def _weights_11(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
+    # Host-based fractions for host resonances under fast exchange.
     w_h = species.h / h_tot
     w_hg = species.hg / h_tot
     return np.vstack([w_h, w_hg]).T
 
 
 def _weights_12(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
+    # Host-based fractions for host resonances under fast exchange.
     w_h = species.h / h_tot
     w_hg = species.hg / h_tot
     w_hg2 = species.hg2 / h_tot
@@ -105,6 +108,7 @@ def _weights_12(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
 
 
 def _weights_21(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
+    # H2G contributes two host units, so its weight is doubled.
     w_h = species.h / h_tot
     w_hg = species.hg / h_tot
     w_h2g = (2.0 * species.h2g) / h_tot
@@ -117,10 +121,12 @@ def predict_dataset(
     logk: np.ndarray,
     delta: np.ndarray,
 ) -> Tuple[np.ndarray, SpeciesResult]:
+    """Return predicted shifts and species populations for one dataset."""
     h_tot = dataset.h_tot
     g_tot = dataset.g_tot
 
     if model.name == "11":
+        # Fit parameters are in log10(K); convert to linear K for equilibrium.
         k = 10 ** float(logk[0])
         species = solve_11(h_tot, g_tot, k)
         weights = _weights_11(species, h_tot)
@@ -128,6 +134,7 @@ def predict_dataset(
         return y_pred, species
 
     if model.name == "12":
+        # Stepwise binding constants for 1:2.
         k1 = 10 ** float(logk[0])
         k2 = 10 ** float(logk[1])
         species = solve_12(h_tot, g_tot, k1, k2)
@@ -136,6 +143,7 @@ def predict_dataset(
         return y_pred, species
 
     if model.name == "21":
+        # Stepwise binding constants for 2:1.
         k1 = 10 ** float(logk[0])
         k2 = 10 ** float(logk[1])
         species = solve_21(h_tot, g_tot, k1, k2)
@@ -144,6 +152,7 @@ def predict_dataset(
         return y_pred, species
 
     if model.name == "nb":
+        # Non-binding model: linear drift with equivalents.
         a0 = delta[:, 0]
         a1 = delta[:, 1]
         y_pred = a0.reshape(1, -1) + dataset.x.reshape(-1, 1) * a1.reshape(1, -1)
@@ -153,6 +162,7 @@ def predict_dataset(
 
 
 def fraction_bound(model: ModelSpec, species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
+    """Fraction bound defined on a host basis for host-resonance data."""
     if model.name == "11":
         return species.hg / h_tot
     if model.name == "12":
