@@ -1,4 +1,4 @@
-# nmrbindfit
+# nmr_bind_fit
 
 NMR chemical shift titration binding fits with model comparison (1:1, 1:2, 2:1, non-binding).
 
