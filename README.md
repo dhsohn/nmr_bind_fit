@@ -45,7 +45,7 @@ CSV or XLSX with:
 - optional sigma column for weighting
 
 Rows are dropped only when host/guest (and sigma if provided) are missing. If any ppm column contains missing
-values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents (G/H).
+values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents ([G]_t/[H]_t).
 
 Example (CSV):
 
