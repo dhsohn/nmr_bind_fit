@@ -65,7 +65,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 - report.html (plots + summary)
 - model_*/ (plots, bootstrap histograms, correlation matrix)
 
-## Methods summary (manuscript-ready)
+## Methods summary
 
 NMR chemical shift titration data are analyzed under a fast-exchange assumption, with observed shifts modeled as
 host-weighted population averages (host resonances only). Candidate models include 1:1 binding (H + G ⇌ HG),
