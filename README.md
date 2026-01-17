@@ -45,7 +45,7 @@ CSV or XLSX with:
 - optional sigma column for weighting
 
 Rows are dropped only when host/guest (and sigma if provided) are missing. If any ppm column contains missing
-values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents ([G]_t/[H]_t).
+values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents ([G]<sub>t</sub>/[H]<sub>t</sub>).
 
 Example (CSV):
 
@@ -69,7 +69,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 
 NMR chemical shift titration data are analyzed under a fast-exchange assumption, with observed shifts modeled as
 host-weighted population averages (host resonances only). Candidate models include 1:1 binding (H + G ⇌ HG),
-1:2 binding (H + G ⇌ HG; HG + G ⇌ HG2), 2:1 binding (H + G ⇌ HG; H + HG ⇌ H2G), and a non-binding linear
+1:2 binding (H + G ⇌ HG; HG + G ⇌ HG<sub>2</sub>), 2:1 binding (H + G ⇌ HG; H + HG ⇌ H<sub>2</sub>G), and a non-binding linear
 drift. Parameters are estimated by nonlinear least squares (scipy.optimize.least_squares), using sigma-weighted
 residuals when provided and unweighted residuals otherwise. The 1:1 model is solved analytically, while 1:2 and
 2:1 are solved point-wise for free guest using Newton-Raphson with a bisection fallback; numerical failures are
