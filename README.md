@@ -82,8 +82,3 @@ Gaussian error model rather than proof of a true model. Replicate titrations are
 with shared binding constants and replicate-specific chemical shifts. At very large K or extreme concentration
 ratios, the free-guest root can approach the lower bound (1e-18), leading to saturation and reduced sensitivity
 to K.
-
-## Code availability and environment
-
-Code is available at https://github.com/dhsohn/nmr_bind_fit. The analysis runs with Python >= 3.9 and requires
-numpy, pandas, scipy, matplotlib (optional: openpyxl for XLSX input).
