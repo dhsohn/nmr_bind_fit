@@ -76,7 +76,6 @@ SUMMARY_LABELS = {
     "K": "Binding constant",
     "bootstrap_K_CI": "Confidence Interval(CI)",
     "bootstrap_K_SE": "Standard Error(SE)",
-    "dropped_peaks": "Dropped chemical shift columns with missing values",
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
     "RMSE_weighted": "Weighted root mean square error",
@@ -239,12 +238,6 @@ def run_fit(args: argparse.Namespace) -> None:
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
 
-    for ds in datasets:
-        if ds.dropped_peaks:
-            report_warnings.append(
-                f"{ds.name}: dropped chemical shift columns with missing values: {', '.join(ds.dropped_peaks)}"
-            )
-
     for key in ordered_keys:
         model_map = results_by_key.get(key, {})
         failures = failures_by_key.get(key, [])
@@ -337,6 +330,11 @@ def run_fit(args: argparse.Namespace) -> None:
                         plot_paths.append(str(path.relative_to(out_dir)))
 
             warnings = []
+            dropped_peaks = _format_dropped_peaks(res.datasets)
+            if dropped_peaks != "None":
+                warnings.append(
+                    f"Dropped chemical shift columns with missing values: {dropped_peaks}"
+                )
             if args.bootstrap_ci_width is not None and res.bootstrap is not None and res.model.n_logk > 0:
                 if res.bootstrap.param_samples.size > 0:
                     k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
@@ -435,7 +433,6 @@ def run_fit(args: argparse.Namespace) -> None:
                 "K": k_str,
                 "bootstrap_K_CI": boot_k_ci,
                 "bootstrap_K_SE": boot_k_se,
-                "dropped_peaks": _format_dropped_peaks(res.datasets),
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
                 "RMSE_weighted": f"{res.rmse_weighted:.6g}",
@@ -462,7 +459,7 @@ def run_fit(args: argparse.Namespace) -> None:
     methods_text = (
         "NMR chemical shift titration data were analyzed under a fast-exchange assumption, with observed shifts "
         "modeled as host-weighted population averages (host resonances only). Candidate models included 1:1 binding "
-        "(H + G <-> HG), 1:2 binding (H + G <-> HG; HG + G <-> HG2), 2:1 binding (H + G <-> HG; H + HG <-> H2G), "
+        "(H + G ⇌ HG), 1:2 binding (H + G ⇌ HG; HG + G ⇌ HG<sub>2</sub>), 2:1 binding (H + G ⇌ HG; H + HG ⇌ H<sub>2</sub>G), "
         "and a non-binding linear drift. Parameters were estimated by nonlinear least squares "
         "(scipy.optimize.least_squares), using sigma-weighted residuals when sigma is provided and unweighted "
         "residuals otherwise. The 1:1 model was solved analytically, while 1:2 and 2:1 were solved point-wise via "

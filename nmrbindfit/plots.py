@@ -14,6 +14,17 @@ import matplotlib.pyplot as plt
 from .io import Dataset
 from .models import ModelSpec, predict_dataset, fraction_bound
 
+matplotlib.rcParams.update(
+    {
+        "font.family": "Arial",
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 8,
+    }
+)
+
 
 def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
     eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
@@ -53,9 +64,8 @@ def plot_isotherms(
         ax.scatter(ds.x, ds.y[:, i], color="#2b2d42", label="data")
         order = np.argsort(grid_ds.x)
         ax.plot(grid_ds.x[order], y_grid[order, i], color="#d90429", label="fit")
-        ax.set_xlabel("eq")
+        ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
         ax.set_ylabel("ppm")
-        ax.set_title(f"{model.name} fit - {peak}")
         ax.legend()
         fig.tight_layout()
         png_path = out_dir / f"isotherm_{peak}.png"
@@ -79,9 +89,8 @@ def plot_residuals(
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.axhline(0.0, color="#6c757d", linewidth=1)
         ax.scatter(ds.x, residuals[:, i], color="#2b2d42")
-        ax.set_xlabel("eq")
+        ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
         ax.set_ylabel("residual")
-        ax.set_title(f"{model.name} residual - {peak}")
         fig.tight_layout()
         png_path = out_dir / f"residual_{peak}.png"
         pdf_path = out_dir / f"residual_{peak}.pdf"
@@ -107,7 +116,6 @@ def plot_bootstrap_hist(
         ax.hist(samples[:, i], bins=20, color="#2b2d42", alpha=0.8)
         ax.set_xlabel(name)
         ax.set_ylabel("count")
-        ax.set_title(title)
         fig.tight_layout()
         png_path = out_dir / f"bootstrap_{name}.png"
         pdf_path = out_dir / f"bootstrap_{name}.pdf"
@@ -132,10 +140,9 @@ def plot_fraction_bound(
     f = fraction_bound(model, species, ds.h_tot)
     fig, ax = plt.subplots(figsize=(6, 3))
     ax.scatter(ds.x, f, color="#2b2d42")
-    ax.set_xlabel("eq")
+    ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
     ax.set_ylabel("fraction bound")
     ax.set_ylim(0, 1.05)
-    ax.set_title(f"{model.name} fraction bound")
     fig.tight_layout()
     png_path = out_dir / "fraction_bound.png"
     pdf_path = out_dir / "fraction_bound.pdf"
