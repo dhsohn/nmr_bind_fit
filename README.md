@@ -73,7 +73,7 @@ flowchart TD
     B --> C{Validate columns}
     C -->|Host or Guest or sigma missing| C1[Drop row]
     C -->|ppm missing| C2[Drop ppm column]
-    C --> D[Build dataset x = [G]<sub>t</sub>/[H]<sub>t</sub>]
+    C --> D[Build dataset x = equivalents]
 
     D --> E{Replicates?}
     E -->|Yes| F[Prepare simultaneous fit with shared K]
