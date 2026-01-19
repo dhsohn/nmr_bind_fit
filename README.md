@@ -69,32 +69,32 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 
 ```mermaid
 flowchart TD
-    A[CLI: nmrbindfit fit] --> B[Load input files (CSV/XLSX)]
+    A[CLI nmrbindfit fit] --> B[Load input files CSV or XLSX]
     B --> C{Validate columns}
-    C -->|Host/Guest/sigma missing| C1[Drop row]
+    C -->|Host or Guest or sigma missing| C1[Drop row]
     C -->|ppm missing| C2[Drop ppm column]
-    C --> D[Build dataset (x = G_t / H_t)]
+    C --> D[Build dataset x = Gt over Ht]
 
     D --> E{Replicates?}
-    E -->|Yes| F[Prepare simultaneous fit (shared K)]
+    E -->|Yes| F[Prepare simultaneous fit with shared K]
     E -->|No| G[Fit each file separately]
 
     F --> H[Loop models: 1:1, 1:2, 2:1, non-binding]
     G --> H
 
     H --> I[Multistart logK initials]
-    I --> J[Nonlinear least squares (least_squares)]
+    I --> J[Nonlinear least squares using least_squares]
     J --> K[Predict shifts]
     K --> K1[1:1: closed form]
-    K --> K2[1:2/2:1: Newton-Raphson, then bisection]
+    K --> K2[1:2 and 2:1: Newton-Raphson then bisection]
     K --> L{Finite predictions?}
     L -->|No| L1[Mark model failed]
-    L -->|Yes| M[Residuals (weighted if sigma)]
+    L -->|Yes| M[Residuals weighted if sigma]
 
-    M --> N[Stats: RSS/RMSE/BIC/AICc]
+    M --> N[Stats RSS RMSE BIC AICc]
     M --> O[Bootstrap resampling]
-    M --> P[Plots: isotherm/residual/fraction/boot]
-    M --> Q[Outputs: summary.csv/report.html/decision.txt]
+    M --> P[Plots isotherm residual fraction boot]
+    M --> Q[Outputs summary.csv report.html decision.txt]
 
     L1 --> Q
 ```
