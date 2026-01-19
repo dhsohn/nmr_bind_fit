@@ -69,32 +69,32 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 
 ```mermaid
 flowchart TD
-    A[CLI 실행: nmrbindfit fit] --> B[입력 파일 로딩<br/>CSV/XLSX]
-    B --> C{컬럼 검증}
-    C -->|Host/Guest/sigma 결측| C1[해당 행 제거]
-    C -->|ppm 결측| C2[해당 ppm 컬럼 제거]
-    C --> D[Dataset 생성<br/>x = [G]_t / [H]_t]
+    A[CLI: nmrbindfit fit] --> B[Load input files (CSV/XLSX)]
+    B --> C{Validate columns}
+    C -->|Host/Guest/sigma missing| C1[Drop row]
+    C -->|ppm missing| C2[Drop ppm column]
+    C --> D[Build dataset (x = G_t / H_t)]
 
-    D --> E{replicates?}
-    E -->|Yes| F[동시 적합 준비<br/>K 공유, shift는 개별]
-    E -->|No| G[각 파일별 적합]
+    D --> E{Replicates?}
+    E -->|Yes| F[Prepare simultaneous fit (shared K)]
+    E -->|No| G[Fit each file separately]
 
-    F --> H[모델 반복: 1:1, 1:2, 2:1, non-binding]
+    F --> H[Loop models: 1:1, 1:2, 2:1, non-binding]
     G --> H
 
-    H --> I[멀티스타트 logK 초기값]
-    I --> J[비선형 최소제곱<br/>scipy.optimize.least_squares]
-    J --> K[예측 계산]
-    K --> K1[1:1: 닫힌해]
-    K --> K2[1:2, 2:1: Newton–Raphson<br/>실패 시 bisection]
-    K --> L{예측값 유한?}
-    L -->|No| L1[모델 실패 처리]
-    L -->|Yes| M[잔차 계산<br/>sigma 있으면 가중]
+    H --> I[Multistart logK initials]
+    I --> J[Nonlinear least squares (least_squares)]
+    J --> K[Predict shifts]
+    K --> K1[1:1: closed form]
+    K --> K2[1:2/2:1: Newton-Raphson, then bisection]
+    K --> L{Finite predictions?}
+    L -->|No| L1[Mark model failed]
+    L -->|Yes| M[Residuals (weighted if sigma)]
 
-    M --> N[통계량 계산<br/>RSS/RMSE/BIC/AICc]
-    M --> O[부트스트랩<br/>residual/points/parametric]
-    M --> P[플롯 생성<br/>isotherm/residual/fraction/boot]
-    M --> Q[요약/리포트 생성<br/>summary.csv/report.html/decision.txt]
+    M --> N[Stats: RSS/RMSE/BIC/AICc]
+    M --> O[Bootstrap resampling]
+    M --> P[Plots: isotherm/residual/fraction/boot]
+    M --> Q[Outputs: summary.csv/report.html/decision.txt]
 
     L1 --> Q
 ```
