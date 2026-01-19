@@ -68,7 +68,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 ## Flowchart
 
 ```mermaid
-flowchart TD
+flowchart LR
     A[CLI nmrbindfit fit] --> B[Load input files CSV or XLSX]
     B --> C{Validate columns}
     C -->|Host or Guest or sigma missing| C1[Drop row]
