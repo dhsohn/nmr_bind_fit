@@ -65,7 +65,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 - report.html (plots + summary)
 - model_*/ (plots, bootstrap histograms, correlation matrix)
 
-## Workflow (flowchart)
+## Flowchart
 
 ```mermaid
 flowchart TD
