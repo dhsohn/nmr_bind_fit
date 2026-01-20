@@ -21,19 +21,19 @@ pip install openpyxl
 Single file fit with all models and 1000 bootstrap iterations:
 
 ```
-python -m nmrbindfit.cli fit --input data.csv --bootstrap 1000
+python -m nmrbindfit.cli --input data.csv --bootstrap 1000
 ```
 
 Multiple replicate files with shared binding constants:
 
 ```
-python -m nmrbindfit.cli fit --input data1.xlsx data2.xlsx --replicates
+python -m nmrbindfit.cli --input data1.xlsx data2.xlsx --replicates
 ```
 
 If you see optimizer overflow warnings, constrain K:
 
 ```
-python -m nmrbindfit.cli fit --input data.csv --k-min 1e0 --k-max 1e12
+python -m nmrbindfit.cli --input data.csv --k-min 1e0 --k-max 1e12
 ```
 
 ## Input Format
@@ -69,7 +69,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 
 ```mermaid
 flowchart TD
-    A[CLI nmrbindfit fit] --> B[Load input files CSV or XLSX]
+    A[CLI nmrbindfit] --> B[Load input files CSV or XLSX]
     B --> C{Validate columns}
     C -->|Host or Guest or sigma missing| C1[Drop row]
     C -->|ppm missing| C2[Drop ppm column]

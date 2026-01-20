@@ -538,39 +538,43 @@ def run_fit(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nmrbindfit")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    fit_p = sub.add_parser("fit", help="Fit binding models")
-    fit_p.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
-    fit_p.add_argument("--host-col", default=None, help="Host concentration column")
-    fit_p.add_argument("--guest-col", default=None, help="Guest concentration column")
-    fit_p.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
-    fit_p.add_argument("--sigma-col", default=None, help="Sigma column for weighting")
-    fit_p.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
-    fit_p.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
-    fit_p.add_argument(
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="fit",
+        choices=["fit"],
+        help="Command (default: fit)",
+    )
+    parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
+    parser.add_argument("--host-col", default=None, help="Host concentration column")
+    parser.add_argument("--guest-col", default=None, help="Guest concentration column")
+    parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
+    parser.add_argument("--sigma-col", default=None, help="Sigma column for weighting")
+    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
+    parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
+    parser.add_argument(
         "--bootstrap-logk-jitter",
         type=float,
         default=0.1,
         help="Standard deviation for logK jitter per bootstrap refit (log10 units)",
     )
-    fit_p.add_argument("--k-starts", default=None, help="Comma-separated K starts")
-    fit_p.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
-    fit_p.add_argument("--k-max", type=float, default=None, help="Maximum K bound")
-    fit_p.add_argument(
+    parser.add_argument("--k-starts", default=None, help="Comma-separated K starts")
+    parser.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
+    parser.add_argument("--k-max", type=float, default=None, help="Maximum K bound")
+    parser.add_argument(
         "--replicates",
         action="store_true",
         help="Fit replicate inputs with shared binding constants",
     )
-    fit_p.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
-    fit_p.add_argument("--seed", type=int, default=None, help="Random seed")
-    fit_p.add_argument(
+    parser.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument(
         "--bootstrap-ci-width",
         type=float,
         default=None,
         help="Warn if bootstrap K CI width exceeds this threshold",
     )
-    fit_p.set_defaults(func=run_fit)
+    parser.set_defaults(func=run_fit)
 
     return parser
 
