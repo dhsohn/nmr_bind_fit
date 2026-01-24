@@ -33,6 +33,7 @@ def gaussian_loglik(
     """Gaussian log-likelihood for residuals (optionally per-peak variance)."""
     res = np.asarray(residuals, dtype=float)
     if sigma is None:
+        # Estimate variance from residuals when sigma is not supplied.
         if not np.all(np.isfinite(res)):
             return float("nan"), 0, 0
         if per_peak and res.ndim == 2:
@@ -67,6 +68,7 @@ def gaussian_loglik(
         loglik = -0.5 * n * (np.log(2.0 * np.pi * sigma2) + 1.0)
         return float(loglik), n, 1
 
+    # Align provided sigma to residual shape and filter invalid entries.
     sig = np.asarray(sigma, dtype=float)
     if sig.shape != res.shape:
         sig = np.broadcast_to(sig, res.shape)
@@ -101,6 +103,7 @@ def quadratic_nonlinearity(x: np.ndarray, y: np.ndarray) -> QuadraticResult:
     """Quadratic fit to diagnose curvature in y vs x."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
+    # Fit a quadratic via least squares to estimate curvature.
     X = np.column_stack([x**2, x, np.ones_like(x)])
     coeff, residuals, rank, _ = np.linalg.lstsq(X, y, rcond=None)
     a = coeff[0]
@@ -112,6 +115,7 @@ def quadratic_nonlinearity(x: np.ndarray, y: np.ndarray) -> QuadraticResult:
     else:
         rss = residuals[0]
     sigma2 = rss / dof
+    # Use the covariance of the quadratic coefficient for confidence bounds.
     cov = sigma2 * np.linalg.inv(X.T @ X)
     se = float(np.sqrt(cov[0, 0]))
     t_val = stats.t.ppf(0.975, dof)
@@ -133,6 +137,7 @@ def svd_diagnosis(y: np.ndarray) -> SVDResult:
     ratios = s[:-1] / s[1:]
     significant = 0
     possible = 0
+    # Identify the first ratio crossing the 2x (significant) or 30% (possible) threshold.
     for i, ratio in enumerate(ratios):
         if ratio > 2.0:
             significant = i + 1

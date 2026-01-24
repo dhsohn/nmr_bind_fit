@@ -20,6 +20,7 @@ class ModelSpec:
     is_binding: bool
 
 
+# Model definitions for each supported binding stoichiometry.
 MODEL_SPECS = {
     "11": ModelSpec(
         name="11",
@@ -60,6 +61,7 @@ def model_param_names(model: ModelSpec, peak_names: List[str]) -> List[str]:
     elif model.n_logk == 2:
         names.extend(["logK1", "logK2"])
 
+    # Peak parameters are ordered by peak, then by species label.
     for peak in peak_names:
         for label in model.species_labels:
             names.append(f"{label}_{peak}")
@@ -71,6 +73,7 @@ def split_params(
     model: ModelSpec,
     dataset: Dataset,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # Slice the parameter vector into logK and delta blocks.
     logk = params[: model.n_logk]
     delta = params[model.n_logk :].reshape(dataset.n_peaks, model.n_delta_per_peak)
     return logk, delta
@@ -81,6 +84,7 @@ def split_params_multi(
     model: ModelSpec,
     datasets: List[Dataset],
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
+    # Walk the parameter vector across datasets for replicate fits.
     logk = params[: model.n_logk]
     deltas = []
     idx = model.n_logk
@@ -163,6 +167,7 @@ def predict_dataset(
 
 def fraction_bound(model: ModelSpec, species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
     """Fraction bound defined on a host basis for host-resonance data."""
+    # Normalize bound species on a per-host basis for host-only resonances.
     if model.name == "11":
         return species.hg / h_tot
     if model.name == "12":

@@ -27,6 +27,7 @@ matplotlib.rcParams.update(
 
 
 def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
+    # Create a dense grid of equivalents for smooth fit curves.
     eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
     h_ref = float(np.median(ds.h_tot))
     h_vals = np.full_like(eq_vals, h_ref)
@@ -53,6 +54,7 @@ def plot_isotherms(
     delta: np.ndarray,
     out_dir: Path,
 ) -> List[Path]:
+    # Plot data points alongside the fitted curve for each peak.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
 
@@ -83,6 +85,7 @@ def plot_residuals(
     residuals: np.ndarray,
     out_dir: Path,
 ) -> List[Path]:
+    # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
     for i, peak in enumerate(ds.y_cols):
@@ -107,6 +110,7 @@ def plot_bootstrap_hist(
     out_dir: Path,
     title: str = "bootstrap K",
 ) -> List[Path]:
+    # Draw bootstrap histograms for K (or K1/K2) samples.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
     if samples.size == 0:
@@ -133,6 +137,7 @@ def plot_fraction_bound(
     delta: np.ndarray,
     out_dir: Path,
 ) -> List[Path]:
+    # Skip non-binding models since they do not define fraction bound.
     if not model.is_binding:
         return []
     out_dir.mkdir(parents=True, exist_ok=True)

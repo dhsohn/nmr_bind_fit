@@ -35,6 +35,7 @@ class DecisionEntry:
 
 
 def _rationale_text(reasons: Sequence[str]) -> str:
+    # Clean up reasons and make a single sentence block.
     cleaned = []
     for reason in reasons:
         text = reason.strip()
@@ -49,6 +50,7 @@ def _rationale_text(reasons: Sequence[str]) -> str:
 
 
 def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
+    # Render decisions into HTML paragraphs for the report.
     paragraphs = []
     for entry in entries:
         rationale = _rationale_text(entry.reasons)
@@ -80,6 +82,7 @@ def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
 
     if not rows:
         return
+    # Preserve column order based on the first row.
     fieldnames = list(rows[0].keys())
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -89,12 +92,14 @@ def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
 
 
 def write_decision_txt(decisions: Sequence[str], path: Path) -> None:
+    # Write the decision narrative line-by-line.
     with path.open("w") as f:
         for line in decisions:
             f.write(line.rstrip() + "\n")
 
 
 def _table_from_rows(rows: Sequence[Dict[str, str]]) -> str:
+    # Build a basic HTML table from a list of dictionaries.
     if not rows:
         return "<p>No summary rows.</p>"
     headers = rows[0].keys()
@@ -115,6 +120,7 @@ def write_report_html(
     warnings: Optional[Sequence[str]],
     output_path: Path,
 ) -> None:
+    # Assemble the HTML report sections for summary, decisions, and per-model details.
     summary_table = _table_from_rows(summary_rows)
     decision_paragraphs = _decision_paragraphs(decision_entries or [])
     methods_parts = []
@@ -133,6 +139,7 @@ def write_report_html(
 
     sections = []
     for entry in model_entries:
+        # Render each model's stats, parameters, warnings, and plots as a section.
         stats_items = "".join(
             f"<li><strong>{html.escape(k)}</strong>: {html.escape(str(v))}</li>" for k, v in entry.stats.items()
         )

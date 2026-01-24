@@ -50,12 +50,14 @@ def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
 
 
 def _log_or_neg_inf(value: float) -> float:
+    # Use -inf for non-positive values to keep log-space formulas stable.
     if value <= 0 or not math.isfinite(value):
         return float("-inf")
     return float(math.log(value))
 
 
 def _logsumexp(values: np.ndarray) -> float:
+    # Stable log-sum-exp for combining log-populations.
     vals = np.asarray(values, dtype=float)
     finite = np.isfinite(vals)
     if not np.any(finite):
@@ -70,6 +72,7 @@ def _scale_species_from_logs(
     stoich: Tuple[float, ...],
 ) -> Tuple[float, ...]:
     """Scale log-populations so that weighted host total matches h_tot."""
+    # Rescale log-populations so stoichiometric totals match the host mass balance.
     if h_tot <= 0 or not math.isfinite(h_tot):
         return tuple(0.0 for _ in log_species)
     log_stoich = np.log(np.asarray(stoich, dtype=float))
@@ -91,6 +94,7 @@ def _newton_1d(
     max_iter: int = 100,
 ) -> Tuple[Optional[float], str]:
     """Newton-Raphson with simple safeguards for a 1D root."""
+    # Clamp the initial guess and guard against invalid steps.
     x = float(np.clip(x0, lower, upper))
     for _ in range(max_iter):
         fx = f(x)
@@ -125,6 +129,7 @@ def _solve_newton(
     tol: float = 1e-12,
     max_iter: int = 100,
 ) -> Tuple[Optional[float], str]:
+    # Try multiple initial guesses to improve convergence robustness.
     statuses = []
     for guess in guesses:
         x, status = _newton_1d(f, df, guess, lower, upper, tol=tol, max_iter=max_iter)
@@ -229,6 +234,7 @@ def solve_12_point(
     if x0 is not None:
         guesses.append(float(x0))
     guesses.extend([g_tot, g_tot * 0.5, g_tot * 0.1, upper])
+    # Use Newton first, then fall back to bisection if needed.
     g, status = _solve_newton(f, df, tuple(guesses), lower, upper)
     if g is None:
         if stats is not None:
@@ -272,6 +278,7 @@ def solve_21_point(
         return float(h_tot), 0.0, 0.0, 0.0
 
     def _h_and_bh_from_g(g: float) -> Tuple[float, float]:
+        # Solve for free host using a log-space quadratic to avoid overflow.
         if g <= 0 or h_tot <= 0:
             return float(h_tot), float(h_tot)
         b = 1.0 + k1 * g
@@ -304,6 +311,7 @@ def solve_21_point(
         return g + term1 + term2 - g_tot
 
     def df(g: float) -> float:
+        # Numerical derivative for robustness when an analytic form is messy.
         eps = max(1e-12, 1e-6 * abs(g))
         g_low = max(lower, g - eps)
         g_high = min(upper, g + eps)
@@ -322,6 +330,7 @@ def solve_21_point(
     if x0 is not None:
         guesses.append(float(x0))
     guesses.extend([g_tot, g_tot * 0.5, g_tot * 0.1, upper])
+    # Use Newton first, then fall back to bisection if needed.
     g, status = _solve_newton(f, df, tuple(guesses), lower, upper)
     if g is None:
         if stats is not None:
@@ -369,6 +378,7 @@ def solve_12(
     g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
+        # Use the previous free-guest solution as the next initial guess.
         stats.points += 1
         try:
             h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
@@ -400,6 +410,7 @@ def solve_21(
     g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
+        # Use the previous free-guest solution as the next initial guess.
         stats.points += 1
         try:
             h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, x0=g_prev, stats=stats)

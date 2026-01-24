@@ -5,6 +5,7 @@ from nmrbindfit.models import MODEL_SPECS, predict_dataset
 
 
 def test_predict_shape_11():
+    # Sanity check prediction shape for the 1:1 model.
     h0 = np.array([1e-3, 1e-3, 1e-3])
     g0 = np.array([0.0, 5e-4, 1e-3])
     x = g0 / h0

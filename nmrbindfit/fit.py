@@ -51,6 +51,7 @@ class FitResult:
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
     """Heuristic start values for chemical shift parameters."""
+    # Use endpoints to seed delta values for faster convergence.
     y0 = dataset.y[0]
     y1 = dataset.y[-1]
     if model.name == "nb":
@@ -73,6 +74,7 @@ def _build_initial_params(
     logk_values: Sequence[float],
 ) -> np.ndarray:
     """Assemble the full parameter vector for one start."""
+    # Concatenate logK values followed by per-dataset delta parameters.
     params: List[float] = []
     params.extend(list(logk_values))
     for ds in datasets:
@@ -88,6 +90,7 @@ def _param_names_multi(model: ModelSpec, datasets: List[Dataset]) -> List[str]:
         names.append("logK")
     elif model.n_logk == 2:
         names.extend(["logK1", "logK2"])
+    # Name delta parameters by species, dataset, and peak.
     for ds in datasets:
         for peak in ds.y_cols:
             for label in model.species_labels:
@@ -130,6 +133,7 @@ def _predict_all(
     datasets: List[Dataset],
 ) -> Tuple[List[np.ndarray], List, List[np.ndarray]]:
     """Predict shifts and residuals without sigma weighting."""
+    # Run model prediction for each dataset and keep raw residuals.
     logk, deltas = split_params_multi(params, model, datasets)
     y_pred_list = []
     species_list = []
@@ -144,6 +148,7 @@ def _predict_all(
 
 def _rss_values(datasets: List[Dataset], residuals: List[np.ndarray]) -> Tuple[float, float]:
     """Return unweighted and sigma-weighted residual sum of squares."""
+    # Track both weighted and unweighted RSS for reporting.
     rss = 0.0
     rss_weighted = 0.0
     for ds, res in zip(datasets, residuals):
@@ -157,6 +162,7 @@ def _rss_values(datasets: List[Dataset], residuals: List[np.ndarray]) -> Tuple[f
 
 def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> float:
     """R2 is reported for reference (not used for selection)."""
+    # Flatten all datasets into one vector for a global R2.
     y_all = []
     y_pred_all = []
     for ds, y_pred in zip(datasets, y_pred_list):
@@ -179,6 +185,7 @@ def _fit_with_initial(
     bounds: Tuple[np.ndarray, np.ndarray],
 ) -> Tuple[np.ndarray, least_squares]:
     """Run least_squares for one initialization."""
+    # Use bounded trust-region least squares on concatenated residuals.
     res = least_squares(
         _residual_vector,
         params0,
@@ -197,6 +204,7 @@ def _param_bounds(
     logk_bounds: Optional[Tuple[float, float]],
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Apply optional logK bounds while leaving shift parameters free."""
+    # Only constrain logK parameters, leave delta unbounded.
     if logk_bounds is None or model.n_logk == 0:
         return (np.full_like(params0, -np.inf), np.full_like(params0, np.inf))
     lower = np.full_like(params0, -np.inf)
@@ -222,6 +230,7 @@ def fit_model(
     if model.n_logk == 0:
         logk_grid = [()]
     else:
+        # Build a full grid of logK start combinations.
         if logk_bounds is not None:
             logk_starts = [v for v in logk_starts if logk_bounds[0] <= v <= logk_bounds[1]]
             if not logk_starts:
@@ -249,6 +258,7 @@ def fit_model(
     if best_params is None or best_res is None:
         raise RuntimeError(f"Fit failed for model {model_name}")
 
+    # Return early if the optimizer failed to converge.
     if not best_res.success:
         param_names = _param_names_multi(model, datasets)
         return FitResult(
@@ -275,6 +285,7 @@ def fit_model(
             bootstrap=None,
         )
 
+    # Generate predictions and residuals for diagnostics.
     y_pred_list, species_list, residuals = _predict_all(best_params, model, datasets)
     if not all(np.all(np.isfinite(y_pred)) for y_pred in y_pred_list):
         fail_points = 0
@@ -311,6 +322,7 @@ def fit_model(
             residuals=[],
             bootstrap=None,
         )
+    # Compute fit diagnostics across all datasets.
     rss, rss_weighted = _rss_values(datasets, residuals)
 
     n = int(sum(ds.n_points * ds.n_peaks for ds in datasets))
@@ -343,6 +355,7 @@ def fit_model(
 
     bootstrap_result = None
     if bootstrap > 0:
+        # Bootstrap parameter uncertainties via refits.
         bootstrap_result = bootstrap_params(
             best_params,
             model,
@@ -386,6 +399,7 @@ def _residual_bootstrap(
     residuals: np.ndarray,
 ) -> Dataset:
     """Residual bootstrap with optional sigma standardization."""
+    # Resample residuals by index to preserve autocorrelation structure.
     idx = rng.integers(0, ds.n_points, size=ds.n_points)
     if ds.sigma is None:
         centered = residuals - np.mean(residuals, axis=0, keepdims=True)
@@ -416,6 +430,7 @@ def _parametric_bootstrap(
     residuals: np.ndarray,
 ) -> Dataset:
     """Parametric bootstrap using Gaussian noise."""
+    # Inject Gaussian noise using either estimated or provided sigma.
     if ds.sigma is None:
         scale = np.std(residuals, axis=0, ddof=1)
         scale = np.where(np.isfinite(scale), scale, 0.0)
@@ -447,6 +462,7 @@ def bootstrap_params(
     logk_jitter: float,
 ) -> BootstrapResult:
     """Run bootstrap refits and collect parameter samples."""
+    # Refit the model on resampled datasets to estimate parameter dispersion.
     rng = np.random.default_rng(seed)
     param_samples = []
     n_success = 0
@@ -494,6 +510,7 @@ def bootstrap_params(
         param_samples.append(params_fit)
         n_success += 1
 
+    # Stack successful samples and compute percentile intervals.
     if not param_samples:
         samples = np.full((0, len(params)), np.nan)
     else:
@@ -534,6 +551,7 @@ def fit_models(
     results = []
     if replicates:
         for model_name in model_names:
+            # Fit all datasets together with shared logK values.
             results.append(
                     fit_model(
                         datasets,

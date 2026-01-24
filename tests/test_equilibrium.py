@@ -4,6 +4,7 @@ from nmrbindfit.equilibrium import solve_11, solve_12, solve_21
 
 
 def test_solve_11_mass_balance():
+    # Mass balance should hold for the closed-form 1:1 solver.
     h0 = np.array([1e-3, 1e-3, 1e-3])
     g0 = np.array([0.0, 5e-4, 2e-3])
     k = 1e4
@@ -13,6 +14,7 @@ def test_solve_11_mass_balance():
 
 
 def test_solve_12_mass_balance():
+    # Mass balance should hold for the 1:2 solver across points.
     h0 = np.array([1e-3, 1e-3])
     g0 = np.array([1e-3, 2e-3])
     k1 = 1e4
@@ -23,6 +25,7 @@ def test_solve_12_mass_balance():
 
 
 def test_solve_21_mass_balance():
+    # Mass balance should hold for the 2:1 solver across points.
     h0 = np.array([1e-3, 2e-3])
     g0 = np.array([1e-3, 1e-3])
     k1 = 1e4

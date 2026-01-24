@@ -29,12 +29,14 @@ DEFAULT_MODEL_NAMES = ["11", "12", "21", "nb"]
 
 
 def _parse_k_starts(value: Optional[str]) -> List[float]:
+    # Parse comma-separated starts or default to log-spaced values.
     if not value:
         return [10**i for i in range(1, 9)]
     return [float(v.strip()) for v in value.split(",") if v.strip()]
 
 
 def _resolve_inputs(patterns: List[str]) -> List[Path]:
+    # Expand glob patterns and validate file existence.
     paths: List[Path] = []
     for pattern in patterns:
         matches = glob.glob(pattern)
@@ -50,11 +52,13 @@ def _resolve_inputs(patterns: List[str]) -> List[Path]:
 
 
 def _safe_output_name(name: str) -> str:
+    # Sanitize output names for filesystem safety.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
     return safe or "output"
 
 
 def _auto_output_dir(paths: List[Path]) -> Path:
+    # Build a timestamped output directory based on input names.
     now = datetime.now()
     timestamp = f"{now:%Y%m%d_%H%M%S}_{now.microsecond // 1000:03d}"
     if len(paths) == 1:
@@ -65,6 +69,7 @@ def _auto_output_dir(paths: List[Path]) -> Path:
 
 
 def _dataset_key(result) -> str:
+    # Normalize dataset key for grouping summaries.
     if len(result.datasets) == 1:
         return result.datasets[0].name
     return "Simultaneous Fitting"
@@ -102,6 +107,7 @@ def _label_stats_key(key: str) -> str:
 
 
 def _safe_pow10(values: np.ndarray) -> np.ndarray:
+    # Clip log10 inputs to avoid overflow in exp.
     log10_max = np.log(np.finfo(float).max) / np.log(10.0)
     log10_min = np.log(np.finfo(float).tiny) / np.log(10.0)
     clipped = np.clip(values, log10_min, log10_max)
@@ -109,6 +115,7 @@ def _safe_pow10(values: np.ndarray) -> np.ndarray:
 
 
 def _safe_std(values: np.ndarray) -> float:
+    # Scale before std to reduce catastrophic cancellation.
     vals = values[np.isfinite(values)]
     if vals.size <= 1:
         return float("nan")
@@ -120,6 +127,7 @@ def _safe_std(values: np.ndarray) -> float:
 
 
 def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
+    # Drop rows with any non-finite values.
     if values.ndim == 1:
         return values[np.isfinite(values)]
     mask = np.all(np.isfinite(values), axis=1)
@@ -127,10 +135,12 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
 
 
 def _display_model_name(name: str) -> str:
+    # Map internal model codes to friendly labels.
     return MODEL_LABELS.get(name, name)
 
 
 def _format_dropped_peaks(datasets) -> str:
+    # Format dropped ppm columns for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
@@ -146,6 +156,7 @@ def _format_dropped_peaks(datasets) -> str:
 
 
 def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, object]]:
+    # Combine solver statistics across species lists.
     totals = {
         "solver_points": 0,
         "solver_newton_success": 0,
@@ -178,6 +189,7 @@ def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, o
 
 
 def run_fit(args: argparse.Namespace) -> None:
+    # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
     datasets = load_datasets(
         paths,
@@ -189,6 +201,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
     model_names = DEFAULT_MODEL_NAMES
 
+    # Validate K starts/bounds and convert to log10 space.
     k_starts = _parse_k_starts(args.k_starts)
     if any(v <= 0 for v in k_starts):
         raise ValueError("All K starts must be positive.")
@@ -205,6 +218,7 @@ def run_fit(args: argparse.Namespace) -> None:
             raise ValueError("--k-min must be less than or equal to --k-max.")
         logk_bounds = (float(np.log10(args.k_min)), float(np.log10(args.k_max)))
 
+    # Fit all requested models.
     results = fit_models(
         datasets,
         model_names,
@@ -218,10 +232,11 @@ def run_fit(args: argparse.Namespace) -> None:
         logk_jitter=args.bootstrap_logk_jitter,
     )
 
+    # Prepare output directory for reports and plots.
     out_dir = _auto_output_dir(paths)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Index results and collect failures
+    # Index results by dataset key and collect failures.
     results_by_key: Dict[str, Dict[str, object]] = {}
     failures_by_key: Dict[str, List[Tuple[str, str]]] = {}
     ordered_keys: List[str] = []
@@ -234,6 +249,7 @@ def run_fit(args: argparse.Namespace) -> None:
             continue
         results_by_key.setdefault(key, {})[res.model.name] = res
 
+    # Accumulators for summary CSV and HTML report.
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
@@ -256,6 +272,7 @@ def run_fit(args: argparse.Namespace) -> None:
             if res.bootstrap is not None and res.bootstrap.param_samples.size > 0:
                 bootstrap_samples = res.bootstrap.param_samples
 
+            # Convert fitted params to report entries, using bootstrap SEs when available.
             params = []
             for i, name in enumerate(res.param_names):
                 value = float(res.params[i])
@@ -291,6 +308,7 @@ def run_fit(args: argparse.Namespace) -> None:
                 model_dir = model_dir / f"dataset_{ds_label}"
             model_dir.mkdir(parents=True, exist_ok=True)
 
+            # Track plot paths relative to the output directory.
             plot_paths: List[str] = []
             logk, deltas = split_params_multi(res.params, res.model, res.datasets)
             for ds, delta, residual in zip(res.datasets, deltas, res.residuals):
@@ -329,6 +347,7 @@ def run_fit(args: argparse.Namespace) -> None:
                     if path.suffix.lower() == ".png":
                         plot_paths.append(str(path.relative_to(out_dir)))
 
+            # Collect per-model warnings shown in the report.
             warnings = []
             dropped_peaks = _format_dropped_peaks(res.datasets)
             if dropped_peaks != "None":
@@ -352,6 +371,7 @@ def run_fit(args: argparse.Namespace) -> None:
                         f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations"
                     )
 
+            # Include solver diagnostics for 1:2 and 2:1 models.
             solver_stats = None
             if res.model.name in {"12", "21"}:
                 solver_stats = _accumulate_solver_stats(res.species)
@@ -370,6 +390,7 @@ def run_fit(args: argparse.Namespace) -> None:
                         f"solver fallback failures ({solver_stats['solver_fallback_fail']}/{solver_stats['solver_points']})"
                     )
 
+            # Prepare statistics text for the report tables.
             stats_base = {
                 "RSS": f"{res.rss:.6g}",
                 "RMSE": f"{res.rmse:.6g}",
@@ -537,6 +558,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Define CLI flags and defaults.
     parser = argparse.ArgumentParser(prog="nmrbindfit")
     parser.add_argument(
         "command",
@@ -580,6 +602,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    # Parse CLI arguments and run the requested command.
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)
