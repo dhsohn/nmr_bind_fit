@@ -8,7 +8,7 @@ from typing import List, Tuple
 import numpy as np
 
 from .equilibrium import SpeciesResult, solve_11, solve_12, solve_21
-from .io import Dataset
+from .types import DatasetLike
 
 
 @dataclass
@@ -71,7 +71,7 @@ def model_param_names(model: ModelSpec, peak_names: List[str]) -> List[str]:
 def split_params(
     params: np.ndarray,
     model: ModelSpec,
-    dataset: Dataset,
+    dataset: DatasetLike,
 ) -> Tuple[np.ndarray, np.ndarray]:
     # Slice the parameter vector into logK and delta blocks.
     logk = params[: model.n_logk]
@@ -82,7 +82,7 @@ def split_params(
 def split_params_multi(
     params: np.ndarray,
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: List[DatasetLike],
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     # Walk the parameter vector across datasets for replicate fits.
     logk = params[: model.n_logk]
@@ -121,7 +121,7 @@ def _weights_21(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
 
 def predict_dataset(
     model: ModelSpec,
-    dataset: Dataset,
+    dataset: DatasetLike,
     logk: np.ndarray,
     delta: np.ndarray,
 ) -> Tuple[np.ndarray, SpeciesResult]:

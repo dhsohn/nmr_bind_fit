@@ -214,35 +214,64 @@ def _param_bounds(
     return lower, upper
 
 
-def fit_model(
-    datasets: List[Dataset],
-    model_name: str,
-    logk_starts: Sequence[float],
-    max_nfev: int = 5000,
-    bootstrap: int = 0,
-    bootstrap_method: str = "residual",
-    seed: Optional[int] = None,
-    logk_bounds: Optional[Tuple[float, float]] = None,
-    logk_jitter: float = 0.1,
-) -> FitResult:
-    """Fit one model to one or multiple datasets with multistart logK."""
-    model = MODEL_SPECS[model_name]
-    if model.n_logk == 0:
-        logk_grid = [()]
-    else:
-        # Build a full grid of logK start combinations.
-        if logk_bounds is not None:
-            logk_starts = [v for v in logk_starts if logk_bounds[0] <= v <= logk_bounds[1]]
-            if not logk_starts:
-                raise ValueError("No K starts within bounds.")
-        logk_grid = list(itertools.product(logk_starts, repeat=model.n_logk))
+def _total_observations(datasets: List[Dataset]) -> int:
+    # Count total scalar observations across all datasets and peaks.
+    return int(sum(ds.n_points * ds.n_peaks for ds in datasets))
 
-    best_params = None
-    best_res = None
-    best_rss = None
+
+def _failed_fit_result(
+    model: ModelSpec,
+    datasets: List[Dataset],
+    params: np.ndarray,
+    param_names: List[str],
+    message: str,
+    species: Optional[List] = None,
+) -> FitResult:
+    # Build a consistent failure payload used across early-return paths.
+    n = _total_observations(datasets)
+    p = int(len(params))
+    dof = int(n - p)
+    return FitResult(
+        model=model,
+        datasets=datasets,
+        params=params,
+        param_names=param_names,
+        success=False,
+        message=message,
+        rss=float("nan"),
+        rss_weighted=float("nan"),
+        rmse=float("nan"),
+        rmse_weighted=float("nan"),
+        r2=float("nan"),
+        reduced_chi2=float("nan"),
+        bic=float("nan"),
+        aicc=float("nan"),
+        n=n,
+        p=p,
+        dof=dof,
+        y_pred=[],
+        species=species if species is not None else [],
+        residuals=[],
+        bootstrap=None,
+    )
+
+
+def _select_best_multistart(
+    model: ModelSpec,
+    datasets: List[Dataset],
+    logk_grid: Sequence[Tuple[float, ...]],
+    max_nfev: int,
+    logk_bounds: Optional[Tuple[float, float]],
+) -> Tuple[Optional[np.ndarray], Optional[least_squares]]:
+    # Prefer converged starts and keep best failure only as fallback diagnostics.
+    best_success_params = None
+    best_success_res = None
+    best_success_rss = None
+    best_failed_params = None
+    best_failed_res = None
+    best_failed_rss = None
 
     for logk_vals in logk_grid:
-        # Select the start that yields the smallest residual sum of squares.
         params0 = _build_initial_params(model, datasets, logk_vals)
         bounds = _param_bounds(params0, model, logk_bounds)
         try:
@@ -250,89 +279,58 @@ def fit_model(
         except Exception:
             continue
         rss = float(np.sum(res.fun**2))
-        if best_rss is None or rss < best_rss:
-            best_rss = rss
-            best_params = params
-            best_res = res
+        if bool(getattr(res, "success", False)):
+            if best_success_rss is None or rss < best_success_rss:
+                best_success_rss = rss
+                best_success_params = params
+                best_success_res = res
+        elif best_failed_rss is None or rss < best_failed_rss:
+            best_failed_rss = rss
+            best_failed_params = params
+            best_failed_res = res
 
-    if best_params is None or best_res is None:
-        raise RuntimeError(f"Fit failed for model {model_name}")
+    if best_success_params is not None and best_success_res is not None:
+        return best_success_params, best_success_res
+    return best_failed_params, best_failed_res
 
-    # Return early if the optimizer failed to converge.
-    if not best_res.success:
-        param_names = _param_names_multi(model, datasets)
-        return FitResult(
-            model=model,
-            datasets=datasets,
-            params=best_params,
-            param_names=param_names,
-            success=False,
-            message=str(best_res.message),
-            rss=float("nan"),
-            rss_weighted=float("nan"),
-            rmse=float("nan"),
-            rmse_weighted=float("nan"),
-            r2=float("nan"),
-            reduced_chi2=float("nan"),
-            bic=float("nan"),
-            aicc=float("nan"),
-            n=int(sum(ds.n_points * ds.n_peaks for ds in datasets)),
-            p=int(len(best_params)),
-            dof=int(sum(ds.n_points * ds.n_peaks for ds in datasets) - len(best_params)),
-            y_pred=[],
-            species=[],
-            residuals=[],
-            bootstrap=None,
-        )
 
-    # Generate predictions and residuals for diagnostics.
-    y_pred_list, species_list, residuals = _predict_all(best_params, model, datasets)
-    if not all(np.all(np.isfinite(y_pred)) for y_pred in y_pred_list):
-        fail_points = 0
-        total_points = 0
-        for ds, species in zip(datasets, species_list):
-            stats = getattr(species, "solver_stats", None)
-            if stats is not None:
-                fail_points += int(getattr(stats, "fallback_fail", 0))
-                total_points += int(getattr(stats, "points", ds.n_points))
-        message = "Equilibrium solver produced non-finite predictions."
-        if total_points > 0:
-            message = f"{message} Failed points: {fail_points}/{total_points}."
-        param_names = _param_names_multi(model, datasets)
-        return FitResult(
-            model=model,
-            datasets=datasets,
-            params=best_params,
-            param_names=param_names,
-            success=False,
-            message=message,
-            rss=float("nan"),
-            rss_weighted=float("nan"),
-        rmse=float("nan"),
-        rmse_weighted=float("nan"),
-        r2=float("nan"),
-        reduced_chi2=float("nan"),
-            bic=float("nan"),
-            aicc=float("nan"),
-            n=int(sum(ds.n_points * ds.n_peaks for ds in datasets)),
-            p=int(len(best_params)),
-            dof=int(sum(ds.n_points * ds.n_peaks for ds in datasets) - len(best_params)),
-            y_pred=[],
-            species=species_list,
-            residuals=[],
-            bootstrap=None,
-        )
-    # Compute fit diagnostics across all datasets.
-    rss, rss_weighted = _rss_values(datasets, residuals)
+def _build_logk_grid(
+    model: ModelSpec,
+    logk_starts: Sequence[float],
+    logk_bounds: Optional[Tuple[float, float]],
+) -> List[Tuple[float, ...]]:
+    # Expand multistart seeds across the model's logK dimensions.
+    if model.n_logk == 0:
+        return [()]
+    starts = list(logk_starts)
+    if logk_bounds is not None:
+        starts = [v for v in starts if logk_bounds[0] <= v <= logk_bounds[1]]
+        if not starts:
+            raise ValueError("No K starts within bounds.")
+    return list(itertools.product(starts, repeat=model.n_logk))
 
-    n = int(sum(ds.n_points * ds.n_peaks for ds in datasets))
-    p = int(len(best_params))
-    dof = int(n - p)
-    rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
-    rmse_weighted = float(np.sqrt(rss_weighted / n)) if n > 0 else float("nan")
-    r2 = _r2_score(datasets, y_pred_list)
-    reduced_chi2 = float(rss_weighted / dof) if dof > 0 else float("nan")
 
+def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[object]) -> str:
+    # Build a diagnostics message when equilibrium predictions are non-finite.
+    fail_points = 0
+    total_points = 0
+    for ds, species in zip(datasets, species_list):
+        stats = getattr(species, "solver_stats", None)
+        if stats is not None:
+            fail_points += int(getattr(stats, "fallback_fail", 0))
+            total_points += int(getattr(stats, "points", ds.n_points))
+    message = "Equilibrium solver produced non-finite predictions."
+    if total_points > 0:
+        message = f"{message} Failed points: {fail_points}/{total_points}."
+    return message
+
+
+def _information_criteria(
+    datasets: List[Dataset],
+    residuals: List[np.ndarray],
+    p: int,
+) -> Tuple[float, float]:
+    # Compute BIC/AICc from Gaussian log-likelihood across datasets.
     loglik_total = 0.0
     n_loglik = 0
     sigma_param_extra = 0
@@ -342,20 +340,52 @@ def fit_model(
             raise RuntimeError(f"BIC calculation failed: log-likelihood is NaN for dataset {ds.name}.")
         if ds.sigma is None and n_sigma > 0:
             sigma_param_extra += n_sigma
-        if np.isfinite(loglik):
-            loglik_total += loglik
-            n_loglik += n_ll
+        loglik_total += loglik
+        n_loglik += n_ll
     bic_p = p + sigma_param_extra
     if n_loglik <= 0:
         raise RuntimeError("BIC calculation failed: no valid log-likelihood terms.")
     bic = bic_from_loglik(loglik_total, n_loglik, bic_p)
     aicc = aicc_from_loglik(loglik_total, n_loglik, bic_p)
+    return bic, aicc
 
+
+def _build_successful_fit_result(
+    model: ModelSpec,
+    datasets: List[Dataset],
+    best_params: np.ndarray,
+    best_res: least_squares,
+    bootstrap: int,
+    bootstrap_method: str,
+    seed: Optional[int],
+    logk_bounds: Optional[Tuple[float, float]],
+    logk_jitter: float,
+) -> FitResult:
+    # Evaluate diagnostics/statistics and build the final successful FitResult.
     param_names = _param_names_multi(model, datasets)
+    y_pred_list, species_list, residuals = _predict_all(best_params, model, datasets)
+    if not all(np.all(np.isfinite(y_pred)) for y_pred in y_pred_list):
+        return _failed_fit_result(
+            model=model,
+            datasets=datasets,
+            params=best_params,
+            param_names=param_names,
+            message=_nonfinite_prediction_message(datasets, species_list),
+            species=species_list,
+        )
+
+    rss, rss_weighted = _rss_values(datasets, residuals)
+    n = _total_observations(datasets)
+    p = int(len(best_params))
+    dof = int(n - p)
+    rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
+    rmse_weighted = float(np.sqrt(rss_weighted / n)) if n > 0 else float("nan")
+    r2 = _r2_score(datasets, y_pred_list)
+    reduced_chi2 = float(rss_weighted / dof) if dof > 0 else float("nan")
+    bic, aicc = _information_criteria(datasets, residuals, p)
 
     bootstrap_result = None
     if bootstrap > 0:
-        # Bootstrap parameter uncertainties via refits.
         bootstrap_result = bootstrap_params(
             best_params,
             model,
@@ -389,6 +419,56 @@ def fit_model(
         species=species_list,
         residuals=residuals,
         bootstrap=bootstrap_result,
+    )
+
+
+def fit_model(
+    datasets: List[Dataset],
+    model_name: str,
+    logk_starts: Sequence[float],
+    max_nfev: int = 5000,
+    bootstrap: int = 0,
+    bootstrap_method: str = "residual",
+    seed: Optional[int] = None,
+    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_jitter: float = 0.1,
+) -> FitResult:
+    """Fit one model to one or multiple datasets with multistart logK."""
+    model = MODEL_SPECS[model_name]
+    logk_grid = _build_logk_grid(model, logk_starts, logk_bounds)
+
+    best_params, best_res = _select_best_multistart(
+        model,
+        datasets,
+        logk_grid,
+        max_nfev=max_nfev,
+        logk_bounds=logk_bounds,
+    )
+
+    if best_params is None or best_res is None:
+        raise RuntimeError(f"Fit failed for model {model_name}")
+
+    # Return early if the optimizer failed to converge.
+    if not best_res.success:
+        param_names = _param_names_multi(model, datasets)
+        return _failed_fit_result(
+            model=model,
+            datasets=datasets,
+            params=best_params,
+            param_names=param_names,
+            message=str(best_res.message),
+        )
+
+    return _build_successful_fit_result(
+        model=model,
+        datasets=datasets,
+        best_params=best_params,
+        best_res=best_res,
+        bootstrap=bootstrap,
+        bootstrap_method=bootstrap_method,
+        seed=seed,
+        logk_bounds=logk_bounds,
+        logk_jitter=logk_jitter,
     )
 
 
@@ -451,6 +531,64 @@ def _parametric_bootstrap(
     )
 
 
+def _points_bootstrap(
+    rng: np.random.Generator,
+    ds: Dataset,
+) -> Dataset:
+    # Sample complete titration points with replacement.
+    idx = rng.integers(0, ds.n_points, size=ds.n_points)
+    return Dataset(
+        name=ds.name,
+        path=ds.path,
+        h_tot=ds.h_tot[idx],
+        g_tot=ds.g_tot[idx],
+        x=ds.x[idx],
+        y=ds.y[idx],
+        y_cols=ds.y_cols,
+        sigma=ds.sigma[idx] if ds.sigma is not None else None,
+        dropped_peaks=ds.dropped_peaks,
+    )
+
+
+def _resample_bootstrap_dataset(
+    method: str,
+    rng: np.random.Generator,
+    ds: Dataset,
+    y_pred: np.ndarray,
+    residuals: np.ndarray,
+) -> Dataset:
+    # Dispatch bootstrap resampling strategy for one dataset.
+    if method == "points":
+        return _points_bootstrap(rng, ds)
+    if method == "parametric":
+        return _parametric_bootstrap(rng, ds, y_pred, residuals)
+    return _residual_bootstrap(rng, ds, y_pred, residuals)
+
+
+def _jitter_bootstrap_start(
+    params: np.ndarray,
+    model: ModelSpec,
+    rng: np.random.Generator,
+    logk_jitter: float,
+    logk_bounds: Optional[Tuple[float, float]],
+) -> np.ndarray:
+    # Apply bounded random jitter to logK start values.
+    params0 = params.copy()
+    if model.n_logk and logk_jitter > 0:
+        jitter = rng.normal(0.0, logk_jitter, size=model.n_logk)
+        params0[: model.n_logk] = params0[: model.n_logk] + jitter
+        if logk_bounds is not None:
+            params0[: model.n_logk] = np.clip(params0[: model.n_logk], logk_bounds[0], logk_bounds[1])
+    return params0
+
+
+def _accept_bootstrap_fit(params_fit: np.ndarray, res: least_squares) -> bool:
+    # Count only converged refits with finite parameter vectors.
+    if not bool(getattr(res, "success", False)):
+        return False
+    return bool(np.all(np.isfinite(params_fit)))
+
+
 def bootstrap_params(
     params: np.ndarray,
     model: ModelSpec,
@@ -474,38 +612,23 @@ def bootstrap_params(
         # Resample each dataset consistently across peaks.
         boot_datasets: List[Dataset] = []
         for ds, y_pred, res in zip(datasets, y_pred_list, residuals):
-            if method == "points":
-                idx = rng.integers(0, ds.n_points, size=ds.n_points)
-                boot = Dataset(
-                    name=ds.name,
-                    path=ds.path,
-                    h_tot=ds.h_tot[idx],
-                    g_tot=ds.g_tot[idx],
-                    x=ds.x[idx],
-                    y=ds.y[idx],
-                    y_cols=ds.y_cols,
-                    sigma=ds.sigma[idx] if ds.sigma is not None else None,
-                    dropped_peaks=ds.dropped_peaks,
-                )
-            elif method == "parametric":
-                boot = _parametric_bootstrap(rng, ds, y_pred, res)
-            else:
-                boot = _residual_bootstrap(rng, ds, y_pred, res)
+            boot = _resample_bootstrap_dataset(method, rng, ds, y_pred, res)
             boot_datasets.append(boot)
 
-        params0 = params.copy()
-        if model.n_logk and logk_jitter > 0:
-            # Small random perturbations reduce local-minimum bias.
-            jitter = rng.normal(0.0, logk_jitter, size=model.n_logk)
-            params0[: model.n_logk] = params0[: model.n_logk] + jitter
-            if logk_bounds is not None:
-                params0[: model.n_logk] = np.clip(
-                    params0[: model.n_logk], logk_bounds[0], logk_bounds[1]
-                )
+        # Small random perturbations reduce local-minimum bias.
+        params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
         bounds = _param_bounds(params0, model, logk_bounds)
         try:
-            params_fit, _ = _fit_with_initial(model, boot_datasets, params0, max_nfev=2000, bounds=bounds)
+            params_fit, res = _fit_with_initial(
+                model,
+                boot_datasets,
+                params0,
+                max_nfev=2000,
+                bounds=bounds,
+            )
         except Exception:
+            continue
+        if not _accept_bootstrap_fit(params_fit, res):
             continue
         param_samples.append(params_fit)
         n_success += 1
@@ -553,17 +676,17 @@ def fit_models(
         for model_name in model_names:
             # Fit all datasets together with shared logK values.
             results.append(
-                    fit_model(
-                        datasets,
-                        model_name,
-                        logk_starts,
-                        max_nfev=max_nfev,
-                        bootstrap=bootstrap,
-                        bootstrap_method=bootstrap_method,
-                        seed=seed,
-                        logk_bounds=logk_bounds,
-                        logk_jitter=logk_jitter,
-                    )
+                fit_model(
+                    datasets,
+                    model_name,
+                    logk_starts,
+                    max_nfev=max_nfev,
+                    bootstrap=bootstrap,
+                    bootstrap_method=bootstrap_method,
+                    seed=seed,
+                    logk_bounds=logk_bounds,
+                    logk_jitter=logk_jitter,
+                )
             )
     else:
         for ds in datasets:

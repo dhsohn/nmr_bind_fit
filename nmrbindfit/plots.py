@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
 import matplotlib
@@ -11,8 +12,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from .io import Dataset
 from .models import ModelSpec, predict_dataset, fraction_bound
+from .types import DatasetLike
 
 matplotlib.rcParams.update(
     {
@@ -26,7 +27,29 @@ matplotlib.rcParams.update(
 )
 
 
-def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
+@dataclass
+class _GridDataset:
+    # Lightweight dataset shape used only for plotting model curves.
+    name: str
+    path: Path
+    h_tot: np.ndarray
+    g_tot: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
+    y_cols: List[str]
+    sigma: Optional[np.ndarray]
+    dropped_peaks: List[str]
+
+    @property
+    def n_points(self) -> int:
+        return int(self.y.shape[0])
+
+    @property
+    def n_peaks(self) -> int:
+        return int(self.y.shape[1])
+
+
+def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
     # Create a dense grid of equivalents for smooth fit curves.
     eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
     h_ref = float(np.median(ds.h_tot))
@@ -34,7 +57,7 @@ def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
     g_vals = eq_vals * h_ref
     x_vals = eq_vals
 
-    return Dataset(
+    return _GridDataset(
         name=ds.name,
         path=ds.path,
         h_tot=h_vals,
@@ -47,9 +70,40 @@ def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
     )
 
 
+def _save_figure(fig: plt.Figure, png_path: Path, pdf_path: Path) -> None:
+    # Keep output format handling in one place.
+    fig.savefig(png_path, dpi=200)
+    fig.savefig(pdf_path)
+    plt.close(fig)
+
+
+def _prepare_isotherm_curve(
+    model: ModelSpec,
+    ds: DatasetLike,
+    logk: np.ndarray,
+    delta: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    # Compute smooth model curve values on a dense equivalents grid.
+    grid_ds = _grid_dataset(ds)
+    y_grid, _ = predict_dataset(model, grid_ds, logk, delta)
+    order = np.argsort(grid_ds.x)
+    return grid_ds.x[order], y_grid[order, :]
+
+
+def _prepare_fraction_bound_values(
+    model: ModelSpec,
+    ds: DatasetLike,
+    logk: np.ndarray,
+    delta: np.ndarray,
+) -> np.ndarray:
+    # Compute model-implied fraction bound for the observed x values.
+    _, species = predict_dataset(model, ds, logk, delta)
+    return fraction_bound(model, species, ds.h_tot)
+
+
 def plot_isotherms(
     model: ModelSpec,
-    ds: Dataset,
+    ds: DatasetLike,
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
@@ -58,30 +112,26 @@ def plot_isotherms(
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
 
-    grid_ds = _grid_dataset(ds)
-    y_grid, _ = predict_dataset(model, grid_ds, logk, delta)
+    x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
 
     for i, peak in enumerate(ds.y_cols):
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.scatter(ds.x, ds.y[:, i], color="#2b2d42", label="data")
-        order = np.argsort(grid_ds.x)
-        ax.plot(grid_ds.x[order], y_grid[order, i], color="#d90429", label="fit")
+        ax.plot(x_curve, y_curve[:, i], color="#d90429", label="fit")
         ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
         ax.set_ylabel("ppm")
         ax.legend()
         fig.tight_layout()
         png_path = out_dir / f"isotherm_{peak}.png"
         pdf_path = out_dir / f"isotherm_{peak}.pdf"
-        fig.savefig(png_path, dpi=200)
-        fig.savefig(pdf_path)
-        plt.close(fig)
+        _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
 
 
 def plot_residuals(
     model: ModelSpec,
-    ds: Dataset,
+    ds: DatasetLike,
     residuals: np.ndarray,
     out_dir: Path,
 ) -> List[Path]:
@@ -97,9 +147,7 @@ def plot_residuals(
         fig.tight_layout()
         png_path = out_dir / f"residual_{peak}.png"
         pdf_path = out_dir / f"residual_{peak}.pdf"
-        fig.savefig(png_path, dpi=200)
-        fig.savefig(pdf_path)
-        plt.close(fig)
+        _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
 
@@ -132,7 +180,7 @@ def plot_bootstrap_hist(
 
 def plot_fraction_bound(
     model: ModelSpec,
-    ds: Dataset,
+    ds: DatasetLike,
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
@@ -141,8 +189,7 @@ def plot_fraction_bound(
     if not model.is_binding:
         return []
     out_dir.mkdir(parents=True, exist_ok=True)
-    y_pred, species = predict_dataset(model, ds, logk, delta)
-    f = fraction_bound(model, species, ds.h_tot)
+    f = _prepare_fraction_bound_values(model, ds, logk, delta)
     fig, ax = plt.subplots(figsize=(6, 3))
     ax.scatter(ds.x, f, color="#2b2d42")
     ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
@@ -151,7 +198,5 @@ def plot_fraction_bound(
     fig.tight_layout()
     png_path = out_dir / "fraction_bound.png"
     pdf_path = out_dir / "fraction_bound.pdf"
-    fig.savefig(png_path, dpi=200)
-    fig.savefig(pdf_path)
-    plt.close(fig)
+    _save_figure(fig, png_path, pdf_path)
     return [png_path, pdf_path]
