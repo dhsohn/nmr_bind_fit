@@ -55,23 +55,15 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
     for entry in entries:
         rationale = _rationale_text(entry.reasons)
         if entry.dataset == "Simultaneous Fitting":
-            model_name = entry.recommended_model
-            if model_name == "non-binding":
-                text = (
-                    "Based on simultaneous fitting of replicate titration datasets, the non-binding model is "
-                    "best supported among the evaluated candidates. "
-                    f"{rationale}"
-                )
-            else:
-                text = (
-                    "Based on simultaneous fitting of replicate titration datasets, the "
-                    f"{model_name} binding model is best supported among the evaluated candidates. "
-                    f"{rationale}"
-                )
+            text = (
+                "Based on simultaneous fitting of replicate titration datasets, the "
+                f"{entry.recommended_model} model was selected as a provisional working model among the evaluated "
+                f"candidates. {rationale}"
+            )
         else:
             text = (
-                f"For the {entry.dataset} dataset, the {entry.recommended_model} model is best supported among "
-                f"the evaluated candidates. {rationale}"
+                f"For the {entry.dataset} dataset, the {entry.recommended_model} model was selected as a provisional "
+                f"working model among the evaluated candidates. {rationale}"
             )
         paragraphs.append(f"<p>{html.escape(text)}</p>")
     return paragraphs

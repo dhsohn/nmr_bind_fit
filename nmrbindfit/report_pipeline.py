@@ -383,10 +383,10 @@ def build_report_artifacts(
 def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> str:
     # Build static methods narrative with runtime bootstrap/replicate notes.
     bootstrap_note = (
-        f"Bootstrap confidence intervals were estimated with {args.bootstrap} iterations using "
+        f"Bootstrap uncertainty was evaluated with {args.bootstrap} iterations using "
         f"{args.bootstrap_method} resampling."
         if args.bootstrap > 0
-        else "Bootstrap confidence intervals were not computed."
+        else "Bootstrap uncertainty was not evaluated."
     )
     replicate_note = ""
     if args.replicates and len(datasets) > 1:
@@ -395,18 +395,18 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
             "replicate-specific chemical shifts. "
         )
     return (
-        "NMR chemical shift titration data were analyzed under a fast-exchange assumption, with observed shifts "
-        "modeled as host-weighted population averages (host resonances only). Candidate models included 1:1 binding "
-        "(H + G ⇌ HG), 1:2 binding (H + G ⇌ HG; HG + G ⇌ HG<sub>2</sub>), 2:1 binding (H + G ⇌ HG; H + HG ⇌ H<sub>2</sub>G), "
-        "and a non-binding linear drift. Parameters were estimated by nonlinear least squares "
-        "(scipy.optimize.least_squares), using sigma-weighted residuals when sigma is provided and unweighted "
-        "residuals otherwise. The 1:1 model was solved analytically, while 1:2 and 2:1 were solved point-wise via "
-        "Newton-Raphson on free guest with bisection fallback; solver failures were logged. "
-        "Uncertainty was quantified by bootstrap resampling with small logK initialization perturbations "
-        f"(std {args.bootstrap_logk_jitter:.3g} in log10 K) in each refit. Model comparison used Gaussian "
-        "log-likelihood BIC as the primary "
-        "criterion with AICc as a supplementary metric; n was defined as the total finite residual count across "
-        "peaks and points, and when sigma was absent per-peak variance was estimated and counted as extra parameters. "
+        "NMR chemical shift titration data were interpreted under a fast-exchange assumption, with observed "
+        "host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries "
+        "were 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding "
+        "(H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters were estimated by "
+        "nonlinear least squares (scipy.optimize.least_squares), using sigma-weighted residuals when sigma was "
+        "provided and unweighted residuals otherwise. The 1:1 equilibrium was solved analytically, while 1:2 and "
+        "2:1 equilibria were solved numerically point-by-point with Newton-Raphson and bisection fallback. "
+        f"Bootstrap refits used a small logK start perturbation (std {args.bootstrap_logk_jitter:.3g} in log10 K). "
+        "Model comparison used BIC as the primary ranking index and AICc as supporting information. These criteria "
+        "were interpreted as relative support among tested candidates and considered together with chemical "
+        "plausibility and spectral consistency. When sigma was absent, one shared residual variance term was "
+        "estimated for model comparison. "
         + replicate_note
         + bootstrap_note
     )
@@ -442,15 +442,19 @@ def build_decisions(
         best = bic_sorted[0]
         best_display = display_model_name(best.model.name)
         decisions.append(
-            f"Recommended model (relative to tested candidates): {best_display} (lowest BIC among candidates)"
+            f"Tentative working model among tested candidates: {best_display} (lowest BIC among candidates)"
         )
         reasons = [
-            f"Among the evaluated models, this model has the lowest Bayesian Information Criterion "
-            f"(BIC={best.bic:.6g}); BIC penalizes model complexity, so lower values indicate a better balance "
-            "of fit and parsimony, but this ranking reflects relative support rather than proof of a true model"
+            f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
+            f"(BIC={best.bic:.6g}). This ranking indicates relative support only and should be interpreted with "
+            "chemical plausibility and spectral behavior"
         ]
         if len(bic_sorted) > 1:
-            decisions.append(f"- next best BIC: {bic_sorted[1].bic:.6g}")
+            delta_bic = float(bic_sorted[1].bic - best.bic)
+            decisions.append(f"- delta BIC to next candidate: {delta_bic:.6g}")
+            if np.isfinite(delta_bic) and delta_bic < 2.0:
+                decisions.append("- BIC separation is small; treat model selection as provisional")
+                reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
             k_samples = _bootstrap_k_samples(best)
             if k_samples.size > 0:

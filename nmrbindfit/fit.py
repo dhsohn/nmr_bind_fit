@@ -334,14 +334,28 @@ def _information_criteria(
     loglik_total = 0.0
     n_loglik = 0
     sigma_param_extra = 0
+    no_sigma_residuals: List[np.ndarray] = []
     for ds, res in zip(datasets, residuals):
-        loglik, n_ll, n_sigma = gaussian_loglik(res, ds.sigma, per_peak=True)
+        if ds.sigma is None:
+            # Use one shared variance for all unweighted residuals to match the SSE objective.
+            no_sigma_residuals.append(res.ravel())
+            continue
+        loglik, n_ll, n_sigma = gaussian_loglik(res, ds.sigma, per_peak=False)
         if not np.isfinite(loglik):
             raise RuntimeError(f"BIC calculation failed: log-likelihood is NaN for dataset {ds.name}.")
-        if ds.sigma is None and n_sigma > 0:
-            sigma_param_extra += n_sigma
         loglik_total += loglik
         n_loglik += n_ll
+        sigma_param_extra += n_sigma
+
+    if no_sigma_residuals:
+        stacked = np.concatenate(no_sigma_residuals)
+        loglik, n_ll, n_sigma = gaussian_loglik(stacked, sigma=None, per_peak=False)
+        if not np.isfinite(loglik):
+            raise RuntimeError("BIC calculation failed: log-likelihood is NaN for residuals without sigma.")
+        loglik_total += loglik
+        n_loglik += n_ll
+        sigma_param_extra += n_sigma
+
     bic_p = p + sigma_param_extra
     if n_loglik <= 0:
         raise RuntimeError("BIC calculation failed: no valid log-likelihood terms.")
