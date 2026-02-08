@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import matplotlib
@@ -37,7 +37,6 @@ class _GridDataset:
     x: np.ndarray
     y: np.ndarray
     y_cols: List[str]
-    sigma: Optional[np.ndarray]
     dropped_peaks: List[str]
 
     @property
@@ -65,7 +64,6 @@ def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
         x=x_vals,
         y=np.zeros((len(x_vals), ds.n_peaks)),
         y_cols=ds.y_cols,
-        sigma=None,
         dropped_peaks=ds.dropped_peaks,
     )
 

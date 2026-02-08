@@ -32,7 +32,6 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
             "host": [1e-3, np.nan, 1e-3],
             "guest": [0.0, 5e-4, 1e-3],
             "ppm1": [7.1, 7.2, 7.3],
-            "sigma": [0.01, 0.01, 0.01],
         }
     )
     df.to_csv(path, index=False)
@@ -42,9 +41,7 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
         host_col="host",
         guest_col="guest",
         ppm_cols=["ppm1"],
-        sigma_col="sigma",
     )
 
     assert ds.n_points == 2
-    assert ds.sigma is not None
-    assert ds.sigma.shape == (2, 1)
+    assert ds.y.shape == (2, 1)

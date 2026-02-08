@@ -20,7 +20,6 @@ def _dataset(name: str, n_points: int, n_peaks: int) -> Dataset:
         x=x,
         y=y,
         y_cols=[f"ppm{i + 1}" for i in range(n_peaks)],
-        sigma=None,
         dropped_peaks=[],
     )
 
@@ -32,7 +31,7 @@ def test_information_criteria_uses_shared_variance_without_sigma_single_dataset(
 
     bic, aicc = fit._information_criteria([ds], residuals, p)
 
-    loglik, n_obs, n_sigma = gaussian_loglik(residuals[0].ravel(), sigma=None, per_peak=False)
+    loglik, n_obs, n_sigma = gaussian_loglik(residuals[0].ravel())
     assert n_sigma == 1
     expected_bic = bic_from_loglik(loglik, n_obs, p + n_sigma)
     expected_aicc = aicc_from_loglik(loglik, n_obs, p + n_sigma)
@@ -52,7 +51,7 @@ def test_information_criteria_uses_one_shared_variance_without_sigma_multiple_da
     bic, aicc = fit._information_criteria([ds1, ds2], residuals, p)
 
     stacked = np.concatenate([res.ravel() for res in residuals])
-    loglik, n_obs, n_sigma = gaussian_loglik(stacked, sigma=None, per_peak=False)
+    loglik, n_obs, n_sigma = gaussian_loglik(stacked)
     assert n_sigma == 1
     expected_bic = bic_from_loglik(loglik, n_obs, p + n_sigma)
     expected_aicc = aicc_from_loglik(loglik, n_obs, p + n_sigma)

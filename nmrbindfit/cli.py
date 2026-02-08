@@ -163,7 +163,6 @@ def run_fit(args: argparse.Namespace) -> None:
         host_col=args.host_col,
         guest_col=args.guest_col,
         ppm_cols=args.ppm_cols,
-        sigma_col=args.sigma_col,
     )
     dataset_labels = _build_dataset_labels(datasets)
 
@@ -238,7 +237,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host-col", default=None, help="Host concentration column")
     parser.add_argument("--guest-col", default=None, help="Guest concentration column")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
-    parser.add_argument("--sigma-col", default=None, help="Sigma column for weighting")
     parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
     parser.add_argument(

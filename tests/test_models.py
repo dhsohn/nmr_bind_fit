@@ -18,7 +18,6 @@ def test_predict_shape_11():
         x=x,
         y=y,
         y_cols=["ppm1", "ppm2"],
-        sigma=None,
         dropped_peaks=[],
     )
     model = MODEL_SPECS["11"]

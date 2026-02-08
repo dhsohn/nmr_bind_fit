@@ -26,7 +26,6 @@ def _make_dataset() -> Dataset:
         x=x,
         y=y,
         y_cols=["ppm1"],
-        sigma=None,
         dropped_peaks=[],
     )
 

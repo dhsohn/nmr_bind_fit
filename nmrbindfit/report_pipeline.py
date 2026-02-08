@@ -21,7 +21,6 @@ SUMMARY_LABELS = {
     "bootstrap_K_SE": "Standard Error(SE)",
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
-    "RMSE_weighted": "Weighted root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
 }
@@ -30,7 +29,6 @@ SUMMARY_LABELS = {
 STATS_LABELS = {
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
-    "RMSE_weighted": "Weighted root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
 }
@@ -262,7 +260,6 @@ def _build_stats_dict(res, solver_stats: Optional[Dict[str, object]]) -> Dict[st
     stats_base = {
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
-        "RMSE_weighted": f"{res.rmse_weighted:.6g}",
         "BIC": f"{res.bic:.6g}",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
     }
@@ -309,7 +306,6 @@ def _build_summary_row(res, ds_label: str, display_name: str) -> Dict[str, str]:
         "bootstrap_K_SE": boot_k_se,
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
-        "RMSE_weighted": f"{res.rmse_weighted:.6g}",
         "BIC": f"{res.bic:.6g}",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
     }
@@ -399,14 +395,12 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
         "host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries "
         "were 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding "
         "(H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters were estimated by "
-        "nonlinear least squares (scipy.optimize.least_squares), using sigma-weighted residuals when sigma was "
-        "provided and unweighted residuals otherwise. The 1:1 equilibrium was solved analytically, while 1:2 and "
-        "2:1 equilibria were solved numerically point-by-point with Newton-Raphson and bisection fallback. "
+        "nonlinear least squares (scipy.optimize.least_squares). The 1:1 equilibrium was solved analytically, while "
+        "1:2 and 2:1 equilibria were solved numerically point-by-point with Newton-Raphson and bisection fallback. "
         f"Bootstrap refits used a small logK start perturbation (std {args.bootstrap_logk_jitter:.3g} in log10 K). "
         "Model comparison used BIC as the primary ranking index and AICc as supporting information. These criteria "
         "were interpreted as relative support among tested candidates and considered together with chemical "
-        "plausibility and spectral consistency. When sigma was absent, one shared residual variance term was "
-        "estimated for model comparison. "
+        "plausibility and spectral consistency. One shared residual variance term was estimated for model comparison. "
         + replicate_note
         + bootstrap_note
     )

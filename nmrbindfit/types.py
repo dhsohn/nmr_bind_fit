@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Protocol
+from typing import List, Protocol
 
 import numpy as np
 
@@ -18,7 +18,6 @@ class DatasetLike(Protocol):
     x: np.ndarray
     y: np.ndarray
     y_cols: List[str]
-    sigma: Optional[np.ndarray]
     dropped_peaks: List[str]
 
     @property

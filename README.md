@@ -42,19 +42,18 @@ CSV or XLSX with:
 - Host Conc. (total host concentration, M)
 - Guest Conc. (total guest concentration, M)
 - one or more ppm columns (e.g., ppm, ppm_H1)
-- optional sigma column for weighting
 
-Rows are dropped only when host/guest (and sigma if provided) are missing. If any ppm column contains missing
+Rows are dropped when host/guest values are missing. If any ppm column contains missing
 values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents ([G]<sub>t</sub>/[H]<sub>t</sub>).
 
 Example (CSV):
 
 ```
-Host Conc.,Guest Conc.,ppm_H1,ppm_H2,sigma
-1.0e-3,0.0,7.10,8.22,0.005
-1.0e-3,2.5e-4,7.15,8.25,0.005
-1.0e-3,5.0e-4,7.20,8.28,0.005
-1.0e-3,1.0e-3,7.32,8.34,0.005
+Host Conc.,Guest Conc.,ppm_H1,ppm_H2
+1.0e-3,0.0,7.10,8.22
+1.0e-3,2.5e-4,7.15,8.25
+1.0e-3,5.0e-4,7.20,8.28
+1.0e-3,1.0e-3,7.32,8.34
 ```
 
 ## Outputs
@@ -71,7 +70,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 flowchart TD
     A[CLI nmrbindfit] --> B[Load input files CSV or XLSX]
     B --> C{Validate columns}
-    C -->|Host or Guest or sigma missing| C1[Drop row]
+    C -->|Host or Guest missing| C1[Drop row]
     C -->|ppm missing| C2[Drop ppm column]
     C --> D[Build dataset x = equivalents]
 
@@ -89,7 +88,7 @@ flowchart TD
     K --> K2[1:2 and 2:1: Newton-Raphson then bisection]
     K --> L{Finite predictions?}
     L -->|No| L1[Mark model failed]
-    L -->|Yes| M[Residuals weighted if sigma]
+    L -->|Yes| M[Residuals]
 
     M --> N[Stats RSS RMSE BIC AICc]
     M --> O[Bootstrap resampling]
@@ -101,4 +100,4 @@ flowchart TD
 
 ## Methods Summary
 
-NMR chemical shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding (H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (scipy.optimize.least_squares), using sigma-weighted residuals when provided and unweighted residuals otherwise. The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Newton-Raphson and bisection fallback. Uncertainty is evaluated by bootstrap resampling (default 1000) with small logK perturbations in each refit; residual bootstrap uses sigma-standardized residuals when available. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. When sigma is absent, one shared residual variance term is estimated for model comparison. Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts. At very large K or extreme concentration ratios, the free-guest root can approach the lower bound (1e-18), leading to saturation and reduced sensitivity to K.
+NMR chemical shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding (H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (scipy.optimize.least_squares). The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Newton-Raphson and bisection fallback. Uncertainty is evaluated by bootstrap resampling (default 1000) with small logK perturbations in each refit. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. One shared residual variance term is estimated for model comparison. Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts. At very large K or extreme concentration ratios, the free-guest root can approach the lower bound (1e-18), leading to saturation and reduced sensitivity to K.

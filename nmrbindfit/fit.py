@@ -33,11 +33,8 @@ class FitResult:
     success: bool
     message: str
     rss: float
-    rss_weighted: float
     rmse: float
-    rmse_weighted: float
     r2: float
-    reduced_chi2: float
     bic: float
     aicc: float
     n: int
@@ -118,9 +115,6 @@ def _residual_vector(
             res = np.full_like(ds.y, 1e6)
         else:
             res = ds.y - y_pred
-            if ds.sigma is not None:
-                # Weighted least squares when sigma is provided.
-                res = res / ds.sigma
             if not np.all(np.isfinite(res)):
                 res = np.full_like(ds.y, 1e6)
         residuals.append(res.ravel())
@@ -132,7 +126,7 @@ def _predict_all(
     model: ModelSpec,
     datasets: List[Dataset],
 ) -> Tuple[List[np.ndarray], List, List[np.ndarray]]:
-    """Predict shifts and residuals without sigma weighting."""
+    """Predict shifts and residuals on the original ppm scale."""
     # Run model prediction for each dataset and keep raw residuals.
     logk, deltas = split_params_multi(params, model, datasets)
     y_pred_list = []
@@ -146,18 +140,12 @@ def _predict_all(
     return y_pred_list, species_list, residuals
 
 
-def _rss_values(datasets: List[Dataset], residuals: List[np.ndarray]) -> Tuple[float, float]:
-    """Return unweighted and sigma-weighted residual sum of squares."""
-    # Track both weighted and unweighted RSS for reporting.
+def _rss_value(residuals: List[np.ndarray]) -> float:
+    """Return residual sum of squares."""
     rss = 0.0
-    rss_weighted = 0.0
-    for ds, res in zip(datasets, residuals):
+    for res in residuals:
         rss += float(np.sum(res**2))
-        if ds.sigma is not None:
-            rss_weighted += float(np.sum((res / ds.sigma) ** 2))
-        else:
-            rss_weighted += float(np.sum(res**2))
-    return rss, rss_weighted
+    return rss
 
 
 def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> float:
@@ -239,11 +227,8 @@ def _failed_fit_result(
         success=False,
         message=message,
         rss=float("nan"),
-        rss_weighted=float("nan"),
         rmse=float("nan"),
-        rmse_weighted=float("nan"),
         r2=float("nan"),
-        reduced_chi2=float("nan"),
         bic=float("nan"),
         aicc=float("nan"),
         n=n,
@@ -330,37 +315,17 @@ def _information_criteria(
     residuals: List[np.ndarray],
     p: int,
 ) -> Tuple[float, float]:
-    # Compute BIC/AICc from Gaussian log-likelihood across datasets.
-    loglik_total = 0.0
-    n_loglik = 0
-    sigma_param_extra = 0
-    no_sigma_residuals: List[np.ndarray] = []
-    for ds, res in zip(datasets, residuals):
-        if ds.sigma is None:
-            # Use one shared variance for all unweighted residuals to match the SSE objective.
-            no_sigma_residuals.append(res.ravel())
-            continue
-        loglik, n_ll, n_sigma = gaussian_loglik(res, ds.sigma, per_peak=False)
-        if not np.isfinite(loglik):
-            raise RuntimeError(f"BIC calculation failed: log-likelihood is NaN for dataset {ds.name}.")
-        loglik_total += loglik
-        n_loglik += n_ll
-        sigma_param_extra += n_sigma
-
-    if no_sigma_residuals:
-        stacked = np.concatenate(no_sigma_residuals)
-        loglik, n_ll, n_sigma = gaussian_loglik(stacked, sigma=None, per_peak=False)
-        if not np.isfinite(loglik):
-            raise RuntimeError("BIC calculation failed: log-likelihood is NaN for residuals without sigma.")
-        loglik_total += loglik
-        n_loglik += n_ll
-        sigma_param_extra += n_sigma
-
-    bic_p = p + sigma_param_extra
+    # Compute BIC/AICc from one shared residual variance across all residuals.
+    stacked = np.concatenate([res.ravel() for res in residuals]) if residuals else np.array([], dtype=float)
+    loglik, n_loglik, n_sigma = gaussian_loglik(stacked)
+    if not np.isfinite(loglik):
+        names = ", ".join(ds.name for ds in datasets)
+        raise RuntimeError(f"BIC calculation failed: log-likelihood is NaN for datasets: {names}.")
+    bic_p = p + n_sigma
     if n_loglik <= 0:
         raise RuntimeError("BIC calculation failed: no valid log-likelihood terms.")
-    bic = bic_from_loglik(loglik_total, n_loglik, bic_p)
-    aicc = aicc_from_loglik(loglik_total, n_loglik, bic_p)
+    bic = bic_from_loglik(loglik, n_loglik, bic_p)
+    aicc = aicc_from_loglik(loglik, n_loglik, bic_p)
     return bic, aicc
 
 
@@ -388,14 +353,12 @@ def _build_successful_fit_result(
             species=species_list,
         )
 
-    rss, rss_weighted = _rss_values(datasets, residuals)
+    rss = _rss_value(residuals)
     n = _total_observations(datasets)
     p = int(len(best_params))
     dof = int(n - p)
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
-    rmse_weighted = float(np.sqrt(rss_weighted / n)) if n > 0 else float("nan")
     r2 = _r2_score(datasets, y_pred_list)
-    reduced_chi2 = float(rss_weighted / dof) if dof > 0 else float("nan")
     bic, aicc = _information_criteria(datasets, residuals, p)
 
     bootstrap_result = None
@@ -419,11 +382,8 @@ def _build_successful_fit_result(
         success=bool(best_res.success),
         message=str(best_res.message),
         rss=rss,
-        rss_weighted=rss_weighted,
         rmse=rmse,
-        rmse_weighted=rmse_weighted,
         r2=r2,
-        reduced_chi2=reduced_chi2,
         bic=bic,
         aicc=aicc,
         n=n,
@@ -492,18 +452,12 @@ def _residual_bootstrap(
     y_pred: np.ndarray,
     residuals: np.ndarray,
 ) -> Dataset:
-    """Residual bootstrap with optional sigma standardization."""
+    """Residual bootstrap by resampling centered residuals."""
     # Resample residuals by index to preserve autocorrelation structure.
     idx = rng.integers(0, ds.n_points, size=ds.n_points)
-    if ds.sigma is None:
-        centered = residuals - np.mean(residuals, axis=0, keepdims=True)
-        resampled = centered[idx, :]
-        y_boot = y_pred + resampled
-    else:
-        std_res = residuals / ds.sigma
-        std_res = std_res - np.mean(std_res, axis=0, keepdims=True)
-        resampled = std_res[idx, :]
-        y_boot = y_pred + resampled * ds.sigma
+    centered = residuals - np.mean(residuals, axis=0, keepdims=True)
+    resampled = centered[idx, :]
+    y_boot = y_pred + resampled
     return Dataset(
         name=ds.name,
         path=ds.path,
@@ -512,7 +466,6 @@ def _residual_bootstrap(
         x=ds.x,
         y=y_boot,
         y_cols=ds.y_cols,
-        sigma=ds.sigma,
         dropped_peaks=ds.dropped_peaks,
     )
 
@@ -523,14 +476,11 @@ def _parametric_bootstrap(
     y_pred: np.ndarray,
     residuals: np.ndarray,
 ) -> Dataset:
-    """Parametric bootstrap using Gaussian noise."""
-    # Inject Gaussian noise using either estimated or provided sigma.
-    if ds.sigma is None:
-        scale = np.std(residuals, axis=0, ddof=1)
-        scale = np.where(np.isfinite(scale), scale, 0.0)
-        noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
-    else:
-        noise = rng.normal(0.0, 1.0, size=y_pred.shape) * ds.sigma
+    """Parametric bootstrap using Gaussian noise estimated from residuals."""
+    # Inject Gaussian noise using per-peak residual standard deviation.
+    scale = np.std(residuals, axis=0, ddof=1)
+    scale = np.where(np.isfinite(scale), scale, 0.0)
+    noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
     y_boot = y_pred + noise
     return Dataset(
         name=ds.name,
@@ -540,7 +490,6 @@ def _parametric_bootstrap(
         x=ds.x,
         y=y_boot,
         y_cols=ds.y_cols,
-        sigma=ds.sigma,
         dropped_peaks=ds.dropped_peaks,
     )
 
@@ -559,7 +508,6 @@ def _points_bootstrap(
         x=ds.x[idx],
         y=ds.y[idx],
         y_cols=ds.y_cols,
-        sigma=ds.sigma[idx] if ds.sigma is not None else None,
         dropped_peaks=ds.dropped_peaks,
     )
 

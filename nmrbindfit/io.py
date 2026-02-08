@@ -21,7 +21,6 @@ class Dataset:
     x: np.ndarray
     y: np.ndarray
     y_cols: List[str]
-    sigma: Optional[np.ndarray]
     dropped_peaks: List[str]
 
     @property
@@ -123,12 +122,9 @@ def _subset_input_columns(
     host_col: str,
     guest_col: str,
     ppm_cols: Sequence[str],
-    sigma_col: Optional[str],
 ) -> pd.DataFrame:
     # Keep only columns needed for fitting.
     use_cols = [host_col, guest_col] + list(ppm_cols)
-    if sigma_col is not None:
-        use_cols.append(sigma_col)
     return df[use_cols].copy()
 
 
@@ -136,12 +132,9 @@ def _drop_missing_required(
     data: pd.DataFrame,
     host_col: str,
     guest_col: str,
-    sigma_col: Optional[str],
 ) -> pd.DataFrame:
-    # Drop rows missing required concentration (or sigma) values.
+    # Drop rows missing required concentration values.
     required_cols = [host_col, guest_col]
-    if sigma_col is not None:
-        required_cols.append(sigma_col)
     return data.dropna(axis=0, how="any", subset=required_cols)
 
 
@@ -170,16 +163,6 @@ def _validate_concentration_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> None
         raise ValueError("Guest concentration values must be non-negative and finite.")
 
 
-def _extract_sigma(data: pd.DataFrame, sigma_col: Optional[str], n_peaks: int) -> Optional[np.ndarray]:
-    # Expand scalar sigma values across peaks when provided.
-    if sigma_col is None:
-        return None
-    sigma_raw = data[sigma_col].to_numpy(dtype=float).reshape(-1, 1)
-    if not np.all(np.isfinite(sigma_raw)) or np.any(sigma_raw <= 0):
-        raise ValueError("Sigma values must be positive and finite.")
-    return np.repeat(sigma_raw, n_peaks, axis=1)
-
-
 def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
     # Compute equivalents (G/H) for plotting and x-axis usage.
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -191,7 +174,6 @@ def load_dataset(
     host_col: Optional[str] = None,
     guest_col: Optional[str] = None,
     ppm_cols: Optional[Sequence[str]] = None,
-    sigma_col: Optional[str] = None,
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
     df = _read_table(path)
@@ -199,16 +181,11 @@ def load_dataset(
     host_col, guest_col = _resolve_concentration_columns(columns, host_col, guest_col)
     ppm_cols = _resolve_ppm_cols(columns, ppm_cols)
 
-    if sigma_col is not None and sigma_col not in columns:
-        raise ValueError(f"Sigma column not found: {sigma_col}")
-
-    data = _subset_input_columns(df, host_col, guest_col, ppm_cols, sigma_col)
-    data = _drop_missing_required(data, host_col, guest_col, sigma_col)
+    data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
+    data = _drop_missing_required(data, host_col, guest_col)
 
     ppm_data, ppm_cols, dropped_ppm = _drop_incomplete_ppm_columns(data, ppm_cols)
     use_cols = [host_col, guest_col] + ppm_cols
-    if sigma_col is not None:
-        use_cols.append(sigma_col)
     data = data[use_cols]
 
     # Extract numeric arrays and validate concentrations.
@@ -216,9 +193,8 @@ def load_dataset(
     g_tot = data[guest_col].to_numpy(dtype=float)
     _validate_concentration_arrays(h_tot, g_tot)
 
-    # Extract ppm values and optional sigma weights.
+    # Extract ppm values.
     y = ppm_data.to_numpy(dtype=float)
-    sigma = _extract_sigma(data, sigma_col, y.shape[1])
     x = _compute_equivalents(h_tot, g_tot)
 
     name = path.stem
@@ -231,7 +207,6 @@ def load_dataset(
         x=x,
         y=y,
         y_cols=ppm_cols,
-        sigma=sigma,
         dropped_peaks=dropped_ppm,
     )
 
@@ -241,7 +216,6 @@ def load_datasets(
     host_col: Optional[str],
     guest_col: Optional[str],
     ppm_cols: Optional[str],
-    sigma_col: Optional[str],
 ) -> List[Dataset]:
     """Load multiple datasets."""
     # Reuse column parsing for all input paths.
@@ -254,7 +228,6 @@ def load_datasets(
                 host_col=host_col,
                 guest_col=guest_col,
                 ppm_cols=ppm_cols_list,
-                sigma_col=sigma_col,
             )
         )
     return datasets

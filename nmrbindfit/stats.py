@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from scipy import stats
@@ -27,59 +27,21 @@ class SVDResult:
 
 def gaussian_loglik(
     residuals: np.ndarray,
-    sigma: Optional[np.ndarray],
-    per_peak: bool = False,
 ) -> Tuple[float, int, int]:
-    """Gaussian log-likelihood for residuals (optionally per-peak variance)."""
+    """Gaussian log-likelihood with one shared residual variance."""
     res = np.asarray(residuals, dtype=float)
-    if sigma is None:
-        # Estimate variance from residuals when sigma is not supplied.
-        if not np.all(np.isfinite(res)):
-            return float("nan"), 0, 0
-        if per_peak and res.ndim == 2:
-            # Estimate a separate variance for each peak when sigma is absent.
-            n_peaks = int(res.shape[1])
-            loglik = 0.0
-            n_total = 0
-            for idx in range(n_peaks):
-                col = res[:, idx]
-                mask = np.isfinite(col)
-                col = col[mask]
-                n = int(col.size)
-                if n == 0:
-                    continue
-                rss = float(np.sum(col**2))
-                sigma2 = rss / n
-                if not np.isfinite(sigma2) or sigma2 <= 0:
-                    sigma2 = 1e-30
-                loglik += -0.5 * n * (np.log(2.0 * np.pi * sigma2) + 1.0)
-                n_total += n
-            if n_total == 0:
-                return float("nan"), 0, 0
-            return float(loglik), n_total, n_peaks
-
-        n = int(res.size)
-        if n == 0:
-            return float("nan"), 0, 0
-        rss = float(np.sum(res**2))
-        sigma2 = rss / n
-        if not np.isfinite(sigma2) or sigma2 <= 0:
-            sigma2 = 1e-30
-        loglik = -0.5 * n * (np.log(2.0 * np.pi * sigma2) + 1.0)
-        return float(loglik), n, 1
-
-    # Align provided sigma to residual shape and filter invalid entries.
-    sig = np.asarray(sigma, dtype=float)
-    if sig.shape != res.shape:
-        sig = np.broadcast_to(sig, res.shape)
-    mask = np.isfinite(res) & np.isfinite(sig) & (sig > 0)
+    # Estimate one variance term from all finite residuals.
+    mask = np.isfinite(res)
     res = res[mask]
-    sig = sig[mask]
     n = int(res.size)
     if n == 0:
         return float("nan"), 0, 0
-    loglik = -0.5 * np.sum(np.log(2.0 * np.pi * sig * sig) + (res / sig) ** 2)
-    return float(loglik), n, 0
+    rss = float(np.sum(res**2))
+    sigma2 = rss / n
+    if not np.isfinite(sigma2) or sigma2 <= 0:
+        sigma2 = 1e-30
+    loglik = -0.5 * n * (np.log(2.0 * np.pi * sigma2) + 1.0)
+    return float(loglik), n, 1
 
 
 def bic_from_loglik(loglik: float, n: int, p: int) -> float:
