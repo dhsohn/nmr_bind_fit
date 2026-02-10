@@ -620,6 +620,27 @@ def bootstrap_params(
     )
 
 
+def _exception_failure_result(
+    model_name: str,
+    datasets: List[Dataset],
+    exc: Exception,
+) -> FitResult:
+    # Convert per-model exceptions into a normal failure result payload.
+    model = MODEL_SPECS[model_name]
+    n_delta = sum(ds.n_peaks * model.n_delta_per_peak for ds in datasets)
+    n_params = int(model.n_logk + n_delta)
+    params = np.full((n_params,), np.nan, dtype=float)
+    param_names = _param_names_multi(model, datasets)
+    message = f"{type(exc).__name__}: {exc}"
+    return _failed_fit_result(
+        model=model,
+        datasets=datasets,
+        params=params,
+        param_names=param_names,
+        message=message,
+    )
+
+
 def fit_models(
     datasets: List[Dataset],
     model_names: Sequence[str],
@@ -637,8 +658,8 @@ def fit_models(
     if replicates:
         for model_name in model_names:
             # Fit all datasets together with shared logK values.
-            results.append(
-                fit_model(
+            try:
+                result = fit_model(
                     datasets,
                     model_name,
                     logk_starts,
@@ -649,12 +670,14 @@ def fit_models(
                     logk_bounds=logk_bounds,
                     logk_jitter=logk_jitter,
                 )
-            )
+            except Exception as exc:
+                result = _exception_failure_result(model_name, datasets, exc)
+            results.append(result)
     else:
         for ds in datasets:
             for model_name in model_names:
-                results.append(
-                    fit_model(
+                try:
+                    result = fit_model(
                         [ds],
                         model_name,
                         logk_starts,
@@ -665,5 +688,7 @@ def fit_models(
                         logk_bounds=logk_bounds,
                         logk_jitter=logk_jitter,
                     )
-                )
+                except Exception as exc:
+                    result = _exception_failure_result(model_name, [ds], exc)
+                results.append(result)
     return results

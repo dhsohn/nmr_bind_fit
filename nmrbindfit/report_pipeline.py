@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -68,6 +69,26 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
         return values[np.isfinite(values)]
     mask = np.all(np.isfinite(values), axis=1)
     return values[mask]
+
+
+def _safe_path_token(value: str) -> str:
+    # Sanitize free-form labels before using them as directory names.
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
+    return safe or "dataset"
+
+
+def _replicate_dataset_dir_labels(datasets: Sequence[object]) -> List[str]:
+    # Build deterministic, collision-free directory labels per replicate dataset.
+    labels: List[str] = []
+    for idx, ds in enumerate(datasets, start=1):
+        base = str(getattr(ds, "name", f"dataset_{idx}"))
+        path = getattr(ds, "path", None)
+        if path is not None:
+            filename = Path(path).name
+            if filename and filename != base:
+                base = f"{base}_{filename}"
+        labels.append(f"{idx:02d}_{_safe_path_token(base)}")
+    return labels
 
 
 def _format_dropped_peaks(datasets: Sequence[object]) -> str:
@@ -162,11 +183,12 @@ def _collect_plot_paths(res, model_name: str, ds_label: str, out_dir: Path) -> L
     model_dir.mkdir(parents=True, exist_ok=True)
 
     plot_paths: List[str] = []
+    replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
     logk, deltas = split_params_multi(res.params, res.model, res.datasets)
-    for ds, delta, residual in zip(res.datasets, deltas, res.residuals):
+    for idx, (ds, delta, residual) in enumerate(zip(res.datasets, deltas, res.residuals)):
         ds_dir = model_dir
         if len(res.datasets) > 1:
-            ds_dir = model_dir / f"dataset_{ds.name}"
+            ds_dir = model_dir / f"dataset_{replicate_dir_labels[idx]}"
         isotherm_files = plot_isotherms(res.model, ds, logk, delta, ds_dir)
         residual_files = plot_residuals(res.model, ds, residual, ds_dir)
         frac_files = plot_fraction_bound(res.model, ds, logk, delta, ds_dir)

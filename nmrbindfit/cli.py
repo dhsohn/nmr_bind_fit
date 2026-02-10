@@ -38,6 +38,7 @@ def _parse_k_starts(value: Optional[str]) -> List[float]:
 def _resolve_inputs(patterns: List[str]) -> List[Path]:
     # Expand glob patterns and validate file existence.
     paths: List[Path] = []
+    resolved_paths: List[Path] = []
     for pattern in patterns:
         matches = glob.glob(pattern)
         if not matches:
@@ -45,9 +46,15 @@ def _resolve_inputs(patterns: List[str]) -> List[Path]:
             if path.exists():
                 matches = [pattern]
         for match in matches:
-            paths.append(Path(match))
+            path = Path(match)
+            paths.append(path)
+            resolved_paths.append(path.resolve())
     if not paths:
         raise FileNotFoundError("No input files found.")
+    counts = Counter(resolved_paths)
+    duplicates = sorted(str(path) for path, count in counts.items() if count > 1)
+    if duplicates:
+        raise ValueError("Duplicate input files detected: " + ", ".join(duplicates))
     return paths
 
 

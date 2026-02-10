@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nmrbindfit.cli import _index_results, _resolve_logk_config
+from nmrbindfit.cli import _index_results, _resolve_inputs, _resolve_logk_config
 
 
 def test_resolve_logk_config_defaults_and_bounds():
@@ -50,3 +50,17 @@ def test_index_results_groups_success_and_failures_by_dataset():
     assert set(result_map["Dataset A"].keys()) == {"11"}
     assert set(result_map["Dataset B"].keys()) == {"11"}
     assert failures["Dataset A"] == [("12", "fail")]
+
+
+def test_resolve_inputs_rejects_duplicate_glob_and_explicit_path(tmp_path):
+    csv_path = tmp_path / "sample.csv"
+    csv_path.write_text("Host Conc.,Guest Conc.,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Duplicate input files detected:"):
+        _resolve_inputs(
+            [
+                str(tmp_path / "*.csv"),
+                str(csv_path),
+                str(tmp_path / "sample.*"),
+            ]
+        )

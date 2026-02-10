@@ -102,3 +102,69 @@ def test_multistart_skips_exception_and_keeps_success(monkeypatch):
 
     assert result.success is True
     assert result.message == "converged"
+
+
+def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
+    ds = _make_dataset()
+    real_fit_model = fit.fit_model
+
+    def fake_fit_model(datasets, model_name, logk_starts, **kwargs):
+        if model_name == "11":
+            raise RuntimeError("forced model crash")
+        return real_fit_model(datasets, model_name, logk_starts, **kwargs)
+
+    monkeypatch.setattr(fit, "fit_model", fake_fit_model)
+
+    results = fit.fit_models(
+        datasets=[ds],
+        model_names=["11", "nb"],
+        logk_starts=[1.0],
+        replicates=False,
+        max_nfev=100,
+        bootstrap=0,
+        bootstrap_method="residual",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+    )
+
+    assert len(results) == 2
+    assert results[0].success is False
+    assert results[0].model.name == "11"
+    assert "RuntimeError: forced model crash" in results[0].message
+    assert results[1].success is True
+    assert results[1].model.name == "nb"
+
+
+def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
+    ds1 = _make_dataset()
+    ds2 = _make_dataset()
+    ds2.name = "test2"
+    real_fit_model = fit.fit_model
+
+    def fake_fit_model(datasets, model_name, logk_starts, **kwargs):
+        if model_name == "11":
+            raise ValueError("bad start grid")
+        return real_fit_model(datasets, model_name, logk_starts, **kwargs)
+
+    monkeypatch.setattr(fit, "fit_model", fake_fit_model)
+
+    results = fit.fit_models(
+        datasets=[ds1, ds2],
+        model_names=["11", "nb"],
+        logk_starts=[1.0],
+        replicates=True,
+        max_nfev=100,
+        bootstrap=0,
+        bootstrap_method="residual",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+    )
+
+    assert len(results) == 2
+    assert results[0].success is False
+    assert results[0].model.name == "11"
+    assert "ValueError: bad start grid" in results[0].message
+    assert results[1].success is True
+    assert results[1].model.name == "nb"

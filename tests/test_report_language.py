@@ -2,7 +2,7 @@ import argparse
 from types import SimpleNamespace
 
 from nmrbindfit.report import DecisionEntry, _decision_paragraphs
-from nmrbindfit.report_pipeline import build_decisions
+from nmrbindfit.report_pipeline import _replicate_dataset_dir_labels, build_decisions
 
 
 def test_build_decisions_uses_provisional_language():
@@ -39,3 +39,17 @@ def test_decision_paragraphs_use_provisional_working_model_language():
     assert len(paragraphs) == 1
     assert "provisional working model" in paragraphs[0]
     assert "best supported" not in paragraphs[0]
+
+
+def test_replicate_dataset_dir_labels_are_collision_free():
+    ds1 = SimpleNamespace(name="sample", path="a/sample.csv")
+    ds2 = SimpleNamespace(name="sample", path="b/sample.csv")
+    ds3 = SimpleNamespace(name="sample", path="b/sample.csv")
+
+    labels = _replicate_dataset_dir_labels([ds1, ds2, ds3])
+
+    assert len(labels) == 3
+    assert len(set(labels)) == 3
+    assert labels[0].startswith("01_")
+    assert labels[1].startswith("02_")
+    assert labels[2].startswith("03_")
