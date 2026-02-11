@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 import warnings
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,19 +32,13 @@ class Dataset:
         return int(self.y.shape[1])
 
 
+REQUIRED_HOST_COL = "[H]t"
+REQUIRED_GUEST_COL = "[G]t"
+
+
 def _norm_col(name: str) -> str:
     # Normalize column names for fuzzy matching.
     return re.sub(r"[^a-z0-9]+", "", name.lower())
-
-
-def _find_first(columns: Sequence[str], candidates: Iterable[str]) -> Optional[str]:
-    # Map normalized names to original columns for quick lookup.
-    norm_map = {_norm_col(c): c for c in columns}
-    for cand in candidates:
-        key = _norm_col(cand)
-        if key in norm_map:
-            return norm_map[key]
-    return None
 
 
 def _find_ppm_columns(columns: Sequence[str]) -> List[str]:
@@ -70,40 +64,10 @@ def _read_table(path: Path) -> pd.DataFrame:
 
 def _resolve_concentration_columns(
     columns: Sequence[str],
-    host_col: Optional[str],
-    guest_col: Optional[str],
 ) -> Tuple[str, str]:
-    # Guess host/guest concentration columns when not explicitly provided.
-    resolved_host = host_col
-    resolved_guest = guest_col
-
-    if resolved_host is None:
-        resolved_host = _find_first(
-            columns,
-            [
-                "host conc",
-                "host concentration",
-                "host",
-                "h0",
-                "htot",
-                "h_tot",
-            ],
-        )
-    if resolved_guest is None:
-        resolved_guest = _find_first(
-            columns,
-            [
-                "guest conc",
-                "guest concentration",
-                "guest",
-                "g0",
-                "gtot",
-                "g_tot",
-            ],
-        )
-    if resolved_host is None or resolved_guest is None:
-        raise ValueError("Host or guest concentration column not found.")
-    return resolved_host, resolved_guest
+    if REQUIRED_HOST_COL not in columns or REQUIRED_GUEST_COL not in columns:
+        raise ValueError("Required concentration columns not found. Expected columns: [H]t, [G]t.")
+    return REQUIRED_HOST_COL, REQUIRED_GUEST_COL
 
 
 def _resolve_ppm_cols(columns: Sequence[str], ppm_cols: Optional[Sequence[str]]) -> List[str]:
@@ -189,15 +153,13 @@ def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
 
 def load_dataset(
     path: Path,
-    host_col: Optional[str] = None,
-    guest_col: Optional[str] = None,
     ppm_cols: Optional[Sequence[str]] = None,
     missing_policy: str = "drop-column",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
     df = _read_table(path)
     columns = list(df.columns)
-    host_col, guest_col = _resolve_concentration_columns(columns, host_col, guest_col)
+    host_col, guest_col = _resolve_concentration_columns(columns)
     ppm_cols = _resolve_ppm_cols(columns, ppm_cols)
 
     data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
@@ -232,8 +194,6 @@ def load_dataset(
 
 def load_datasets(
     paths: Sequence[Path],
-    host_col: Optional[str],
-    guest_col: Optional[str],
     ppm_cols: Optional[str],
     missing_policy: str = "drop-column",
 ) -> List[Dataset]:
@@ -245,8 +205,6 @@ def load_datasets(
         datasets.append(
             load_dataset(
                 path,
-                host_col=host_col,
-                guest_col=guest_col,
                 ppm_cols=ppm_cols_list,
                 missing_policy=missing_policy,
             )

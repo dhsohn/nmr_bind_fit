@@ -15,7 +15,7 @@ import numpy as np
 from .fit import fit_models
 from .io import load_datasets
 from .report import write_decision_txt, write_report_html, write_summary_csv
-from .report_pipeline import build_decisions, build_methods_text, build_report_artifacts
+from .report_pipeline import build_decisions, build_methods_sections, build_methods_text, build_report_artifacts
 from .types import DatasetLike, FitResultLike
 
 
@@ -27,6 +27,10 @@ MODEL_LABELS = {
 }
 
 DEFAULT_MODEL_NAMES = ["11", "12", "21", "nb"]
+STRICT_MISSING_POLICY = "drop-column"
+STRICT_SOLVER_FAILURE_MODE = "fail-fast"
+STRICT_K_MIN = 1e0
+STRICT_K_MAX = 1e12
 
 
 def _parse_k_starts(value: Optional[str]) -> List[float]:
@@ -120,22 +124,13 @@ def _dataset_key(result: FitResultLike, dataset_labels: Dict[int, str]) -> str:
 
 
 def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optional[Tuple[float, float]]]:
-    # Validate K starts/bounds and convert to log10 space.
     k_starts = _parse_k_starts(args.k_starts)
     if any(v <= 0 for v in k_starts):
         raise ValueError("All K starts must be positive.")
     if args.bootstrap_logk_jitter < 0:
         raise ValueError("--bootstrap-logk-jitter must be non-negative.")
     logk_starts = [float(np.log10(v)) for v in k_starts]
-    logk_bounds = None
-    if args.k_min is not None or args.k_max is not None:
-        if args.k_min is None or args.k_max is None:
-            raise ValueError("Both --k-min and --k-max must be provided.")
-        if args.k_min <= 0 or args.k_max <= 0:
-            raise ValueError("K bounds must be positive.")
-        if args.k_min > args.k_max:
-            raise ValueError("--k-min must be less than or equal to --k-max.")
-        logk_bounds = (float(np.log10(args.k_min)), float(np.log10(args.k_max)))
+    logk_bounds = (float(np.log10(STRICT_K_MIN)), float(np.log10(STRICT_K_MAX)))
     return logk_starts, logk_bounds
 
 
@@ -168,10 +163,8 @@ def run_fit(args: argparse.Namespace) -> None:
     paths = _resolve_inputs(args.input)
     datasets = load_datasets(
         paths,
-        host_col=args.host_col,
-        guest_col=args.guest_col,
         ppm_cols=args.ppm_cols,
-        missing_policy=args.missing_policy,
+        missing_policy=STRICT_MISSING_POLICY,
     )
     dataset_labels = _build_dataset_labels(datasets)
 
@@ -191,7 +184,7 @@ def run_fit(args: argparse.Namespace) -> None:
         seed=args.seed,
         logk_bounds=logk_bounds,
         logk_jitter=args.bootstrap_logk_jitter,
-        solver_failure_mode=args.solver_failure_mode,
+        solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
     )
 
     # Prepare output directory for reports and plots.
@@ -213,6 +206,7 @@ def run_fit(args: argparse.Namespace) -> None:
     write_summary_csv(summary_rows, out_dir / "summary.csv")
 
     methods_text = build_methods_text(args, datasets)
+    methods_sections = build_methods_sections(args, datasets)
     decisions, decision_entries = build_decisions(
         args,
         ordered_keys,
@@ -230,6 +224,7 @@ def run_fit(args: argparse.Namespace) -> None:
         methods_text=methods_text,
         warnings=report_warnings,
         output_path=out_dir / "report.html",
+        methods_sections=methods_sections,
     )
 
 
@@ -244,15 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Command (default: fit)",
     )
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
-    parser.add_argument("--host-col", default=None, help="Host concentration column")
-    parser.add_argument("--guest-col", default=None, help="Guest concentration column")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
-    parser.add_argument(
-        "--missing-policy",
-        choices=["drop-column", "mask"],
-        default="drop-column",
-        help="Handling strategy for missing ppm values",
-    )
     parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
     parser.add_argument(
@@ -262,18 +249,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Standard deviation for logK jitter per bootstrap refit (log10 units)",
     )
     parser.add_argument("--k-starts", default=None, help="Comma-separated K starts")
-    parser.add_argument("--k-min", type=float, default=None, help="Minimum K bound")
-    parser.add_argument("--k-max", type=float, default=None, help="Maximum K bound")
     parser.add_argument(
         "--replicates",
         action="store_true",
         help="Fit replicate inputs with shared binding constants",
-    )
-    parser.add_argument(
-        "--solver-failure-mode",
-        choices=["fail-fast", "continue"],
-        default="fail-fast",
-        help="Per-point solver failure behavior for 1:2 and 2:1 models",
     )
     parser.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
@@ -283,7 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Warn if bootstrap K CI width exceeds this threshold",
     )
-    parser.set_defaults(func=run_fit)
+    parser.set_defaults(
+        func=run_fit,
+        missing_policy=STRICT_MISSING_POLICY,
+        solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
+    )
 
     return parser
 

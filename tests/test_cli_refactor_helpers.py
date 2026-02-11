@@ -6,31 +6,27 @@ import pytest
 from nmrbindfit.cli import _index_results, _resolve_inputs, _resolve_logk_config
 
 
-def test_resolve_logk_config_defaults_and_bounds():
+def test_resolve_logk_config_defaults_and_fixed_bounds():
     args = argparse.Namespace(
         k_starts=None,
         bootstrap_logk_jitter=0.1,
-        k_min=None,
-        k_max=None,
     )
     starts, bounds = _resolve_logk_config(args)
     assert len(starts) == 8
-    assert bounds is None
+    assert bounds == (0.0, 12.0)
 
-    args.k_min = 1e2
-    args.k_max = 1e4
+    args.k_starts = "10,100"
     starts, bounds = _resolve_logk_config(args)
-    assert bounds == (2.0, 4.0)
+    assert starts == [1.0, 2.0]
+    assert bounds == (0.0, 12.0)
 
 
-def test_resolve_logk_config_rejects_partial_bounds():
+def test_resolve_logk_config_rejects_negative_jitter():
     args = argparse.Namespace(
         k_starts="10,100",
-        bootstrap_logk_jitter=0.1,
-        k_min=1e2,
-        k_max=None,
+        bootstrap_logk_jitter=-0.1,
     )
-    with pytest.raises(ValueError, match="Both --k-min and --k-max must be provided."):
+    with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be non-negative."):
         _resolve_logk_config(args)
 
 
@@ -54,7 +50,7 @@ def test_index_results_groups_success_and_failures_by_dataset():
 
 def test_resolve_inputs_rejects_duplicate_glob_and_explicit_path(tmp_path):
     csv_path = tmp_path / "sample.csv"
-    csv_path.write_text("Host Conc.,Guest Conc.,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+    csv_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Duplicate input files detected:"):
         _resolve_inputs(

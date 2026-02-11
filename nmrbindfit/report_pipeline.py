@@ -446,16 +446,8 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]
             "Replicate datasets were fit simultaneously with shared binding constants and "
             "replicate-specific chemical shifts. "
         )
-    missing_note = (
-        "Missing ppm values were handled by masking missing entries in residual calculations. "
-        if args.missing_policy == "mask"
-        else "ppm columns containing missing values were dropped before fitting. "
-    )
-    solver_mode_note = (
-        "For 1:2 and 2:1 models, per-point solver failures were handled in continue mode and reported by index. "
-        if args.solver_failure_mode == "continue"
-        else "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior. "
-    )
+    missing_note = "ppm columns containing missing values were dropped before fitting. "
+    solver_mode_note = "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior. "
     return (
         "NMR chemical shift titration data were interpreted under a fast-exchange assumption, with observed "
         "host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries "
@@ -463,6 +455,7 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]
         "(H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters were estimated by "
         "nonlinear least squares (scipy.optimize.least_squares). The 1:1 equilibrium was solved analytically, while "
         "1:2 and 2:1 equilibria were solved numerically point-by-point with Newton-Raphson and bisection fallback. "
+        "log10 K parameters were constrained to [0, 12] (K in [1e0, 1e12]) for stable, reproducible estimation. "
         f"Bootstrap refits used a small logK start perturbation (std {args.bootstrap_logk_jitter:.3g} in log10 K). "
         "Model comparison used BIC as the primary ranking index and AICc as supporting information. These criteria "
         "were interpreted as relative support among tested candidates and considered together with chemical "
@@ -473,6 +466,104 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]
         + solver_mode_note
         + bootstrap_note
     )
+
+
+def build_methods_sections(
+    args: argparse.Namespace, datasets: Sequence[DatasetLike]
+) -> List[Dict[str, str]]:
+    """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
+    sections: List[Dict[str, str]] = []
+
+    # 1. Data Interpretation
+    sections.append(
+        {
+            "title": "Data Interpretation",
+            "content": (
+                "NMR chemical shift titration data were interpreted under a fast-exchange assumption, "
+                "with observed host-resonance chemical shifts modeled as population-weighted averages of "
+                "the free and bound chemical states. Under this regime, the observed shift δ_obs at each "
+                "titration point is expressed as: δ_obs = Σᵢ xᵢ · δᵢ, where xᵢ is the mole fraction of "
+                "host in state i and δᵢ is the intrinsic chemical shift of that state."
+            ),
+        }
+    )
+
+    # 2. Binding Models
+    replicate_note = ""
+    if args.replicates and len(datasets) > 1:
+        replicate_note = (
+            " Replicate datasets were fit simultaneously with shared binding constants (K) and "
+            "replicate-specific chemical shift parameters (δ), thereby improving precision in K estimates."
+        )
+    sections.append(
+        {
+            "title": "Binding Models",
+            "content": (
+                "Candidate binding stoichiometries evaluated were: "
+                "(i) 1:1 binding (H + G ⇌ HG, characterized by K), "
+                "(ii) 1:2 sequential binding (H + G ⇌ HG, K₁; HG + G ⇌ HG₂, K₂), "
+                "(iii) 2:1 sequential binding (H + G ⇌ HG, K₁; H + HG ⇌ H₂G, K₂), and "
+                "(iv) a non-binding linear drift control model (δ = a₀ + a₁·[G]ₜ/[H]ₜ)."
+                + replicate_note
+            ),
+        }
+    )
+
+    # 3. Parameter Estimation
+    sections.append(
+        {
+            "title": "Parameter Estimation",
+            "content": (
+                "Parameters were estimated by nonlinear least-squares minimization using "
+                "scipy.optimize.least_squares (Trust Region Reflective algorithm). "
+                "The 1:1 equilibrium was solved analytically via the closed-form quadratic solution. "
+                "The 1:2 and 2:1 equilibria were solved numerically point-by-point using Newton–Raphson "
+                "iteration with bisection fallback for convergence robustness. "
+                "Binding constants were parameterized as log₁₀(K) and constrained to [0, 12] "
+                "(K ∈ [1, 10¹²] M⁻¹) during optimization to ensure stable, physically meaningful estimation. "
+                "ppm columns containing missing values were dropped before fitting. "
+                "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
+            ),
+        }
+    )
+
+    # 4. Model Comparison
+    sections.append(
+        {
+            "title": "Statistical Model Comparison",
+            "content": (
+                "Model comparison employed the Bayesian Information Criterion (BIC) as the primary "
+                "ranking index, defined as BIC = n·ln(RSS/n) + k·ln(n), where n is the number of "
+                "observations, RSS is the residual sum of squares, and k is the number of estimated "
+                "parameters. The corrected Akaike Information Criterion (AICc) was reported as "
+                "supporting information. These criteria were interpreted as measures of relative support "
+                "among the tested candidates and considered together with chemical plausibility and "
+                "spectral consistency. One shared residual variance term (σ²) was estimated for model "
+                "comparison and counted as one additional information-criteria parameter (k = p + 1). "
+                "A ΔBIC < 2 between the best and next-best model was flagged as weak discrimination."
+            ),
+        }
+    )
+
+    # 5. Uncertainty Quantification
+    bootstrap_note = (
+        f"Bootstrap uncertainty was evaluated using {args.bootstrap} iterations with "
+        f"{args.bootstrap_method} resampling. "
+        f"Bootstrap refits used a small log₁₀(K) start perturbation "
+        f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
+        "The 95% confidence interval was derived from the 2.5th and 97.5th percentiles of the "
+        "bootstrap distribution."
+        if args.bootstrap > 0
+        else "Bootstrap uncertainty was not evaluated in this analysis."
+    )
+    sections.append(
+        {
+            "title": "Uncertainty Quantification",
+            "content": bootstrap_note,
+        }
+    )
+
+    return sections
 
 
 def build_decisions(

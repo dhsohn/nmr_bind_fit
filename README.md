@@ -30,34 +30,28 @@ Multiple replicate files with shared binding constants:
 python -m nmrbindfit.cli --input data1.xlsx data2.xlsx --replicates
 ```
 
-If you see optimizer overflow warnings, constrain K:
-
-```
-python -m nmrbindfit.cli --input data.csv --k-min 1e0 --k-max 1e12
-```
-
-To keep partially missing ppm values and continue point-wise nonlinear solver failures:
-
-```
-python -m nmrbindfit.cli --input data.csv --missing-policy mask --solver-failure-mode continue
-```
+For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns
+with missing values are dropped before fitting, and point-wise nonlinear solver failures in
+1:2/2:1 models use fail-fast behavior. log10 K is constrained to [0, 12] (K in [1e0, 1e12]).
 
 ## Input Format
 
 CSV or XLSX with:
-- Host Conc. (total host concentration, M)
-- Guest Conc. (total guest concentration, M)
+- [H]t (total host concentration, M)
+- [G]t (total guest concentration, M)
 - one or more ppm columns (e.g., ppm, ppm_H1)
 
-Rows are dropped when host/guest values are missing. By default, if any ppm column contains
-missing values, that peak column is excluded while remaining peaks are retained. With
-`--missing-policy mask`, missing ppm entries are kept as masked values during fitting. The
-x-axis is always equivalents ([G]<sub>t</sub>/[H]<sub>t</sub>).
+The concentration column names are fixed and must be exactly `[H]t` and `[G]t`.
+
+Rows are dropped when host/guest values are missing. If any ppm column contains missing
+values, that peak column is excluded while remaining peaks are retained. Point-wise solver
+failures in 1:2/2:1 models use fail-fast behavior. The x-axis is always equivalents
+([G]<sub>t</sub>/[H]<sub>t</sub>).
 
 Example (CSV):
 
 ```
-Host Conc.,Guest Conc.,ppm_H1,ppm_H2
+[H]t,[G]t,ppm_H1,ppm_H2
 1.0e-3,0.0,7.10,8.22
 1.0e-3,2.5e-4,7.15,8.25
 1.0e-3,5.0e-4,7.20,8.28

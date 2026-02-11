@@ -1,4 +1,4 @@
-"""Plotting helpers."""
+"""Plotting helpers – publication-quality figures."""
 
 from __future__ import annotations
 
@@ -15,16 +15,43 @@ from .io import Dataset
 from .models import ModelSpec, predict_dataset, fraction_bound
 from .types import DatasetLike
 
+# ── Publication-quality defaults ──────────────────────────────────────────────
 matplotlib.rcParams.update(
     {
-        "font.family": "Arial",
-        "font.size": 8,
-        "axes.labelsize": 8,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
-        "legend.fontsize": 8,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "font.size": 10,
+        "axes.labelsize": 11,
+        "axes.titlesize": 11,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 9,
+        "axes.linewidth": 0.8,
+        "xtick.major.width": 0.6,
+        "ytick.major.width": 0.6,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "figure.dpi": 150,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.08,
     }
 )
+
+# Colour palette — muted academic style
+_CLR_DATA = "#2b2d42"
+_CLR_FIT = "#d90429"
+_CLR_ZERO = "#94a3b8"
+_CLR_HIST = "#334155"
+
+
+def _style_axes(ax: plt.Axes) -> None:
+    """Remove top/right spines and lighten remaining ones."""
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#64748b")
+    ax.spines["bottom"].set_color("#64748b")
+    ax.tick_params(colors="#475569")
 
 
 def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
@@ -49,8 +76,8 @@ def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
 
 def _save_figure(fig: plt.Figure, png_path: Path, pdf_path: Path) -> None:
     # Keep output format handling in one place.
-    fig.savefig(png_path, dpi=200)
-    fig.savefig(pdf_path)
+    fig.savefig(png_path, dpi=300, facecolor="white")
+    fig.savefig(pdf_path, facecolor="white")
     plt.close(fig)
 
 
@@ -92,12 +119,15 @@ def plot_isotherms(
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
 
     for i, peak in enumerate(ds.y_cols):
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.scatter(ds.x, ds.y[:, i], color="#2b2d42", label="data")
-        ax.plot(x_curve, y_curve[:, i], color="#d90429", label="fit")
-        ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
-        ax.set_ylabel("ppm")
-        ax.legend()
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
+                   label="Observed", edgecolors="white", linewidths=0.4)
+        ax.plot(x_curve, y_curve[:, i], color=_CLR_FIT, linewidth=1.6,
+                label="Fitted", zorder=2)
+        ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")
+        ax.set_ylabel(r"$\delta$ (ppm)")
+        ax.legend(frameon=False, loc="best")
+        _style_axes(ax)
         fig.tight_layout()
         png_path = out_dir / f"isotherm_{peak}.png"
         pdf_path = out_dir / f"isotherm_{peak}.pdf"
@@ -116,11 +146,13 @@ def plot_residuals(
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
     for i, peak in enumerate(ds.y_cols):
-        fig, ax = plt.subplots(figsize=(6, 3))
-        ax.axhline(0.0, color="#6c757d", linewidth=1)
-        ax.scatter(ds.x, residuals[:, i], color="#2b2d42")
-        ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
-        ax.set_ylabel("residual")
+        fig, ax = plt.subplots(figsize=(7, 3))
+        ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
+        ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
+                   edgecolors="white", linewidths=0.4)
+        ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")
+        ax.set_ylabel("Residual (ppm)")
+        _style_axes(ax)
         fig.tight_layout()
         png_path = out_dir / f"residual_{peak}.png"
         pdf_path = out_dir / f"residual_{peak}.pdf"
@@ -141,15 +173,17 @@ def plot_bootstrap_hist(
     if samples.size == 0:
         return files
     for i, name in enumerate(names):
-        fig, ax = plt.subplots(figsize=(5, 3))
-        ax.hist(samples[:, i], bins=20, color="#2b2d42", alpha=0.8)
-        ax.set_xlabel(name)
-        ax.set_ylabel("count")
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
+                edgecolor="white", linewidth=0.5)
+        ax.set_xlabel(f"$K$ ({name})" if name != "K" else "$K$")
+        ax.set_ylabel("Count")
+        _style_axes(ax)
         fig.tight_layout()
         png_path = out_dir / f"bootstrap_{name}.png"
         pdf_path = out_dir / f"bootstrap_{name}.pdf"
-        fig.savefig(png_path, dpi=200)
-        fig.savefig(pdf_path)
+        fig.savefig(png_path, dpi=300, facecolor="white")
+        fig.savefig(pdf_path, facecolor="white")
         plt.close(fig)
         files.extend([png_path, pdf_path])
     return files
@@ -167,11 +201,13 @@ def plot_fraction_bound(
         return []
     out_dir.mkdir(parents=True, exist_ok=True)
     f = _prepare_fraction_bound_values(model, ds, logk, delta)
-    fig, ax = plt.subplots(figsize=(6, 3))
-    ax.scatter(ds.x, f, color="#2b2d42")
-    ax.set_xlabel(r"[G]$_t$ / [H]$_t$")
-    ax.set_ylabel("fraction bound")
-    ax.set_ylim(0, 1.05)
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    ax.scatter(ds.x, f, color=_CLR_DATA, s=28, zorder=3,
+               edgecolors="white", linewidths=0.4)
+    ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")
+    ax.set_ylabel("Fraction Bound")
+    ax.set_ylim(-0.02, 1.05)
+    _style_axes(ax)
     fig.tight_layout()
     png_path = out_dir / "fraction_bound.png"
     pdf_path = out_dir / "fraction_bound.pdf"
