@@ -24,7 +24,7 @@ def _dataset(name: str, n_points: int, n_peaks: int) -> Dataset:
     )
 
 
-def test_information_criteria_uses_shared_variance_without_sigma_single_dataset():
+def test_information_criteria_uses_shared_variance_including_sigma_single_dataset():
     ds = _dataset("single", n_points=4, n_peaks=2)
     residuals = [np.array([[0.1, -0.2], [0.0, 0.3], [-0.1, 0.2], [0.05, -0.15]], dtype=float)]
     p = 5
@@ -39,7 +39,7 @@ def test_information_criteria_uses_shared_variance_without_sigma_single_dataset(
     np.testing.assert_allclose(aicc, expected_aicc)
 
 
-def test_information_criteria_uses_one_shared_variance_without_sigma_multiple_datasets():
+def test_information_criteria_uses_one_shared_variance_including_sigma_multiple_datasets():
     ds1 = _dataset("d1", n_points=3, n_peaks=1)
     ds2 = _dataset("d2", n_points=3, n_peaks=1)
     residuals = [

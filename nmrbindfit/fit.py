@@ -339,6 +339,7 @@ def _build_successful_fit_result(
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
+    max_nfev: int,
 ) -> FitResult:
     # Evaluate diagnostics/statistics and build the final successful FitResult.
     param_names = _param_names_multi(model, datasets)
@@ -372,6 +373,7 @@ def _build_successful_fit_result(
             seed=seed,
             logk_bounds=logk_bounds,
             logk_jitter=logk_jitter,
+            max_nfev=max_nfev,
         )
 
     return FitResult(
@@ -443,6 +445,7 @@ def fit_model(
         seed=seed,
         logk_bounds=logk_bounds,
         logk_jitter=logk_jitter,
+        max_nfev=max_nfev,
     )
 
 
@@ -560,6 +563,7 @@ def bootstrap_params(
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
+    max_nfev: int = 5000,
 ) -> BootstrapResult:
     """Run bootstrap refits and collect parameter samples."""
     # Refit the model on resampled datasets to estimate parameter dispersion.
@@ -585,7 +589,7 @@ def bootstrap_params(
                 model,
                 boot_datasets,
                 params0,
-                max_nfev=2000,
+                max_nfev=max_nfev,
                 bounds=bounds,
             )
         except Exception:

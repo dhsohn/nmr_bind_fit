@@ -313,7 +313,7 @@ def _build_summary_row(res, ds_label: str, display_name: str) -> Dict[str, str]:
     else:
         k_ci_low = np.percentile(k_samples, 2.5, axis=0)
         k_ci_high = np.percentile(k_samples, 97.5, axis=0)
-        boot_k_ci = ";".join(f"[{l:.6g}, {h:.6g}]" for l, h in zip(k_ci_low, k_ci_high))
+        boot_k_ci = ";".join(f"[{low:.6g}, {high:.6g}]" for low, high in zip(k_ci_low, k_ci_high))
         if k_samples.shape[0] > 1:
             boot_k_se_vals = [_safe_std(k_samples[:, i]) for i in range(k_samples.shape[1])]
             boot_k_se = ";".join(f"{v:.6g}" for v in boot_k_se_vals)
@@ -422,7 +422,8 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
         f"Bootstrap refits used a small logK start perturbation (std {args.bootstrap_logk_jitter:.3g} in log10 K). "
         "Model comparison used BIC as the primary ranking index and AICc as supporting information. These criteria "
         "were interpreted as relative support among tested candidates and considered together with chemical "
-        "plausibility and spectral consistency. One shared residual variance term was estimated for model comparison. "
+        "plausibility and spectral consistency. One shared residual variance term was estimated for model comparison "
+        "and counted as one additional information-criteria parameter (k = p + 1). "
         + replicate_note
         + bootstrap_note
     )

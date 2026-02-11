@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nmrbindfit.io import load_dataset
+from nmrbindfit.io import _compute_equivalents, load_dataset
 
 
 def test_load_dataset_drops_incomplete_ppm_column(tmp_path):
@@ -45,3 +45,32 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
 
     assert ds.n_points == 2
     assert ds.y.shape == (2, 1)
+
+
+def test_load_dataset_reads_xlsx(tmp_path):
+    pytest.importorskip("openpyxl")
+
+    path = tmp_path / "sample.xlsx"
+    df = pd.DataFrame(
+        {
+            "host": [1e-3, 1e-3, 1e-3],
+            "guest": [0.0, 5e-4, 1e-3],
+            "ppm1": [7.1, 7.2, 7.3],
+        }
+    )
+    df.to_excel(path, index=False)
+
+    ds = load_dataset(path, host_col="host", guest_col="guest", ppm_cols=["ppm1"])
+
+    assert ds.n_points == 3
+    assert ds.y.shape == (3, 1)
+    assert ds.y_cols == ["ppm1"]
+
+
+def test_compute_equivalents_is_defensive_for_zero_host_values():
+    h_tot = np.array([1e-3, 0.0], dtype=float)
+    g_tot = np.array([5e-4, 1e-3], dtype=float)
+
+    out = _compute_equivalents(h_tot, g_tot)
+
+    np.testing.assert_allclose(out, np.array([0.5, 0.0], dtype=float))

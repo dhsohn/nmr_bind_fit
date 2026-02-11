@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
@@ -12,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from .io import Dataset
 from .models import ModelSpec, predict_dataset, fraction_bound
 from .types import DatasetLike
 
@@ -27,27 +27,6 @@ matplotlib.rcParams.update(
 )
 
 
-@dataclass
-class _GridDataset:
-    # Lightweight dataset shape used only for plotting model curves.
-    name: str
-    path: Path
-    h_tot: np.ndarray
-    g_tot: np.ndarray
-    x: np.ndarray
-    y: np.ndarray
-    y_cols: List[str]
-    dropped_peaks: List[str]
-
-    @property
-    def n_points(self) -> int:
-        return int(self.y.shape[0])
-
-    @property
-    def n_peaks(self) -> int:
-        return int(self.y.shape[1])
-
-
 def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
     # Create a dense grid of equivalents for smooth fit curves.
     eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
@@ -56,7 +35,7 @@ def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
     g_vals = eq_vals * h_ref
     x_vals = eq_vals
 
-    return _GridDataset(
+    return Dataset(
         name=ds.name,
         path=ds.path,
         h_tot=h_vals,
