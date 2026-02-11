@@ -47,6 +47,32 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
     assert ds.y.shape == (2, 1)
 
 
+def test_load_dataset_masks_missing_ppm_values_when_requested(tmp_path):
+    path = tmp_path / "sample.csv"
+    df = pd.DataFrame(
+        {
+            "host": [1e-3, 1e-3, 1e-3],
+            "guest": [0.0, 5e-4, 1e-3],
+            "ppm1": [7.1, np.nan, 7.3],
+            "ppm2": [8.1, 8.2, 8.3],
+        }
+    )
+    df.to_csv(path, index=False)
+
+    ds = load_dataset(
+        path,
+        host_col="host",
+        guest_col="guest",
+        ppm_cols=["ppm1", "ppm2"],
+        missing_policy="mask",
+    )
+
+    assert ds.y_cols == ["ppm1", "ppm2"]
+    assert ds.dropped_peaks == []
+    assert ds.y.shape == (3, 2)
+    assert np.isnan(ds.y[1, 0])
+
+
 def test_load_dataset_reads_xlsx(tmp_path):
     pytest.importorskip("openpyxl")
 

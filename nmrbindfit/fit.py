@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import itertools
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import OptimizeResult, least_squares
 
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
@@ -44,6 +44,21 @@ class FitResult:
     species: List
     residuals: List[np.ndarray]
     bootstrap: Optional[BootstrapResult]
+    penalty_count: int
+
+
+_NUMERIC_EXCEPTIONS = (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
+
+
+def _residual_penalty_scale(y: np.ndarray) -> float:
+    vals = np.asarray(y, dtype=float)
+    finite = vals[np.isfinite(vals)]
+    if finite.size == 0:
+        return 1e3
+    scale = float(np.max(np.abs(finite)))
+    if not np.isfinite(scale) or scale <= 0:
+        scale = 1.0
+    return float(scale * 1e3)
 
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
@@ -99,25 +114,40 @@ def _residual_vector(
     params: np.ndarray,
     model: ModelSpec,
     datasets: List[Dataset],
+    solver_failure_mode: str = "fail-fast",
+    penalty_counter: Optional[Dict[str, int]] = None,
 ) -> np.ndarray:
     """Return concatenated residuals used by least_squares."""
     logk, deltas = split_params_multi(params, model, datasets)
     residuals = []
     for ds, delta in zip(datasets, deltas):
-        try:
-            y_pred, _ = predict_dataset(model, ds, logk, delta)
-        except Exception:
-            # Penalize solver failures so they are not selected as best fits.
-            res = np.full_like(ds.y, 1e6)
-            residuals.append(res.ravel())
+        valid_mask = np.isfinite(ds.y)
+        n_valid = int(np.count_nonzero(valid_mask))
+        if n_valid == 0:
             continue
-        if not np.all(np.isfinite(y_pred)):
-            res = np.full_like(ds.y, 1e6)
-        else:
-            res = ds.y - y_pred
-            if not np.all(np.isfinite(res)):
-                res = np.full_like(ds.y, 1e6)
-        residuals.append(res.ravel())
+        penalty = np.full((n_valid,), _residual_penalty_scale(ds.y), dtype=float)
+        try:
+            y_pred, _ = predict_dataset(model, ds, logk, delta, solver_failure_mode=solver_failure_mode)
+        except _NUMERIC_EXCEPTIONS:
+            if penalty_counter is not None:
+                penalty_counter["count"] = penalty_counter.get("count", 0) + 1
+            residuals.append(penalty)
+            continue
+        if not np.all(np.isfinite(y_pred[valid_mask])):
+            if penalty_counter is not None:
+                penalty_counter["count"] = penalty_counter.get("count", 0) + 1
+            residuals.append(penalty)
+            continue
+        res = ds.y - y_pred
+        res_valid = res[valid_mask]
+        if not np.all(np.isfinite(res_valid)):
+            if penalty_counter is not None:
+                penalty_counter["count"] = penalty_counter.get("count", 0) + 1
+            residuals.append(penalty)
+            continue
+        residuals.append(res_valid.ravel())
+    if not residuals:
+        return np.array([], dtype=float)
     return np.concatenate(residuals)
 
 
@@ -125,6 +155,7 @@ def _predict_all(
     params: np.ndarray,
     model: ModelSpec,
     datasets: List[Dataset],
+    solver_failure_mode: str = "fail-fast",
 ) -> Tuple[List[np.ndarray], List, List[np.ndarray]]:
     """Predict shifts and residuals on the original ppm scale."""
     # Run model prediction for each dataset and keep raw residuals.
@@ -133,10 +164,10 @@ def _predict_all(
     species_list = []
     residuals = []
     for ds, delta in zip(datasets, deltas):
-        y_pred, species = predict_dataset(model, ds, logk, delta)
+        y_pred, species = predict_dataset(model, ds, logk, delta, solver_failure_mode=solver_failure_mode)
         y_pred_list.append(y_pred)
         species_list.append(species)
-        residuals.append(ds.y - y_pred)
+        residuals.append(np.where(np.isfinite(ds.y), ds.y - y_pred, np.nan))
     return y_pred_list, species_list, residuals
 
 
@@ -144,7 +175,7 @@ def _rss_value(residuals: List[np.ndarray]) -> float:
     """Return residual sum of squares."""
     rss = 0.0
     for res in residuals:
-        rss += float(np.sum(res**2))
+        rss += float(np.nansum(res**2))
     return rss
 
 
@@ -154,8 +185,13 @@ def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> float:
     y_all = []
     y_pred_all = []
     for ds, y_pred in zip(datasets, y_pred_list):
-        y_all.append(ds.y.ravel())
-        y_pred_all.append(y_pred.ravel())
+        mask = np.isfinite(ds.y) & np.isfinite(y_pred)
+        if not np.any(mask):
+            continue
+        y_all.append(ds.y[mask].ravel())
+        y_pred_all.append(y_pred[mask].ravel())
+    if not y_all:
+        return float("nan")
     y_all = np.concatenate(y_all)
     y_pred_all = np.concatenate(y_pred_all)
     ss_res = np.sum((y_all - y_pred_all) ** 2)
@@ -171,11 +207,23 @@ def _fit_with_initial(
     params0: np.ndarray,
     max_nfev: int,
     bounds: Tuple[np.ndarray, np.ndarray],
-) -> Tuple[np.ndarray, least_squares]:
+    solver_failure_mode: str = "fail-fast",
+) -> Tuple[np.ndarray, OptimizeResult]:
     """Run least_squares for one initialization."""
     # Use bounded trust-region least squares on concatenated residuals.
+    penalty_counter: Dict[str, int] = {"count": 0}
+
+    def residual_fn(current_params: np.ndarray, current_model: ModelSpec, current_datasets: List[Dataset]) -> np.ndarray:
+        return _residual_vector(
+            current_params,
+            current_model,
+            current_datasets,
+            solver_failure_mode=solver_failure_mode,
+            penalty_counter=penalty_counter,
+        )
+
     res = least_squares(
-        _residual_vector,
+        residual_fn,
         params0,
         args=(model, datasets),
         method="trf",
@@ -183,6 +231,7 @@ def _fit_with_initial(
         x_scale="jac",
         bounds=bounds,
     )
+    setattr(res, "penalty_count", int(penalty_counter.get("count", 0)))
     return res.x, res
 
 
@@ -204,7 +253,7 @@ def _param_bounds(
 
 def _total_observations(datasets: List[Dataset]) -> int:
     # Count total scalar observations across all datasets and peaks.
-    return int(sum(ds.n_points * ds.n_peaks for ds in datasets))
+    return int(sum(np.count_nonzero(np.isfinite(ds.y)) for ds in datasets))
 
 
 def _failed_fit_result(
@@ -238,6 +287,7 @@ def _failed_fit_result(
         species=species if species is not None else [],
         residuals=[],
         bootstrap=None,
+        penalty_count=0,
     )
 
 
@@ -247,7 +297,8 @@ def _select_best_multistart(
     logk_grid: Sequence[Tuple[float, ...]],
     max_nfev: int,
     logk_bounds: Optional[Tuple[float, float]],
-) -> Tuple[Optional[np.ndarray], Optional[least_squares]]:
+    solver_failure_mode: str = "fail-fast",
+) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
     # Prefer converged starts and keep best failure only as fallback diagnostics.
     best_success_params = None
     best_success_res = None
@@ -259,9 +310,12 @@ def _select_best_multistart(
     for logk_vals in logk_grid:
         params0 = _build_initial_params(model, datasets, logk_vals)
         bounds = _param_bounds(params0, model, logk_bounds)
+        fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
+        if solver_failure_mode != "fail-fast":
+            fit_kwargs["solver_failure_mode"] = solver_failure_mode
         try:
-            params, res = _fit_with_initial(model, datasets, params0, max_nfev=max_nfev, bounds=bounds)
-        except Exception:
+            params, res = _fit_with_initial(model, datasets, params0, **fit_kwargs)
+        except _NUMERIC_EXCEPTIONS:
             continue
         rss = float(np.sum(res.fun**2))
         if bool(getattr(res, "success", False)):
@@ -333,18 +387,24 @@ def _build_successful_fit_result(
     model: ModelSpec,
     datasets: List[Dataset],
     best_params: np.ndarray,
-    best_res: least_squares,
+    best_res: OptimizeResult,
     bootstrap: int,
     bootstrap_method: str,
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
     max_nfev: int,
+    solver_failure_mode: str,
 ) -> FitResult:
     # Evaluate diagnostics/statistics and build the final successful FitResult.
     param_names = _param_names_multi(model, datasets)
-    y_pred_list, species_list, residuals = _predict_all(best_params, model, datasets)
-    if not all(np.all(np.isfinite(y_pred)) for y_pred in y_pred_list):
+    y_pred_list, species_list, residuals = _predict_all(
+        best_params,
+        model,
+        datasets,
+        solver_failure_mode=solver_failure_mode,
+    )
+    if not all(np.all(np.isfinite(y_pred[np.isfinite(ds.y)])) for ds, y_pred in zip(datasets, y_pred_list)):
         return _failed_fit_result(
             model=model,
             datasets=datasets,
@@ -374,6 +434,7 @@ def _build_successful_fit_result(
             logk_bounds=logk_bounds,
             logk_jitter=logk_jitter,
             max_nfev=max_nfev,
+            solver_failure_mode=solver_failure_mode,
         )
 
     return FitResult(
@@ -395,6 +456,7 @@ def _build_successful_fit_result(
         species=species_list,
         residuals=residuals,
         bootstrap=bootstrap_result,
+        penalty_count=int(getattr(best_res, "penalty_count", 0)),
     )
 
 
@@ -408,6 +470,7 @@ def fit_model(
     seed: Optional[int] = None,
     logk_bounds: Optional[Tuple[float, float]] = None,
     logk_jitter: float = 0.1,
+    solver_failure_mode: str = "fail-fast",
 ) -> FitResult:
     """Fit one model to one or multiple datasets with multistart logK."""
     model = MODEL_SPECS[model_name]
@@ -419,6 +482,7 @@ def fit_model(
         logk_grid,
         max_nfev=max_nfev,
         logk_bounds=logk_bounds,
+        solver_failure_mode=solver_failure_mode,
     )
 
     if best_params is None or best_res is None:
@@ -446,6 +510,7 @@ def fit_model(
         logk_bounds=logk_bounds,
         logk_jitter=logk_jitter,
         max_nfev=max_nfev,
+        solver_failure_mode=solver_failure_mode,
     )
 
 
@@ -458,9 +523,13 @@ def _residual_bootstrap(
     """Residual bootstrap by resampling centered residuals."""
     # Resample residuals by index to preserve autocorrelation structure.
     idx = rng.integers(0, ds.n_points, size=ds.n_points)
-    centered = residuals - np.mean(residuals, axis=0, keepdims=True)
+    col_means = np.nanmean(residuals, axis=0, keepdims=True)
+    col_means = np.where(np.isfinite(col_means), col_means, 0.0)
+    centered = residuals - col_means
+    centered[~np.isfinite(centered)] = 0.0
     resampled = centered[idx, :]
     y_boot = y_pred + resampled
+    y_boot[~np.isfinite(ds.y)] = np.nan
     return Dataset(
         name=ds.name,
         path=ds.path,
@@ -481,10 +550,11 @@ def _parametric_bootstrap(
 ) -> Dataset:
     """Parametric bootstrap using Gaussian noise estimated from residuals."""
     # Inject Gaussian noise using per-peak residual standard deviation.
-    scale = np.std(residuals, axis=0, ddof=1)
+    scale = np.nanstd(residuals, axis=0, ddof=1)
     scale = np.where(np.isfinite(scale), scale, 0.0)
     noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
     y_boot = y_pred + noise
+    y_boot[~np.isfinite(ds.y)] = np.nan
     return Dataset(
         name=ds.name,
         path=ds.path,
@@ -547,11 +617,34 @@ def _jitter_bootstrap_start(
     return params0
 
 
-def _accept_bootstrap_fit(params_fit: np.ndarray, res: least_squares) -> bool:
+def _accept_bootstrap_fit(
+    params_fit: np.ndarray,
+    res: OptimizeResult,
+    model: ModelSpec,
+    datasets: List[Dataset],
+    solver_failure_mode: str = "fail-fast",
+) -> bool:
     # Count only converged refits with finite parameter vectors.
     if not bool(getattr(res, "success", False)):
         return False
-    return bool(np.all(np.isfinite(params_fit)))
+    if not bool(np.all(np.isfinite(params_fit))):
+        return False
+    try:
+        y_pred_list, _, _ = _predict_all(
+            params_fit,
+            model,
+            datasets,
+            solver_failure_mode=solver_failure_mode,
+        )
+    except _NUMERIC_EXCEPTIONS:
+        return False
+    for ds, y_pred in zip(datasets, y_pred_list):
+        valid_mask = np.isfinite(ds.y)
+        if not np.any(valid_mask):
+            return False
+        if not np.all(np.isfinite(y_pred[valid_mask])):
+            return False
+    return True
 
 
 def bootstrap_params(
@@ -564,6 +657,7 @@ def bootstrap_params(
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
     max_nfev: int = 5000,
+    solver_failure_mode: str = "fail-fast",
 ) -> BootstrapResult:
     """Run bootstrap refits and collect parameter samples."""
     # Refit the model on resampled datasets to estimate parameter dispersion.
@@ -572,7 +666,12 @@ def bootstrap_params(
     n_success = 0
     logk_jitter = float(logk_jitter)
 
-    y_pred_list, species_list, residuals = _predict_all(params, model, datasets)
+    y_pred_list, _, residuals = _predict_all(
+        params,
+        model,
+        datasets,
+        solver_failure_mode=solver_failure_mode,
+    )
 
     for _ in range(n_boot):
         # Resample each dataset consistently across peaks.
@@ -584,17 +683,25 @@ def bootstrap_params(
         # Small random perturbations reduce local-minimum bias.
         params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
         bounds = _param_bounds(params0, model, logk_bounds)
+        fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
+        if solver_failure_mode != "fail-fast":
+            fit_kwargs["solver_failure_mode"] = solver_failure_mode
         try:
             params_fit, res = _fit_with_initial(
                 model,
                 boot_datasets,
                 params0,
-                max_nfev=max_nfev,
-                bounds=bounds,
+                **fit_kwargs,
             )
-        except Exception:
+        except _NUMERIC_EXCEPTIONS:
             continue
-        if not _accept_bootstrap_fit(params_fit, res):
+        if not _accept_bootstrap_fit(
+            params_fit,
+            res,
+            model,
+            boot_datasets,
+            solver_failure_mode=solver_failure_mode,
+        ):
             continue
         param_samples.append(params_fit)
         n_success += 1
@@ -656,6 +763,7 @@ def fit_models(
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
+    solver_failure_mode: str = "fail-fast",
 ) -> List[FitResult]:
     """Fit all requested models, optionally as simultaneous replicates."""
     results = []
@@ -673,6 +781,7 @@ def fit_models(
                     seed=seed,
                     logk_bounds=logk_bounds,
                     logk_jitter=logk_jitter,
+                    solver_failure_mode=solver_failure_mode,
                 )
             except Exception as exc:
                 result = _exception_failure_result(model_name, datasets, exc)
@@ -691,6 +800,7 @@ def fit_models(
                         seed=seed,
                         logk_bounds=logk_bounds,
                         logk_jitter=logk_jitter,
+                        solver_failure_mode=solver_failure_mode,
                     )
                 except Exception as exc:
                     result = _exception_failure_result(model_name, [ds], exc)

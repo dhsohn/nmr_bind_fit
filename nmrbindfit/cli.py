@@ -8,7 +8,7 @@ import glob
 from datetime import datetime
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -16,6 +16,7 @@ from .fit import fit_models
 from .io import load_datasets
 from .report import write_decision_txt, write_report_html, write_summary_csv
 from .report_pipeline import build_decisions, build_methods_text, build_report_artifacts
+from .types import DatasetLike, FitResultLike
 
 
 MODEL_LABELS = {
@@ -75,7 +76,7 @@ def _auto_output_dir(paths: List[Path]) -> Path:
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
 
-def _build_dataset_labels(datasets: List[object]) -> Dict[int, str]:
+def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
     # Build collision-free labels so same-stem files do not overwrite each other.
     labels = [str(getattr(ds, "name", "dataset")) for ds in datasets]
     counts = Counter(labels)
@@ -110,11 +111,11 @@ def _build_dataset_labels(datasets: List[object]) -> Dict[int, str]:
     return {id(ds): label for ds, label in zip(datasets, deduped)}
 
 
-def _dataset_key(result, dataset_labels: Dict[int, str]) -> str:
+def _dataset_key(result: FitResultLike, dataset_labels: Dict[int, str]) -> str:
     # Normalize dataset key for grouping summaries.
     if len(result.datasets) == 1:
         ds = result.datasets[0]
-        return dataset_labels.get(id(ds), ds.name)
+        return dataset_labels.get(id(ds), ds.name) or ds.name
     return "Simultaneous Fitting"
 
 
@@ -139,11 +140,11 @@ def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optiona
 
 
 def _index_results(
-    results: List[object],
+    results: Sequence[FitResultLike],
     dataset_labels: Dict[int, str],
-) -> Tuple[List[str], Dict[str, Dict[str, object]], Dict[str, List[Tuple[str, str]]]]:
+) -> Tuple[List[str], Dict[str, Dict[str, FitResultLike]], Dict[str, List[Tuple[str, str]]]]:
     # Build ordered successful result map and per-dataset failure list.
-    results_by_key: Dict[str, Dict[str, object]] = {}
+    results_by_key: Dict[str, Dict[str, FitResultLike]] = {}
     failures_by_key: Dict[str, List[Tuple[str, str]]] = {}
     ordered_keys: List[str] = []
     for res in results:
@@ -170,6 +171,7 @@ def run_fit(args: argparse.Namespace) -> None:
         host_col=args.host_col,
         guest_col=args.guest_col,
         ppm_cols=args.ppm_cols,
+        missing_policy=args.missing_policy,
     )
     dataset_labels = _build_dataset_labels(datasets)
 
@@ -189,6 +191,7 @@ def run_fit(args: argparse.Namespace) -> None:
         seed=args.seed,
         logk_bounds=logk_bounds,
         logk_jitter=args.bootstrap_logk_jitter,
+        solver_failure_mode=args.solver_failure_mode,
     )
 
     # Prepare output directory for reports and plots.
@@ -244,6 +247,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host-col", default=None, help="Host concentration column")
     parser.add_argument("--guest-col", default=None, help="Guest concentration column")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
+    parser.add_argument(
+        "--missing-policy",
+        choices=["drop-column", "mask"],
+        default="drop-column",
+        help="Handling strategy for missing ppm values",
+    )
     parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
     parser.add_argument(
@@ -259,6 +268,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--replicates",
         action="store_true",
         help="Fit replicate inputs with shared binding constants",
+    )
+    parser.add_argument(
+        "--solver-failure-mode",
+        choices=["fail-fast", "continue"],
+        default="fail-fast",
+        help="Per-point solver failure behavior for 1:2 and 2:1 models",
     )
     parser.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")

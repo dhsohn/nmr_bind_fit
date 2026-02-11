@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Callable, Optional, Tuple
 
@@ -28,6 +28,13 @@ class SolverStats:
     fallback_success: int = 0
     fallback_fail: int = 0
     fallback_method: str = "bisection"
+    failed_indices: list[int] = field(default_factory=list)
+
+
+def _normalize_failure_mode(failure_mode: str) -> str:
+    if failure_mode not in {"fail-fast", "continue"}:
+        raise ValueError("failure_mode must be one of: fail-fast, continue")
+    return failure_mode
 
 
 def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
@@ -366,8 +373,10 @@ def solve_12(
     g_tot: np.ndarray,
     k1: float,
     k2: float,
+    failure_mode: str = "fail-fast",
 ) -> SpeciesResult:
     """Solve 1:2 binding across all points; aborts on the first failure."""
+    mode = _normalize_failure_mode(failure_mode)
     h_tot = np.asarray(h_tot, dtype=float)
     g_tot = np.asarray(g_tot, dtype=float)
     h = np.full_like(h_tot, np.nan)
@@ -383,6 +392,9 @@ def solve_12(
         try:
             h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
         except RuntimeError:
+            stats.failed_indices.append(i)
+            if mode == "continue":
+                continue
             break
         h[i] = h_i
         g[i] = g_i
@@ -398,8 +410,10 @@ def solve_21(
     g_tot: np.ndarray,
     k1: float,
     k2: float,
+    failure_mode: str = "fail-fast",
 ) -> SpeciesResult:
     """Solve 2:1 binding across all points; aborts on the first failure."""
+    mode = _normalize_failure_mode(failure_mode)
     h_tot = np.asarray(h_tot, dtype=float)
     g_tot = np.asarray(g_tot, dtype=float)
     h = np.full_like(h_tot, np.nan)
@@ -415,6 +429,9 @@ def solve_21(
         try:
             h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
         except RuntimeError:
+            stats.failed_indices.append(i)
+            if mode == "continue":
+                continue
             break
         h[i] = h_i
         g[i] = g_i

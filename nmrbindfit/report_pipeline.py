@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
-from .models import split_params_multi
+from .models import ModelSpec, split_params_multi
 from .plots import plot_bootstrap_hist, plot_fraction_bound, plot_isotherms, plot_residuals
 from .report import DecisionEntry, ModelEntry, ParamEntry
+from .types import DatasetLike, FitResultLike, SpeciesLike
 
 
 SUMMARY_LABELS = {
@@ -32,6 +33,7 @@ STATS_LABELS = {
     "RMSE": "Root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
+    "penalty_events": "Optimization penalty events",
 }
 
 
@@ -71,18 +73,29 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
     return values[mask]
 
 
+def _as_int(value: object) -> int:
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
 def _safe_path_token(value: str) -> str:
     # Sanitize free-form labels before using them as directory names.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
     return safe or "dataset"
 
 
-def _replicate_dataset_dir_labels(datasets: Sequence[object]) -> List[str]:
+def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
     labels: List[str] = []
     for idx, ds in enumerate(datasets, start=1):
-        base = str(getattr(ds, "name", f"dataset_{idx}"))
-        path = getattr(ds, "path", None)
+        base = str(ds.name or f"dataset_{idx}")
+        path = ds.path
         if path is not None:
             filename = Path(path).name
             if filename and filename != base:
@@ -91,12 +104,12 @@ def _replicate_dataset_dir_labels(datasets: Sequence[object]) -> List[str]:
     return labels
 
 
-def _format_dropped_peaks(datasets: Sequence[object]) -> str:
+def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
     # Format dropped ppm columns for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
-        dropped_peaks = getattr(ds, "dropped_peaks", [])
+        dropped_peaks = ds.dropped_peaks
         if dropped_peaks:
             cols = ", ".join(dropped_peaks)
             if multi:
@@ -108,7 +121,7 @@ def _format_dropped_peaks(datasets: Sequence[object]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, object]]:
+def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[str, object]]:
     # Combine solver statistics across species lists.
     totals = {
         "solver_points": 0,
@@ -121,17 +134,17 @@ def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, o
     }
     found = False
     for species in species_list:
-        stats = getattr(species, "solver_stats", None)
+        stats = species.solver_stats
         if stats is None:
             continue
         found = True
-        totals["solver_points"] += int(getattr(stats, "points", 0))
-        totals["solver_newton_success"] += int(getattr(stats, "newton_success", 0))
-        totals["solver_newton_fail"] += int(getattr(stats, "newton_fail", 0))
-        totals["solver_newton_max_iter"] += int(getattr(stats, "newton_max_iter", 0))
-        totals["solver_fallback_success"] += int(getattr(stats, "fallback_success", 0))
-        totals["solver_fallback_fail"] += int(getattr(stats, "fallback_fail", 0))
-        method = getattr(stats, "fallback_method", None)
+        totals["solver_points"] += int(stats.points)
+        totals["solver_newton_success"] += int(stats.newton_success)
+        totals["solver_newton_fail"] += int(stats.newton_fail)
+        totals["solver_newton_max_iter"] += int(stats.newton_max_iter)
+        totals["solver_fallback_success"] += int(stats.fallback_success)
+        totals["solver_fallback_fail"] += int(stats.fallback_fail)
+        method = stats.fallback_method
         if method:
             totals["solver_fallback_method"].add(str(method))
     if not found:
@@ -141,7 +154,7 @@ def _accumulate_solver_stats(species_list: List[object]) -> Optional[Dict[str, o
     return totals
 
 
-def _build_param_entries(res) -> List[ParamEntry]:
+def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     # Convert fitted parameters into report entries and optional bootstrap SE.
     bootstrap_samples = None
     if res.bootstrap is not None and res.bootstrap.param_samples.size > 0:
@@ -175,7 +188,7 @@ def _build_param_entries(res) -> List[ParamEntry]:
     return params
 
 
-def _collect_plot_paths(res, model_name: str, ds_label: str, out_dir: Path) -> List[str]:
+def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_dir: Path) -> List[str]:
     # Write model plots and return PNG paths relative to output root.
     model_dir = out_dir / f"model_{model_name}"
     if len(res.datasets) > 1:
@@ -184,14 +197,15 @@ def _collect_plot_paths(res, model_name: str, ds_label: str, out_dir: Path) -> L
 
     plot_paths: List[str] = []
     replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
-    logk, deltas = split_params_multi(res.params, res.model, res.datasets)
+    model_spec = cast(ModelSpec, res.model)
+    logk, deltas = split_params_multi(res.params, model_spec, res.datasets)
     for idx, (ds, delta, residual) in enumerate(zip(res.datasets, deltas, res.residuals)):
         ds_dir = model_dir
         if len(res.datasets) > 1:
             ds_dir = model_dir / f"dataset_{replicate_dir_labels[idx]}"
-        isotherm_files = plot_isotherms(res.model, ds, logk, delta, ds_dir)
-        residual_files = plot_residuals(res.model, ds, residual, ds_dir)
-        frac_files = plot_fraction_bound(res.model, ds, logk, delta, ds_dir)
+        isotherm_files = plot_isotherms(model_spec, ds, logk, delta, ds_dir)
+        residual_files = plot_residuals(model_spec, ds, residual, ds_dir)
+        frac_files = plot_fraction_bound(model_spec, ds, logk, delta, ds_dir)
         for path in isotherm_files + residual_files + frac_files:
             if path.suffix.lower() == ".png":
                 plot_paths.append(str(path.relative_to(out_dir)))
@@ -222,7 +236,7 @@ def _collect_plot_paths(res, model_name: str, ds_label: str, out_dir: Path) -> L
     return plot_paths
 
 
-def _bootstrap_k_samples(res) -> np.ndarray:
+def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
     # Return finite bootstrap K samples (linear scale) for warnings and summary.
     if res.bootstrap is None or res.model.n_logk == 0 or res.bootstrap.param_samples.size == 0:
         return np.full((0, res.model.n_logk), np.nan)
@@ -230,7 +244,7 @@ def _bootstrap_k_samples(res) -> np.ndarray:
     return _filter_finite_rows(k_samples)
 
 
-def _solver_stats_for_result(res) -> Optional[Dict[str, object]]:
+def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
@@ -248,7 +262,11 @@ def _solver_stats_for_result(res) -> Optional[Dict[str, object]]:
     return solver_stats
 
 
-def _build_model_warnings(args: argparse.Namespace, res, solver_stats: Optional[Dict[str, object]]) -> List[str]:
+def _build_model_warnings(
+    args: argparse.Namespace,
+    res: FitResultLike,
+    solver_stats: Optional[Dict[str, object]],
+) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
 
@@ -268,22 +286,38 @@ def _build_model_warnings(args: argparse.Namespace, res, solver_stats: Optional[
         if n_fail > 0:
             warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
 
+    if res.penalty_count > 0:
+        warnings.append(f"optimization penalty residual events: {res.penalty_count}")
+
     if solver_stats is not None and solver_stats.get("solver_fallback_fail", 0) not in {"N/A", None}:
-        n_fail = int(solver_stats.get("solver_fallback_fail", 0))
-        n_points = int(solver_stats.get("solver_points", 0))
+        n_fail = _as_int(solver_stats.get("solver_fallback_fail", 0))
+        n_points = _as_int(solver_stats.get("solver_points", 0))
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver fallback failures ({n_fail}/{n_points})")
+
+    for ds, species in zip(res.datasets, res.species):
+        stats = species.solver_stats
+        if stats is None:
+            continue
+        failed_indices = list(stats.failed_indices)
+        if not failed_indices:
+            continue
+        preview = ", ".join(str(idx) for idx in failed_indices[:10])
+        if len(failed_indices) > 10:
+            preview = f"{preview}, ..."
+        warnings.append(f"{ds.name}: solver-failed points [{preview}]")
 
     return warnings
 
 
-def _build_stats_dict(res, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
     # Build stats block for report tables.
     stats_base = {
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
         "BIC": f"{res.bic:.6g}",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
+        "penalty_events": str(res.penalty_count),
     }
     if solver_stats is not None:
         stats_base.update(
@@ -300,7 +334,7 @@ def _build_stats_dict(res, solver_stats: Optional[Dict[str, object]]) -> Dict[st
     return {_label_stats_key(k): v for k, v in stats_base.items()}
 
 
-def _build_summary_row(res, ds_label: str, display_name: str) -> Dict[str, str]:
+def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> Dict[str, str]:
     # Build one row for summary.csv.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
@@ -338,7 +372,7 @@ def _build_model_entry(
     args: argparse.Namespace,
     key: str,
     model_name: str,
-    res,
+    res: FitResultLike,
     out_dir: Path,
     display_model_name: Callable[[str], str],
 ) -> Tuple[ModelEntry, Dict[str, str]]:
@@ -364,7 +398,7 @@ def _build_model_entry(
 def build_report_artifacts(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, object]],
+    results_by_key: Dict[str, Dict[str, FitResultLike]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     out_dir: Path,
     display_model_name: Callable[[str], str],
@@ -375,7 +409,7 @@ def build_report_artifacts(
     report_warnings: List[str] = []
 
     for key in ordered_keys:
-        model_map = results_by_key.get(key, {})
+        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
@@ -398,7 +432,7 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> str:
+def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> str:
     # Build static methods narrative with runtime bootstrap/replicate notes.
     bootstrap_note = (
         f"Bootstrap uncertainty was evaluated with {args.bootstrap} iterations using "
@@ -412,6 +446,16 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
             "Replicate datasets were fit simultaneously with shared binding constants and "
             "replicate-specific chemical shifts. "
         )
+    missing_note = (
+        "Missing ppm values were handled by masking missing entries in residual calculations. "
+        if args.missing_policy == "mask"
+        else "ppm columns containing missing values were dropped before fitting. "
+    )
+    solver_mode_note = (
+        "For 1:2 and 2:1 models, per-point solver failures were handled in continue mode and reported by index. "
+        if args.solver_failure_mode == "continue"
+        else "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior. "
+    )
     return (
         "NMR chemical shift titration data were interpreted under a fast-exchange assumption, with observed "
         "host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries "
@@ -425,6 +469,8 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
         "plausibility and spectral consistency. One shared residual variance term was estimated for model comparison "
         "and counted as one additional information-criteria parameter (k = p + 1). "
         + replicate_note
+        + missing_note
+        + solver_mode_note
         + bootstrap_note
     )
 
@@ -432,7 +478,7 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[object]) -> 
 def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, object]],
+    results_by_key: Dict[str, Dict[str, FitResultLike]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     display_model_name: Callable[[str], str],
 ) -> Tuple[List[str], List[DecisionEntry]]:
@@ -441,7 +487,7 @@ def build_decisions(
     decision_entries: List[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = results_by_key.get(key, {})
+        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         bic_sorted = sorted(model_map.values(), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")

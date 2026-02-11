@@ -36,6 +36,12 @@ If you see optimizer overflow warnings, constrain K:
 python -m nmrbindfit.cli --input data.csv --k-min 1e0 --k-max 1e12
 ```
 
+To keep partially missing ppm values and continue point-wise nonlinear solver failures:
+
+```
+python -m nmrbindfit.cli --input data.csv --missing-policy mask --solver-failure-mode continue
+```
+
 ## Input Format
 
 CSV or XLSX with:
@@ -43,8 +49,10 @@ CSV or XLSX with:
 - Guest Conc. (total guest concentration, M)
 - one or more ppm columns (e.g., ppm, ppm_H1)
 
-Rows are dropped when host/guest values are missing. If any ppm column contains missing
-values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents ([G]<sub>t</sub>/[H]<sub>t</sub>).
+Rows are dropped when host/guest values are missing. By default, if any ppm column contains
+missing values, that peak column is excluded while remaining peaks are retained. With
+`--missing-policy mask`, missing ppm entries are kept as masked values during fitting. The
+x-axis is always equivalents ([G]<sub>t</sub>/[H]<sub>t</sub>).
 
 Example (CSV):
 

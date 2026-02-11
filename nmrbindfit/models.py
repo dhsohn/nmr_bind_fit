@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import numpy as np
 
@@ -82,7 +82,7 @@ def split_params(
 def split_params_multi(
     params: np.ndarray,
     model: ModelSpec,
-    datasets: List[DatasetLike],
+    datasets: Sequence[DatasetLike],
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     # Walk the parameter vector across datasets for replicate fits.
     logk = params[: model.n_logk]
@@ -105,17 +105,23 @@ def _weights_11(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
 
 def _weights_12(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
     # Host-based fractions for host resonances under fast exchange.
+    hg2 = species.hg2
+    if hg2 is None:
+        raise ValueError("1:2 species populations are missing HG2.")
     w_h = species.h / h_tot
     w_hg = species.hg / h_tot
-    w_hg2 = species.hg2 / h_tot
+    w_hg2 = hg2 / h_tot
     return np.vstack([w_h, w_hg, w_hg2]).T
 
 
 def _weights_21(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
     # H2G contributes two host units, so its weight is doubled.
+    h2g = species.h2g
+    if h2g is None:
+        raise ValueError("2:1 species populations are missing H2G.")
     w_h = species.h / h_tot
     w_hg = species.hg / h_tot
-    w_h2g = (2.0 * species.h2g) / h_tot
+    w_h2g = (2.0 * h2g) / h_tot
     return np.vstack([w_h, w_hg, w_h2g]).T
 
 
@@ -124,6 +130,7 @@ def predict_dataset(
     dataset: DatasetLike,
     logk: np.ndarray,
     delta: np.ndarray,
+    solver_failure_mode: str = "fail-fast",
 ) -> Tuple[np.ndarray, SpeciesResult]:
     """Return predicted shifts and species populations for one dataset."""
     h_tot = dataset.h_tot
@@ -141,7 +148,7 @@ def predict_dataset(
         # Stepwise binding constants for 1:2.
         k1 = 10 ** float(logk[0])
         k2 = 10 ** float(logk[1])
-        species = solve_12(h_tot, g_tot, k1, k2)
+        species = solve_12(h_tot, g_tot, k1, k2, failure_mode=solver_failure_mode)
         weights = _weights_12(species, h_tot)
         y_pred = weights @ delta.T
         return y_pred, species
@@ -150,7 +157,7 @@ def predict_dataset(
         # Stepwise binding constants for 2:1.
         k1 = 10 ** float(logk[0])
         k2 = 10 ** float(logk[1])
-        species = solve_21(h_tot, g_tot, k1, k2)
+        species = solve_21(h_tot, g_tot, k1, k2, failure_mode=solver_failure_mode)
         weights = _weights_21(species, h_tot)
         y_pred = weights @ delta.T
         return y_pred, species
@@ -171,7 +178,13 @@ def fraction_bound(model: ModelSpec, species: SpeciesResult, h_tot: np.ndarray) 
     if model.name == "11":
         return species.hg / h_tot
     if model.name == "12":
-        return (species.hg + species.hg2) / h_tot
+        hg2 = species.hg2
+        if hg2 is None:
+            raise ValueError("1:2 species populations are missing HG2.")
+        return (species.hg + hg2) / h_tot
     if model.name == "21":
-        return (species.hg + 2.0 * species.h2g) / h_tot
+        h2g = species.h2g
+        if h2g is None:
+            raise ValueError("2:1 species populations are missing H2G.")
+        return (species.hg + 2.0 * h2g) / h_tot
     return np.full_like(h_tot, np.nan)

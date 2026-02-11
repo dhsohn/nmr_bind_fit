@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import nmrbindfit.fit as fit
 from nmrbindfit.io import Dataset
@@ -168,3 +169,21 @@ def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
     assert "ValueError: bad start grid" in results[0].message
     assert results[1].success is True
     assert results[1].model.name == "nb"
+
+
+def test_multistart_propagates_unexpected_exception(monkeypatch):
+    ds = _make_dataset()
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds, solver_failure_mode="fail-fast"):
+        raise IndexError("unexpected coding bug")
+
+    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
+
+    with pytest.raises(IndexError, match="unexpected coding bug"):
+        fit.fit_model(
+            [ds],
+            "11",
+            logk_starts=[1.0, 2.0],
+            max_nfev=10,
+            bootstrap=0,
+        )

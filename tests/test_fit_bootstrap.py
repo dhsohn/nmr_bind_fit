@@ -1,6 +1,8 @@
 from pathlib import Path
+from typing import cast
 
 import numpy as np
+from scipy.optimize import OptimizeResult
 
 import nmrbindfit.fit as fit
 from nmrbindfit.io import Dataset
@@ -125,3 +127,24 @@ def test_bootstrap_all_nonconverged_yields_no_samples(monkeypatch):
     assert out.logk_samples.shape == (0, 1)
     assert np.isnan(out.ci_low).all()
     assert np.isnan(out.ci_high).all()
+
+
+def test_accept_bootstrap_fit_rejects_nonfinite_predictions(monkeypatch):
+    ds = _make_dataset()
+    model = MODEL_SPECS["11"]
+    params = np.array([4.0, 7.0, 7.5], dtype=float)
+
+    def fake_predict_all(params, model, datasets, solver_failure_mode="fail-fast"):
+        bad = np.full_like(ds.y, np.nan)
+        return [bad], [], [np.zeros_like(ds.y)]
+
+    monkeypatch.setattr(fit, "_predict_all", fake_predict_all)
+
+    accepted = fit._accept_bootstrap_fit(
+        params,
+        cast(OptimizeResult, _DummyResult(success=True)),
+        model,
+        [ds],
+    )
+
+    assert accepted is False

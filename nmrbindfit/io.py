@@ -125,7 +125,7 @@ def _subset_input_columns(
 ) -> pd.DataFrame:
     # Keep only columns needed for fitting.
     use_cols = [host_col, guest_col] + list(ppm_cols)
-    return df[use_cols].copy()
+    return df.loc[:, use_cols].copy()
 
 
 def _drop_missing_required(
@@ -143,7 +143,10 @@ def _drop_incomplete_ppm_columns(
     ppm_cols: Sequence[str],
 ) -> Tuple[pd.DataFrame, List[str], List[str]]:
     # Remove ppm columns containing any missing value.
-    dropped_ppm = [col for col in ppm_cols if data[col].isna().any()]
+    ppm_cols_list = list(ppm_cols)
+    ppm_view = data.loc[:, ppm_cols_list]
+    missing_by_col = ppm_view.isna().any(axis=0)
+    dropped_ppm = [col for col in ppm_cols_list if bool(missing_by_col.get(col, False))]
     if dropped_ppm:
         warnings.warn(
             "Dropping ppm columns with missing values: " + ", ".join(dropped_ppm),
@@ -152,7 +155,22 @@ def _drop_incomplete_ppm_columns(
     kept_ppm = [col for col in ppm_cols if col not in dropped_ppm]
     if not kept_ppm:
         raise ValueError("No ppm columns remain after dropping columns with missing values.")
-    return data[kept_ppm], kept_ppm, dropped_ppm
+    return data.loc[:, kept_ppm].copy(), kept_ppm, dropped_ppm
+
+
+def _apply_missing_policy(
+    data: pd.DataFrame,
+    ppm_cols: Sequence[str],
+    missing_policy: str,
+) -> Tuple[pd.DataFrame, List[str], List[str]]:
+    if missing_policy == "drop-column":
+        return _drop_incomplete_ppm_columns(data, ppm_cols)
+    if missing_policy == "mask":
+        kept_ppm = list(ppm_cols)
+        if not kept_ppm:
+            raise ValueError("No ppm columns remain after applying missing-value policy.")
+        return data.loc[:, kept_ppm].copy(), kept_ppm, []
+    raise ValueError("missing_policy must be one of: drop-column, mask")
 
 
 def _validate_concentration_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> None:
@@ -174,6 +192,7 @@ def load_dataset(
     host_col: Optional[str] = None,
     guest_col: Optional[str] = None,
     ppm_cols: Optional[Sequence[str]] = None,
+    missing_policy: str = "drop-column",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
     df = _read_table(path)
@@ -184,17 +203,17 @@ def load_dataset(
     data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
     data = _drop_missing_required(data, host_col, guest_col)
 
-    ppm_data, ppm_cols, dropped_ppm = _drop_incomplete_ppm_columns(data, ppm_cols)
+    ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)
     use_cols = [host_col, guest_col] + ppm_cols
-    data = data[use_cols]
+    data = data.loc[:, use_cols].copy()
 
     # Extract numeric arrays and validate concentrations.
-    h_tot = data[host_col].to_numpy(dtype=float)
-    g_tot = data[guest_col].to_numpy(dtype=float)
+    h_tot = np.asarray(data.loc[:, host_col], dtype=float)
+    g_tot = np.asarray(data.loc[:, guest_col], dtype=float)
     _validate_concentration_arrays(h_tot, g_tot)
 
     # Extract ppm values.
-    y = ppm_data.to_numpy(dtype=float)
+    y = np.asarray(ppm_data, dtype=float)
     x = _compute_equivalents(h_tot, g_tot)
 
     name = path.stem
@@ -216,6 +235,7 @@ def load_datasets(
     host_col: Optional[str],
     guest_col: Optional[str],
     ppm_cols: Optional[str],
+    missing_policy: str = "drop-column",
 ) -> List[Dataset]:
     """Load multiple datasets."""
     # Reuse column parsing for all input paths.
@@ -228,6 +248,7 @@ def load_datasets(
                 host_col=host_col,
                 guest_col=guest_col,
                 ppm_cols=ppm_cols_list,
+                missing_policy=missing_policy,
             )
         )
     return datasets
