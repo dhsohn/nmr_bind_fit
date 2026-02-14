@@ -53,32 +53,6 @@ MODEL_SPECS = {
 }
 
 
-def model_param_names(model: ModelSpec, peak_names: List[str]) -> List[str]:
-    """Parameter names in the same order used for optimization."""
-    names: List[str] = []
-    if model.n_logk == 1:
-        names.append("logK")
-    elif model.n_logk == 2:
-        names.extend(["logK1", "logK2"])
-
-    # Peak parameters are ordered by peak, then by species label.
-    for peak in peak_names:
-        for label in model.species_labels:
-            names.append(f"{label}_{peak}")
-    return names
-
-
-def split_params(
-    params: np.ndarray,
-    model: ModelSpec,
-    dataset: DatasetLike,
-) -> Tuple[np.ndarray, np.ndarray]:
-    # Slice the parameter vector into logK and delta blocks.
-    logk = params[: model.n_logk]
-    delta = params[model.n_logk :].reshape(dataset.n_peaks, model.n_delta_per_peak)
-    return logk, delta
-
-
 def split_params_multi(
     params: np.ndarray,
     model: ModelSpec,

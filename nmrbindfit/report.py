@@ -91,20 +91,6 @@ def write_decision_txt(decisions: Sequence[str], path: Path) -> None:
             f.write(line.rstrip() + "\n")
 
 
-def _table_from_rows(rows: Sequence[Dict[str, str]]) -> str:
-    # Build a basic HTML table from a list of dictionaries.
-    if not rows:
-        return "<p>No summary rows.</p>"
-    headers = rows[0].keys()
-    thead = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
-    body_rows = []
-    for row in rows:
-        tds = "".join(f"<td>{html.escape(str(row[h]))}</td>" for h in headers)
-        body_rows.append(f"<tr>{tds}</tr>")
-    tbody = "".join(body_rows)
-    return f"<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
-
-
 # ── Numeric helpers ───────────────────────────────────────────────────────────
 
 _NUMERIC_COLS = {
@@ -497,39 +483,30 @@ def _fig_caption(fig_counter: _FigCounter, plot_path: str) -> str:
     return f"<strong>Figure {n}.</strong> {html.escape(stem)}"
 
 
-def write_report_html(
-    summary_rows: Sequence[Dict[str, str]],
-    model_entries: Sequence[ModelEntry],
-    decision_entries: Optional[Sequence[DecisionEntry]],
-    methods_text: Optional[str],
-    warnings: Optional[Sequence[str]],
-    output_path: Path,
-    *,
-    methods_sections: Optional[Sequence[Dict[str, str]]] = None,
-) -> None:
-    """Write a publication-quality HTML report."""
-    now = datetime.now()
-    fig_counter = _FigCounter()
-
-    # ── Identify best model per dataset ───────────────────────────────────
+def _best_models_map(decision_entries: Optional[Sequence[DecisionEntry]]) -> Dict[str, str]:
     best_models: Dict[str, str] = {}
     if decision_entries:
         for d in decision_entries:
             best_models[d.dataset] = d.recommended_model
+    return best_models
 
-    # ── Executive summary ─────────────────────────────────────────────────
+
+def _render_exec_summary(decision_entries: Optional[Sequence[DecisionEntry]]) -> str:
     decision_paragraphs = _decision_paragraphs(decision_entries or [])
-    exec_html = ""
-    if decision_paragraphs:
-        exec_html = (
-            '<div class="exec-summary" id="executive-summary">'
-            "<h2>Executive Summary</h2>"
-            + "".join(decision_paragraphs)
-            + "</div>"
-        )
+    if not decision_paragraphs:
+        return ""
+    return (
+        '<div class="exec-summary" id="executive-summary">'
+        "<h2>Executive Summary</h2>"
+        + "".join(decision_paragraphs)
+        + "</div>"
+    )
 
-    # ── Methods block ─────────────────────────────────────────────────────
-    methods_block = ""
+
+def _render_methods_block(
+    methods_text: Optional[str],
+    methods_sections: Optional[Sequence[Dict[str, str]]],
+) -> str:
     if methods_sections:
         parts = []
         for sec in methods_sections:
@@ -541,131 +518,157 @@ def write_report_html(
                 f"<p>{content}</p>"
                 f"</div>"
             )
-        methods_block = (
+        return (
             '<h2 class="section-title" id="methods">Methods</h2>'
             + "".join(parts)
         )
-    elif methods_text:
-        methods_block = (
+    if methods_text:
+        return (
             '<h2 class="section-title" id="methods">Methods</h2>'
             f'<div class="methods-section"><p>{html.escape(methods_text)}</p></div>'
         )
+    return ""
 
-    # ── Warnings block ────────────────────────────────────────────────────
-    warnings_block = ""
-    if warnings:
-        items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
-        warnings_block = (
-            '<div class="warning-box">'
-            '<div class="warn-title">⚠ Analysis Warnings</div>'
-            f"<ul>{items}</ul>"
-            "</div>"
+
+def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
+    if not warnings:
+        return ""
+    items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+    return (
+        '<div class="warning-box">'
+        '<div class="warn-title">⚠ Analysis Warnings</div>'
+        f"<ul>{items}</ul>"
+        "</div>"
+    )
+
+
+def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: Dict[str, str]) -> str:
+    if not summary_rows:
+        return ""
+    # Exclude "Dataset" column from HTML to avoid horizontal overflow.
+    headers = [h for h in summary_rows[0].keys() if h != "Dataset"]
+    thead = "".join(
+        f'<th{_cell_class(h)}>{html.escape(h)}</th>' for h in headers
+    )
+    body_rows = []
+    for row in summary_rows:
+        model_val = row.get("Model", "")
+        ds_val = row.get("Dataset", "")
+        is_best = best_models.get(ds_val) == model_val
+        tr_class = ' class="best-model"' if is_best else ""
+        tds = "".join(
+            f'<td{_cell_class(h)}>{html.escape(str(row[h]))}</td>'
+            for h in headers
         )
+        body_rows.append(f"<tr{tr_class}>{tds}</tr>")
+    tbody = "".join(body_rows)
+    return (
+        '<h2 class="section-title" id="model-comparison">Model Comparison</h2>'
+        f"<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
+    )
 
-    # ── Summary table ─────────────────────────────────────────────────────
-    summary_table = ""
-    if summary_rows:
-        # Exclude "Dataset" column from HTML to avoid horizontal overflow.
-        headers = [h for h in summary_rows[0].keys() if h != "Dataset"]
-        thead = "".join(
-            f'<th{_cell_class(h)}>{html.escape(h)}</th>' for h in headers
-        )
-        body_rows = []
-        for row in summary_rows:
-            model_val = row.get("Model", "")
-            ds_val = row.get("Dataset", "")
-            is_best = best_models.get(ds_val) == model_val
-            tr_class = ' class="best-model"' if is_best else ""
-            tds = "".join(
-                f'<td{_cell_class(h)}>{html.escape(str(row[h]))}</td>'
-                for h in headers
-            )
-            body_rows.append(f"<tr{tr_class}>{tds}</tr>")
-        tbody = "".join(body_rows)
-        summary_table = (
-            '<h2 class="section-title" id="model-comparison">Model Comparison</h2>'
-            f"<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
-        )
 
-    # ── Per-model sections ────────────────────────────────────────────────
-    model_sections = []
-    for entry in model_entries:
-        is_best = best_models.get(entry.dataset) == entry.model
-        badge = '<span class="model-badge best">★ Best Model</span>' if is_best else ""
-        slug = _slug(f"{entry.dataset}-{entry.model}")
-
-        # Stats grid
-        stats_items = []
-        for k, v in entry.stats.items():
-            stats_items.append(
-                f'<div class="stat-item">'
-                f'<div class="stat-label">{html.escape(k)}</div>'
-                f'<div class="stat-value">{html.escape(str(v))}</div>'
-                f"</div>"
-            )
-        stats_grid = f'<div class="stats-grid">{"".join(stats_items)}</div>'
-
-        # Parameter table
-        param_rows = []
-        for p in entry.params:
-            se_text = f"{p.se:.6g}" if math.isfinite(p.se) else "N/A"
-            param_rows.append(
-                f'<tr><td>{html.escape(p.name)}</td><td class="num">{p.value:.6g}</td>'
-                f'<td class="num">{se_text}</td></tr>'
-            )
-        param_table = (
-            "<table><thead><tr>"
-            "<th>Parameter</th>"
-            '<th class="num">Value</th>'
-            '<th class="num">Standard Error (SE)</th>'
-            "</tr></thead>"
-            f"<tbody>{''.join(param_rows)}</tbody></table>"
-        )
-
-        # Warnings
-        if entry.warnings:
-            warn_items = "".join(f"<li>{html.escape(w)}</li>" for w in entry.warnings)
-            warn_block = (
-                '<div class="warning-box">'
-                '<div class="warn-title">⚠ Model Warnings</div>'
-                f"<ul>{warn_items}</ul></div>"
-            )
-        else:
-            warn_block = '<p class="no-warnings">No warnings.</p>'
-
-        # Plots with captions
-        plots_html = ""
-        if entry.plots:
-            fig_items = []
-            for p in entry.plots:
-                caption = _fig_caption(fig_counter, p)
-                fig_items.append(
-                    f'<figure class="figure-card">'
-                    f'<img src="{html.escape(p)}" alt="{html.escape(Path(p).stem)}" loading="lazy">'
-                    f"<figcaption>{caption}</figcaption>"
-                    f"</figure>"
-                )
-            plots_html = f'<div class="figure-grid">{"".join(fig_items)}</div>'
-
-        display_title = f"{html.escape(entry.model)}"
-        if entry.dataset != "Simultaneous Fitting":
-            display_title += f" <span style='font-weight:400;color:var(--slate-500)'>— {html.escape(entry.dataset)}</span>"
-
-        model_sections.append(
-            f'<div class="model-card" id="{slug}">'
-            f'<div class="model-card-header"><h3>{display_title}</h3>{badge}</div>'
-            f'<h4 class="model-sub">Goodness-of-Fit Statistics</h4>'
-            f"{stats_grid}"
-            f'<h4 class="model-sub">Fitted Parameters</h4>'
-            f"{param_table}"
-            f'<h4 class="model-sub">Warnings</h4>'
-            f"{warn_block}"
-            f'<h4 class="model-sub">Figures</h4>'
-            f"{plots_html}"
+def _render_stats_grid(stats: Dict[str, str]) -> str:
+    stats_items = []
+    for k, v in stats.items():
+        stats_items.append(
+            f'<div class="stat-item">'
+            f'<div class="stat-label">{html.escape(k)}</div>'
+            f'<div class="stat-value">{html.escape(str(v))}</div>'
             f"</div>"
         )
+    return f'<div class="stats-grid">{"".join(stats_items)}</div>'
 
-    # ── Table of contents ─────────────────────────────────────────────────
+
+def _render_param_table(params: Sequence[ParamEntry]) -> str:
+    param_rows = []
+    for p in params:
+        se_text = f"{p.se:.6g}" if math.isfinite(p.se) else "N/A"
+        param_rows.append(
+            f'<tr><td>{html.escape(p.name)}</td><td class="num">{p.value:.6g}</td>'
+            f'<td class="num">{se_text}</td></tr>'
+        )
+    return (
+        "<table><thead><tr>"
+        "<th>Parameter</th>"
+        '<th class="num">Value</th>'
+        '<th class="num">Standard Error (SE)</th>'
+        "</tr></thead>"
+        f"<tbody>{''.join(param_rows)}</tbody></table>"
+    )
+
+
+def _render_model_warning_block(warnings: Sequence[str]) -> str:
+    if warnings:
+        warn_items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+        return (
+            '<div class="warning-box">'
+            '<div class="warn-title">⚠ Model Warnings</div>'
+            f"<ul>{warn_items}</ul></div>"
+        )
+    return '<p class="no-warnings">No warnings.</p>'
+
+
+def _render_plot_grid(plot_paths: Sequence[str], fig_counter: _FigCounter) -> str:
+    if not plot_paths:
+        return ""
+    fig_items = []
+    for p in plot_paths:
+        caption = _fig_caption(fig_counter, p)
+        fig_items.append(
+            f'<figure class="figure-card">'
+            f'<img src="{html.escape(p)}" alt="{html.escape(Path(p).stem)}" loading="lazy">'
+            f"<figcaption>{caption}</figcaption>"
+            f"</figure>"
+        )
+    return f'<div class="figure-grid">{"".join(fig_items)}</div>'
+
+
+def _render_model_card(entry: ModelEntry, best_models: Dict[str, str], fig_counter: _FigCounter) -> str:
+    is_best = best_models.get(entry.dataset) == entry.model
+    badge = '<span class="model-badge best">★ Best Model</span>' if is_best else ""
+    slug = _slug(f"{entry.dataset}-{entry.model}")
+
+    stats_grid = _render_stats_grid(entry.stats)
+    param_table = _render_param_table(entry.params)
+    warn_block = _render_model_warning_block(entry.warnings)
+    plots_html = _render_plot_grid(entry.plots, fig_counter)
+
+    display_title = f"{html.escape(entry.model)}"
+    if entry.dataset != "Simultaneous Fitting":
+        display_title += (
+            f" <span style='font-weight:400;color:var(--slate-500)'>— {html.escape(entry.dataset)}</span>"
+        )
+
+    return (
+        f'<div class="model-card" id="{slug}">'
+        f'<div class="model-card-header"><h3>{display_title}</h3>{badge}</div>'
+        f'<h4 class="model-sub">Goodness-of-Fit Statistics</h4>'
+        f"{stats_grid}"
+        f'<h4 class="model-sub">Fitted Parameters</h4>'
+        f"{param_table}"
+        f'<h4 class="model-sub">Warnings</h4>'
+        f"{warn_block}"
+        f'<h4 class="model-sub">Figures</h4>'
+        f"{plots_html}"
+        f"</div>"
+    )
+
+
+def _render_model_sections(
+    model_entries: Sequence[ModelEntry],
+    best_models: Dict[str, str],
+    fig_counter: _FigCounter,
+) -> List[str]:
+    return [_render_model_card(entry, best_models, fig_counter) for entry in model_entries]
+
+
+def _render_toc(
+    exec_html: str,
+    methods_block: str,
+    summary_table: str,
+    model_entries: Sequence[ModelEntry],
+) -> str:
     toc_items = []
     toc_idx = 1
     if exec_html:
@@ -685,15 +688,41 @@ def write_report_html(
         toc_items.append(f'<li><a href="#{slug}">{toc_idx}. {label}</a></li>')
         toc_idx += 1
 
-    toc_html = (
+    if not toc_items:
+        return ""
+    return (
         '<nav class="toc"><h2>Contents</h2>'
         f'<ol>{"".join(toc_items)}</ol></nav>'
-    ) if toc_items else ""
+    )
 
-    # ── Per-model detail heading ──────────────────────────────────────────
-    model_detail_heading = ""
+
+def _render_model_detail_heading(model_sections: Sequence[str]) -> str:
     if model_sections:
-        model_detail_heading = '<h2 class="section-title" id="model-details">Model Details</h2>'
+        return '<h2 class="section-title" id="model-details">Model Details</h2>'
+    return ""
+
+
+def write_report_html(
+    summary_rows: Sequence[Dict[str, str]],
+    model_entries: Sequence[ModelEntry],
+    decision_entries: Optional[Sequence[DecisionEntry]],
+    methods_text: Optional[str],
+    warnings: Optional[Sequence[str]],
+    output_path: Path,
+    *,
+    methods_sections: Optional[Sequence[Dict[str, str]]] = None,
+) -> None:
+    """Write a publication-quality HTML report."""
+    now = datetime.now()
+    fig_counter = _FigCounter()
+    best_models = _best_models_map(decision_entries)
+    exec_html = _render_exec_summary(decision_entries)
+    methods_block = _render_methods_block(methods_text, methods_sections)
+    warnings_block = _render_warnings_block(warnings)
+    summary_table = _render_summary_table(summary_rows, best_models)
+    model_sections = _render_model_sections(model_entries, best_models, fig_counter)
+    toc_html = _render_toc(exec_html, methods_block, summary_table, model_entries)
+    model_detail_heading = _render_model_detail_heading(model_sections)
 
     # ── Assemble document ─────────────────────────────────────────────────
     html_doc = f"""<!DOCTYPE html>

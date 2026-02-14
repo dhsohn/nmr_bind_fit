@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from nmrbindfit.cli import build_parser, run_fit
 
@@ -94,3 +95,33 @@ def test_run_fit_replicates_bootstrap_and_continue_mode(tmp_path, monkeypatch):
     report_text = report_path.read_text(encoding="utf-8")
     assert "fail-fast behavior" in report_text
     assert "dropped before fitting" in report_text
+
+
+def test_run_fit_rejects_out_of_bounds_k_starts_before_fitting(tmp_path, monkeypatch):
+    data_path = tmp_path / "sample.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [1e-3, 1e-3, 1e-3],
+            "[G]t": [0.0, 5e-4, 1e-3],
+            "ppm_H1": [7.10, 7.20, 7.32],
+        }
+    ).to_csv(data_path, index=False)
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--input",
+            str(data_path),
+            "--bootstrap",
+            "0",
+            "--k-starts",
+            "1e13",
+        ]
+    )
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match=r"All K starts must be within \[1e\+00, 1e\+12\]\."):
+        run_fit(args)
+
+    output_dirs = [path for path in tmp_path.iterdir() if path.is_dir()]
+    assert output_dirs == []

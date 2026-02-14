@@ -111,7 +111,7 @@ def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
 
     def fake_fit_model(datasets, model_name, logk_starts, **kwargs):
         if model_name == "11":
-            raise RuntimeError("forced model crash")
+            raise fit.ModelFitError("forced model crash")
         return real_fit_model(datasets, model_name, logk_starts, **kwargs)
 
     monkeypatch.setattr(fit, "fit_model", fake_fit_model)
@@ -132,7 +132,7 @@ def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
     assert len(results) == 2
     assert results[0].success is False
     assert results[0].model.name == "11"
-    assert "RuntimeError: forced model crash" in results[0].message
+    assert "ModelFitError: forced model crash" in results[0].message
     assert results[1].success is True
     assert results[1].model.name == "nb"
 
@@ -145,7 +145,7 @@ def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
 
     def fake_fit_model(datasets, model_name, logk_starts, **kwargs):
         if model_name == "11":
-            raise ValueError("bad start grid")
+            raise fit.ModelFitError("bad start grid")
         return real_fit_model(datasets, model_name, logk_starts, **kwargs)
 
     monkeypatch.setattr(fit, "fit_model", fake_fit_model)
@@ -166,9 +166,35 @@ def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
     assert len(results) == 2
     assert results[0].success is False
     assert results[0].model.name == "11"
-    assert "ValueError: bad start grid" in results[0].message
+    assert "ModelFitError: bad start grid" in results[0].message
     assert results[1].success is True
     assert results[1].model.name == "nb"
+
+
+def test_fit_models_propagates_unexpected_exception(monkeypatch):
+    ds = _make_dataset()
+    real_fit_model = fit.fit_model
+
+    def fake_fit_model(datasets, model_name, logk_starts, **kwargs):
+        if model_name == "11":
+            raise RuntimeError("unexpected bug")
+        return real_fit_model(datasets, model_name, logk_starts, **kwargs)
+
+    monkeypatch.setattr(fit, "fit_model", fake_fit_model)
+
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        fit.fit_models(
+            datasets=[ds],
+            model_names=["11", "nb"],
+            logk_starts=[1.0],
+            replicates=False,
+            max_nfev=100,
+            bootstrap=0,
+            bootstrap_method="residual",
+            seed=0,
+            logk_bounds=None,
+            logk_jitter=0.0,
+        )
 
 
 def test_multistart_propagates_unexpected_exception(monkeypatch):

@@ -2,7 +2,7 @@ import argparse
 from types import SimpleNamespace
 
 from nmrbindfit.report import DecisionEntry, _decision_paragraphs
-from nmrbindfit.report_pipeline import _replicate_dataset_dir_labels, build_decisions
+from nmrbindfit.report_pipeline import _replicate_dataset_dir_labels, build_decisions, build_report_artifacts
 
 
 def test_build_decisions_uses_provisional_language():
@@ -53,3 +53,32 @@ def test_replicate_dataset_dir_labels_are_collision_free():
     assert labels[0].startswith("01_")
     assert labels[1].startswith("02_")
     assert labels[2].startswith("03_")
+
+
+def test_build_decisions_uses_fit_failed_wording_for_exclusions():
+    args = argparse.Namespace(bootstrap_ci_width=None)
+    decisions, entries = build_decisions(
+        args,
+        ordered_keys=["dataset_a"],
+        results_by_key={"dataset_a": {}},
+        failures_by_key={"dataset_a": [("11", "ModelFitError: forced model crash")]},
+        display_model_name=lambda name: name,
+    )
+
+    assert len(entries) == 0
+    assert any("fit failed: ModelFitError: forced model crash" in line for line in decisions)
+
+
+def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path):
+    summary_rows, model_entries, warnings = build_report_artifacts(
+        args=argparse.Namespace(),
+        ordered_keys=["dataset_a"],
+        results_by_key={"dataset_a": {}},
+        failures_by_key={"dataset_a": [("11", "ModelFitError: forced model crash")]},
+        out_dir=tmp_path,
+        display_model_name=lambda name: name,
+    )
+
+    assert summary_rows == []
+    assert model_entries == []
+    assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]

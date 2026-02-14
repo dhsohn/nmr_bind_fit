@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nmrbindfit.cli import _index_results, _resolve_inputs, _resolve_logk_config
+from nmrbindfit.cli import _index_results, _resolve_inputs, _resolve_logk_config, build_parser, run_fit
 
 
 def test_resolve_logk_config_defaults_and_fixed_bounds():
@@ -28,6 +28,49 @@ def test_resolve_logk_config_rejects_negative_jitter():
     )
     with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be non-negative."):
         _resolve_logk_config(args)
+
+
+def test_resolve_logk_config_rejects_empty_k_starts_list():
+    args = argparse.Namespace(
+        k_starts=",",
+        bootstrap_logk_jitter=0.1,
+    )
+    with pytest.raises(ValueError, match="--k-starts must include at least one positive value."):
+        _resolve_logk_config(args)
+
+
+def test_resolve_logk_config_rejects_k_starts_out_of_strict_bounds():
+    args = argparse.Namespace(
+        k_starts="10,1e13",
+        bootstrap_logk_jitter=0.1,
+    )
+    with pytest.raises(ValueError, match=r"All K starts must be within \[1e\+00, 1e\+12\]\."):
+        _resolve_logk_config(args)
+
+
+def test_build_parser_rejects_negative_bootstrap(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--input", "sample.csv", "--bootstrap", "-1"])
+    err = capsys.readouterr().err
+    assert "--bootstrap must be non-negative." in err
+
+
+def test_run_fit_rejects_negative_bootstrap_when_parser_is_bypassed():
+    args = argparse.Namespace(
+        input=["sample.csv"],
+        ppm_cols=None,
+        bootstrap=-1,
+        bootstrap_method="residual",
+        bootstrap_logk_jitter=0.1,
+        k_starts=None,
+        replicates=False,
+        max_nfev=100,
+        seed=None,
+        bootstrap_ci_width=None,
+    )
+    with pytest.raises(ValueError, match="--bootstrap must be non-negative."):
+        run_fit(args)
 
 
 def test_index_results_groups_success_and_failures_by_dataset():

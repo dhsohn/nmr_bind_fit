@@ -33,6 +33,17 @@ STRICT_K_MIN = 1e0
 STRICT_K_MAX = 1e12
 
 
+def _non_negative_int(value: str) -> int:
+    # Argparse type converter that rejects negative integers.
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--bootstrap must be non-negative.") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("--bootstrap must be non-negative.")
+    return parsed
+
+
 def _parse_k_starts(value: Optional[str]) -> List[float]:
     # Parse comma-separated starts or default to log-spaced values.
     if not value:
@@ -125,8 +136,12 @@ def _dataset_key(result: FitResultLike, dataset_labels: Dict[int, str]) -> str:
 
 def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optional[Tuple[float, float]]]:
     k_starts = _parse_k_starts(args.k_starts)
+    if not k_starts:
+        raise ValueError("--k-starts must include at least one positive value.")
     if any(v <= 0 for v in k_starts):
         raise ValueError("All K starts must be positive.")
+    if any(v < STRICT_K_MIN or v > STRICT_K_MAX for v in k_starts):
+        raise ValueError(f"All K starts must be within [{STRICT_K_MIN:.0e}, {STRICT_K_MAX:.0e}].")
     if args.bootstrap_logk_jitter < 0:
         raise ValueError("--bootstrap-logk-jitter must be non-negative.")
     logk_starts = [float(np.log10(v)) for v in k_starts]
@@ -159,6 +174,8 @@ def _display_model_name(name: str) -> str:
 
 
 def run_fit(args: argparse.Namespace) -> None:
+    if args.bootstrap < 0:
+        raise ValueError("--bootstrap must be non-negative.")
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
     datasets = load_datasets(
@@ -240,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
-    parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap iterations")
+    parser.add_argument("--bootstrap", type=_non_negative_int, default=1000, help="Bootstrap iterations")
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
     parser.add_argument(
         "--bootstrap-logk-jitter",

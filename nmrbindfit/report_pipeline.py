@@ -413,7 +413,7 @@ def build_report_artifacts(
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
-                f"{key}: excluded {display_model_name(model_name)} (optimizer did not converge: {message})"
+                f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
             )
         if not model_map:
             continue
@@ -432,46 +432,8 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> str:
-    # Build static methods narrative with runtime bootstrap/replicate notes.
-    bootstrap_note = (
-        f"Bootstrap uncertainty was evaluated with {args.bootstrap} iterations using "
-        f"{args.bootstrap_method} resampling."
-        if args.bootstrap > 0
-        else "Bootstrap uncertainty was not evaluated."
-    )
-    replicate_note = ""
-    if args.replicates and len(datasets) > 1:
-        replicate_note = (
-            "Replicate datasets were fit simultaneously with shared binding constants and "
-            "replicate-specific chemical shifts. "
-        )
-    missing_note = "ppm columns containing missing values were dropped before fitting. "
-    solver_mode_note = "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior. "
-    return (
-        "NMR chemical shift titration data were interpreted under a fast-exchange assumption, with observed "
-        "host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries "
-        "were 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding "
-        "(H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters were estimated by "
-        "nonlinear least squares (scipy.optimize.least_squares). The 1:1 equilibrium was solved analytically, while "
-        "1:2 and 2:1 equilibria were solved numerically point-by-point with Newton-Raphson and bisection fallback. "
-        "log10 K parameters were constrained to [0, 12] (K in [1e0, 1e12]) for stable, reproducible estimation. "
-        f"Bootstrap refits used a small logK start perturbation (std {args.bootstrap_logk_jitter:.3g} in log10 K). "
-        "Model comparison used BIC as the primary ranking index and AICc as supporting information. These criteria "
-        "were interpreted as relative support among tested candidates and considered together with chemical "
-        "plausibility and spectral consistency. One shared residual variance term was estimated for model comparison "
-        "and counted as one additional information-criteria parameter (k = p + 1). "
-        + replicate_note
-        + missing_note
-        + solver_mode_note
-        + bootstrap_note
-    )
-
-
-def build_methods_sections(
-    args: argparse.Namespace, datasets: Sequence[DatasetLike]
-) -> List[Dict[str, str]]:
-    """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
+def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
+    # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
 
     # 1. Data Interpretation
@@ -540,6 +502,8 @@ def build_methods_sections(
                 "among the tested candidates and considered together with chemical plausibility and "
                 "spectral consistency. One shared residual variance term (σ²) was estimated for model "
                 "comparison and counted as one additional information-criteria parameter (k = p + 1). "
+                "The effective sample size n was defined as the total number of finite residual scalars "
+                "across all datasets, titration points, and ppm peaks; missing observations were excluded. "
                 "A ΔBIC < 2 between the best and next-best model was flagged as weak discrimination."
             ),
         }
@@ -566,6 +530,19 @@ def build_methods_sections(
     return sections
 
 
+def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> str:
+    # Flatten structured methods sections into one text block.
+    sections = _compose_methods_sections(args, datasets)
+    return " ".join(section["content"] for section in sections)
+
+
+def build_methods_sections(
+    args: argparse.Namespace, datasets: Sequence[DatasetLike]
+) -> List[Dict[str, str]]:
+    """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
+    return _compose_methods_sections(args, datasets)
+
+
 def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
@@ -586,7 +563,7 @@ def build_decisions(
             decisions.append("Warnings:")
             for model_name, message in failures:
                 decisions.append(
-                    f"- excluded {display_model_name(model_name)} (optimizer did not converge: {message})"
+                    f"- excluded {display_model_name(model_name)} (fit failed: {message})"
                 )
         if not bic_sorted:
             decisions.append("No successful model fits; see warnings.")

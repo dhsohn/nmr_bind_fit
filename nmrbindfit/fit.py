@@ -47,6 +47,10 @@ class FitResult:
     penalty_count: int
 
 
+class ModelFitError(RuntimeError):
+    """Recoverable per-model fit failure for multi-model sweeps."""
+
+
 _NUMERIC_EXCEPTIONS = (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
 
 
@@ -474,7 +478,10 @@ def fit_model(
 ) -> FitResult:
     """Fit one model to one or multiple datasets with multistart logK."""
     model = MODEL_SPECS[model_name]
-    logk_grid = _build_logk_grid(model, logk_starts, logk_bounds)
+    try:
+        logk_grid = _build_logk_grid(model, logk_starts, logk_bounds)
+    except ValueError as exc:
+        raise ModelFitError(str(exc)) from exc
 
     best_params, best_res = _select_best_multistart(
         model,
@@ -486,7 +493,7 @@ def fit_model(
     )
 
     if best_params is None or best_res is None:
-        raise RuntimeError(f"Fit failed for model {model_name}")
+        raise ModelFitError(f"Fit failed for model {model_name}")
 
     # Return early if the optimizer failed to converge.
     if not best_res.success:
@@ -499,19 +506,24 @@ def fit_model(
             message=str(best_res.message),
         )
 
-    return _build_successful_fit_result(
-        model=model,
-        datasets=datasets,
-        best_params=best_params,
-        best_res=best_res,
-        bootstrap=bootstrap,
-        bootstrap_method=bootstrap_method,
-        seed=seed,
-        logk_bounds=logk_bounds,
-        logk_jitter=logk_jitter,
-        max_nfev=max_nfev,
-        solver_failure_mode=solver_failure_mode,
-    )
+    try:
+        return _build_successful_fit_result(
+            model=model,
+            datasets=datasets,
+            best_params=best_params,
+            best_res=best_res,
+            bootstrap=bootstrap,
+            bootstrap_method=bootstrap_method,
+            seed=seed,
+            logk_bounds=logk_bounds,
+            logk_jitter=logk_jitter,
+            max_nfev=max_nfev,
+            solver_failure_mode=solver_failure_mode,
+        )
+    except RuntimeError as exc:
+        if str(exc).startswith("BIC calculation failed:"):
+            raise ModelFitError(str(exc)) from exc
+        raise
 
 
 def _residual_bootstrap(
@@ -752,6 +764,21 @@ def _exception_failure_result(
     )
 
 
+def _iter_fit_jobs(
+    datasets: List[Dataset],
+    model_names: Sequence[str],
+    replicates: bool,
+):
+    # Yield (datasets_for_fit, model_name) jobs for shared and per-dataset modes.
+    if replicates:
+        for model_name in model_names:
+            yield datasets, model_name
+        return
+    for ds in datasets:
+        for model_name in model_names:
+            yield [ds], model_name
+
+
 def fit_models(
     datasets: List[Dataset],
     model_names: Sequence[str],
@@ -767,42 +794,22 @@ def fit_models(
 ) -> List[FitResult]:
     """Fit all requested models, optionally as simultaneous replicates."""
     results = []
-    if replicates:
-        for model_name in model_names:
-            # Fit all datasets together with shared logK values.
-            try:
-                result = fit_model(
-                    datasets,
-                    model_name,
-                    logk_starts,
-                    max_nfev=max_nfev,
-                    bootstrap=bootstrap,
-                    bootstrap_method=bootstrap_method,
-                    seed=seed,
-                    logk_bounds=logk_bounds,
-                    logk_jitter=logk_jitter,
-                    solver_failure_mode=solver_failure_mode,
-                )
-            except Exception as exc:
-                result = _exception_failure_result(model_name, datasets, exc)
-            results.append(result)
-    else:
-        for ds in datasets:
-            for model_name in model_names:
-                try:
-                    result = fit_model(
-                        [ds],
-                        model_name,
-                        logk_starts,
-                        max_nfev=max_nfev,
-                        bootstrap=bootstrap,
-                        bootstrap_method=bootstrap_method,
-                        seed=seed,
-                        logk_bounds=logk_bounds,
-                        logk_jitter=logk_jitter,
-                        solver_failure_mode=solver_failure_mode,
-                    )
-                except Exception as exc:
-                    result = _exception_failure_result(model_name, [ds], exc)
-                results.append(result)
+    for fit_datasets, model_name in _iter_fit_jobs(datasets, model_names, replicates):
+        # Fit one model to either all replicates or a single dataset.
+        try:
+            result = fit_model(
+                fit_datasets,
+                model_name,
+                logk_starts,
+                max_nfev=max_nfev,
+                bootstrap=bootstrap,
+                bootstrap_method=bootstrap_method,
+                seed=seed,
+                logk_bounds=logk_bounds,
+                logk_jitter=logk_jitter,
+                solver_failure_mode=solver_failure_mode,
+            )
+        except ModelFitError as exc:
+            result = _exception_failure_result(model_name, fit_datasets, exc)
+        results.append(result)
     return results

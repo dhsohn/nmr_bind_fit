@@ -182,9 +182,7 @@ def plot_bootstrap_hist(
         fig.tight_layout()
         png_path = out_dir / f"bootstrap_{name}.png"
         pdf_path = out_dir / f"bootstrap_{name}.pdf"
-        fig.savefig(png_path, dpi=300, facecolor="white")
-        fig.savefig(pdf_path, facecolor="white")
-        plt.close(fig)
+        _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
 
