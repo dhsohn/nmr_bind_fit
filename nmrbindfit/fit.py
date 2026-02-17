@@ -1,27 +1,21 @@
-"""Model fitting and bootstrap utilities."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import itertools
 import numpy as np
-from scipy.optimize import OptimizeResult, least_squares
+from scipy.optimize import OptimizeResult
 
+from .fit_bootstrap import BootstrapResult
+from .fit_bootstrap import accept_bootstrap_fit as _accept_bootstrap_fit_impl
+from .fit_bootstrap import bootstrap_params as _bootstrap_params_impl
+from .fit_criteria import information_criteria as _information_criteria_impl
+from .fit_optimizer import build_logk_grid as _build_logk_grid_impl
+from .fit_optimizer import fit_with_initial as _fit_with_initial_impl
+from .fit_optimizer import param_bounds as _param_bounds_impl
+from .fit_optimizer import select_best_multistart as _select_best_multistart_impl
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
-from .stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
-
-
-@dataclass
-class BootstrapResult:
-    param_samples: np.ndarray
-    logk_samples: np.ndarray
-    ci_low: np.ndarray
-    ci_high: np.ndarray
-    n_success: int
-    n_boot: int
 
 
 @dataclass
@@ -48,7 +42,7 @@ class FitResult:
 
 
 class ModelFitError(RuntimeError):
-    """Recoverable per-model fit failure for multi-model sweeps."""
+    pass
 
 
 _NUMERIC_EXCEPTIONS = (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
@@ -66,8 +60,6 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
 
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
-    """Heuristic start values for chemical shift parameters."""
-    # Use endpoints to seed delta values for faster convergence.
     y0 = dataset.y[0]
     y1 = dataset.y[-1]
     if model.name == "nb":
@@ -89,8 +81,6 @@ def _build_initial_params(
     datasets: List[Dataset],
     logk_values: Sequence[float],
 ) -> np.ndarray:
-    """Assemble the full parameter vector for one start."""
-    # Concatenate logK values followed by per-dataset delta parameters.
     params: List[float] = []
     params.extend(list(logk_values))
     for ds in datasets:
@@ -100,13 +90,11 @@ def _build_initial_params(
 
 
 def _param_names_multi(model: ModelSpec, datasets: List[Dataset]) -> List[str]:
-    """Parameter names for multi-dataset fits (replicates)."""
     names: List[str] = []
     if model.n_logk == 1:
         names.append("logK")
     elif model.n_logk == 2:
         names.extend(["logK1", "logK2"])
-    # Name delta parameters by species, dataset, and peak.
     for ds in datasets:
         for peak in ds.y_cols:
             for label in model.species_labels:
@@ -121,7 +109,6 @@ def _residual_vector(
     solver_failure_mode: str = "fail-fast",
     penalty_counter: Optional[Dict[str, int]] = None,
 ) -> np.ndarray:
-    """Return concatenated residuals used by least_squares."""
     logk, deltas = split_params_multi(params, model, datasets)
     residuals = []
     for ds, delta in zip(datasets, deltas):
@@ -161,8 +148,6 @@ def _predict_all(
     datasets: List[Dataset],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[List[np.ndarray], List, List[np.ndarray]]:
-    """Predict shifts and residuals on the original ppm scale."""
-    # Run model prediction for each dataset and keep raw residuals.
     logk, deltas = split_params_multi(params, model, datasets)
     y_pred_list = []
     species_list = []
@@ -176,7 +161,6 @@ def _predict_all(
 
 
 def _rss_value(residuals: List[np.ndarray]) -> float:
-    """Return residual sum of squares."""
     rss = 0.0
     for res in residuals:
         rss += float(np.nansum(res**2))
@@ -184,8 +168,6 @@ def _rss_value(residuals: List[np.ndarray]) -> float:
 
 
 def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> float:
-    """R2 is reported for reference (not used for selection)."""
-    # Flatten all datasets into one vector for a global R2.
     y_all = []
     y_pred_all = []
     for ds, y_pred in zip(datasets, y_pred_list):
@@ -213,30 +195,15 @@ def _fit_with_initial(
     bounds: Tuple[np.ndarray, np.ndarray],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[np.ndarray, OptimizeResult]:
-    """Run least_squares for one initialization."""
-    # Use bounded trust-region least squares on concatenated residuals.
-    penalty_counter: Dict[str, int] = {"count": 0}
-
-    def residual_fn(current_params: np.ndarray, current_model: ModelSpec, current_datasets: List[Dataset]) -> np.ndarray:
-        return _residual_vector(
-            current_params,
-            current_model,
-            current_datasets,
-            solver_failure_mode=solver_failure_mode,
-            penalty_counter=penalty_counter,
-        )
-
-    res = least_squares(
-        residual_fn,
-        params0,
-        args=(model, datasets),
-        method="trf",
+    return _fit_with_initial_impl(
+        model=model,
+        datasets=datasets,
+        params0=params0,
+        residual_vector_fn=_residual_vector,
         max_nfev=max_nfev,
-        x_scale="jac",
         bounds=bounds,
+        solver_failure_mode=solver_failure_mode,
     )
-    setattr(res, "penalty_count", int(penalty_counter.get("count", 0)))
-    return res.x, res
 
 
 def _param_bounds(
@@ -244,19 +211,10 @@ def _param_bounds(
     model: ModelSpec,
     logk_bounds: Optional[Tuple[float, float]],
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Apply optional logK bounds while leaving shift parameters free."""
-    # Only constrain logK parameters, leave delta unbounded.
-    if logk_bounds is None or model.n_logk == 0:
-        return (np.full_like(params0, -np.inf), np.full_like(params0, np.inf))
-    lower = np.full_like(params0, -np.inf)
-    upper = np.full_like(params0, np.inf)
-    lower[: model.n_logk] = logk_bounds[0]
-    upper[: model.n_logk] = logk_bounds[1]
-    return lower, upper
+    return _param_bounds_impl(params0, model, logk_bounds)
 
 
 def _total_observations(datasets: List[Dataset]) -> int:
-    # Count total scalar observations across all datasets and peaks.
     return int(sum(np.count_nonzero(np.isfinite(ds.y)) for ds in datasets))
 
 
@@ -268,7 +226,6 @@ def _failed_fit_result(
     message: str,
     species: Optional[List] = None,
 ) -> FitResult:
-    # Build a consistent failure payload used across early-return paths.
     n = _total_observations(datasets)
     p = int(len(params))
     dof = int(n - p)
@@ -303,38 +260,18 @@ def _select_best_multistart(
     logk_bounds: Optional[Tuple[float, float]],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
-    # Prefer converged starts and keep best failure only as fallback diagnostics.
-    best_success_params = None
-    best_success_res = None
-    best_success_rss = None
-    best_failed_params = None
-    best_failed_res = None
-    best_failed_rss = None
-
-    for logk_vals in logk_grid:
-        params0 = _build_initial_params(model, datasets, logk_vals)
-        bounds = _param_bounds(params0, model, logk_bounds)
-        fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
-        if solver_failure_mode != "fail-fast":
-            fit_kwargs["solver_failure_mode"] = solver_failure_mode
-        try:
-            params, res = _fit_with_initial(model, datasets, params0, **fit_kwargs)
-        except _NUMERIC_EXCEPTIONS:
-            continue
-        rss = float(np.sum(res.fun**2))
-        if bool(getattr(res, "success", False)):
-            if best_success_rss is None or rss < best_success_rss:
-                best_success_rss = rss
-                best_success_params = params
-                best_success_res = res
-        elif best_failed_rss is None or rss < best_failed_rss:
-            best_failed_rss = rss
-            best_failed_params = params
-            best_failed_res = res
-
-    if best_success_params is not None and best_success_res is not None:
-        return best_success_params, best_success_res
-    return best_failed_params, best_failed_res
+    return _select_best_multistart_impl(
+        model=model,
+        datasets=datasets,
+        logk_grid=logk_grid,
+        max_nfev=max_nfev,
+        logk_bounds=logk_bounds,
+        build_initial_params_fn=_build_initial_params,
+        fit_with_initial_fn=_fit_with_initial,
+        param_bounds_fn=_param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+        solver_failure_mode=solver_failure_mode,
+    )
 
 
 def _build_logk_grid(
@@ -342,19 +279,10 @@ def _build_logk_grid(
     logk_starts: Sequence[float],
     logk_bounds: Optional[Tuple[float, float]],
 ) -> List[Tuple[float, ...]]:
-    # Expand multistart seeds across the model's logK dimensions.
-    if model.n_logk == 0:
-        return [()]
-    starts = list(logk_starts)
-    if logk_bounds is not None:
-        starts = [v for v in starts if logk_bounds[0] <= v <= logk_bounds[1]]
-        if not starts:
-            raise ValueError("No K starts within bounds.")
-    return list(itertools.product(starts, repeat=model.n_logk))
+    return _build_logk_grid_impl(model, logk_starts, logk_bounds)
 
 
 def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[object]) -> str:
-    # Build a diagnostics message when equilibrium predictions are non-finite.
     fail_points = 0
     total_points = 0
     for ds, species in zip(datasets, species_list):
@@ -373,18 +301,7 @@ def _information_criteria(
     residuals: List[np.ndarray],
     p: int,
 ) -> Tuple[float, float]:
-    # Compute BIC/AICc from one shared residual variance across all residuals.
-    stacked = np.concatenate([res.ravel() for res in residuals]) if residuals else np.array([], dtype=float)
-    loglik, n_loglik, n_sigma = gaussian_loglik(stacked)
-    if not np.isfinite(loglik):
-        names = ", ".join(ds.name for ds in datasets)
-        raise RuntimeError(f"BIC calculation failed: log-likelihood is NaN for datasets: {names}.")
-    bic_p = p + n_sigma
-    if n_loglik <= 0:
-        raise RuntimeError("BIC calculation failed: no valid log-likelihood terms.")
-    bic = bic_from_loglik(loglik, n_loglik, bic_p)
-    aicc = aicc_from_loglik(loglik, n_loglik, bic_p)
-    return bic, aicc
+    return _information_criteria_impl(datasets, residuals, p)
 
 
 def _build_successful_fit_result(
@@ -400,7 +317,6 @@ def _build_successful_fit_result(
     max_nfev: int,
     solver_failure_mode: str,
 ) -> FitResult:
-    # Evaluate diagnostics/statistics and build the final successful FitResult.
     param_names = _param_names_multi(model, datasets)
     y_pred_list, species_list, residuals = _predict_all(
         best_params,
@@ -476,7 +392,6 @@ def fit_model(
     logk_jitter: float = 0.1,
     solver_failure_mode: str = "fail-fast",
 ) -> FitResult:
-    """Fit one model to one or multiple datasets with multistart logK."""
     model = MODEL_SPECS[model_name]
     try:
         logk_grid = _build_logk_grid(model, logk_starts, logk_bounds)
@@ -495,7 +410,6 @@ def fit_model(
     if best_params is None or best_res is None:
         raise ModelFitError(f"Fit failed for model {model_name}")
 
-    # Return early if the optimizer failed to converge.
     if not best_res.success:
         param_names = _param_names_multi(model, datasets)
         return _failed_fit_result(
@@ -526,109 +440,6 @@ def fit_model(
         raise
 
 
-def _residual_bootstrap(
-    rng: np.random.Generator,
-    ds: Dataset,
-    y_pred: np.ndarray,
-    residuals: np.ndarray,
-) -> Dataset:
-    """Residual bootstrap by resampling centered residuals."""
-    # Resample residuals by index to preserve autocorrelation structure.
-    idx = rng.integers(0, ds.n_points, size=ds.n_points)
-    col_means = np.nanmean(residuals, axis=0, keepdims=True)
-    col_means = np.where(np.isfinite(col_means), col_means, 0.0)
-    centered = residuals - col_means
-    centered[~np.isfinite(centered)] = 0.0
-    resampled = centered[idx, :]
-    y_boot = y_pred + resampled
-    y_boot[~np.isfinite(ds.y)] = np.nan
-    return Dataset(
-        name=ds.name,
-        path=ds.path,
-        h_tot=ds.h_tot,
-        g_tot=ds.g_tot,
-        x=ds.x,
-        y=y_boot,
-        y_cols=ds.y_cols,
-        dropped_peaks=ds.dropped_peaks,
-    )
-
-
-def _parametric_bootstrap(
-    rng: np.random.Generator,
-    ds: Dataset,
-    y_pred: np.ndarray,
-    residuals: np.ndarray,
-) -> Dataset:
-    """Parametric bootstrap using Gaussian noise estimated from residuals."""
-    # Inject Gaussian noise using per-peak residual standard deviation.
-    scale = np.nanstd(residuals, axis=0, ddof=1)
-    scale = np.where(np.isfinite(scale), scale, 0.0)
-    noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
-    y_boot = y_pred + noise
-    y_boot[~np.isfinite(ds.y)] = np.nan
-    return Dataset(
-        name=ds.name,
-        path=ds.path,
-        h_tot=ds.h_tot,
-        g_tot=ds.g_tot,
-        x=ds.x,
-        y=y_boot,
-        y_cols=ds.y_cols,
-        dropped_peaks=ds.dropped_peaks,
-    )
-
-
-def _points_bootstrap(
-    rng: np.random.Generator,
-    ds: Dataset,
-) -> Dataset:
-    # Sample complete titration points with replacement.
-    idx = rng.integers(0, ds.n_points, size=ds.n_points)
-    return Dataset(
-        name=ds.name,
-        path=ds.path,
-        h_tot=ds.h_tot[idx],
-        g_tot=ds.g_tot[idx],
-        x=ds.x[idx],
-        y=ds.y[idx],
-        y_cols=ds.y_cols,
-        dropped_peaks=ds.dropped_peaks,
-    )
-
-
-def _resample_bootstrap_dataset(
-    method: str,
-    rng: np.random.Generator,
-    ds: Dataset,
-    y_pred: np.ndarray,
-    residuals: np.ndarray,
-) -> Dataset:
-    # Dispatch bootstrap resampling strategy for one dataset.
-    if method == "points":
-        return _points_bootstrap(rng, ds)
-    if method == "parametric":
-        return _parametric_bootstrap(rng, ds, y_pred, residuals)
-    return _residual_bootstrap(rng, ds, y_pred, residuals)
-
-
-def _jitter_bootstrap_start(
-    params: np.ndarray,
-    model: ModelSpec,
-    rng: np.random.Generator,
-    logk_jitter: float,
-    logk_bounds: Optional[Tuple[float, float]],
-) -> np.ndarray:
-    # Apply bounded random jitter to logK start values.
-    params0 = params.copy()
-    if model.n_logk and logk_jitter > 0:
-        jitter = rng.normal(0.0, logk_jitter, size=model.n_logk)
-        params0[: model.n_logk] = params0[: model.n_logk] + jitter
-        if logk_bounds is not None:
-            params0[: model.n_logk] = np.clip(params0[: model.n_logk], logk_bounds[0], logk_bounds[1])
-    return params0
-
-
 def _accept_bootstrap_fit(
     params_fit: np.ndarray,
     res: OptimizeResult,
@@ -636,27 +447,15 @@ def _accept_bootstrap_fit(
     datasets: List[Dataset],
     solver_failure_mode: str = "fail-fast",
 ) -> bool:
-    # Count only converged refits with finite parameter vectors.
-    if not bool(getattr(res, "success", False)):
-        return False
-    if not bool(np.all(np.isfinite(params_fit))):
-        return False
-    try:
-        y_pred_list, _, _ = _predict_all(
-            params_fit,
-            model,
-            datasets,
-            solver_failure_mode=solver_failure_mode,
-        )
-    except _NUMERIC_EXCEPTIONS:
-        return False
-    for ds, y_pred in zip(datasets, y_pred_list):
-        valid_mask = np.isfinite(ds.y)
-        if not np.any(valid_mask):
-            return False
-        if not np.all(np.isfinite(y_pred[valid_mask])):
-            return False
-    return True
+    return _accept_bootstrap_fit_impl(
+        params_fit,
+        res,
+        model,
+        datasets,
+        predict_all_fn=_predict_all,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+        solver_failure_mode=solver_failure_mode,
+    )
 
 
 def bootstrap_params(
@@ -671,75 +470,21 @@ def bootstrap_params(
     max_nfev: int = 5000,
     solver_failure_mode: str = "fail-fast",
 ) -> BootstrapResult:
-    """Run bootstrap refits and collect parameter samples."""
-    # Refit the model on resampled datasets to estimate parameter dispersion.
-    rng = np.random.default_rng(seed)
-    param_samples = []
-    n_success = 0
-    logk_jitter = float(logk_jitter)
-
-    y_pred_list, _, residuals = _predict_all(
-        params,
-        model,
-        datasets,
-        solver_failure_mode=solver_failure_mode,
-    )
-
-    for _ in range(n_boot):
-        # Resample each dataset consistently across peaks.
-        boot_datasets: List[Dataset] = []
-        for ds, y_pred, res in zip(datasets, y_pred_list, residuals):
-            boot = _resample_bootstrap_dataset(method, rng, ds, y_pred, res)
-            boot_datasets.append(boot)
-
-        # Small random perturbations reduce local-minimum bias.
-        params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
-        bounds = _param_bounds(params0, model, logk_bounds)
-        fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
-        if solver_failure_mode != "fail-fast":
-            fit_kwargs["solver_failure_mode"] = solver_failure_mode
-        try:
-            params_fit, res = _fit_with_initial(
-                model,
-                boot_datasets,
-                params0,
-                **fit_kwargs,
-            )
-        except _NUMERIC_EXCEPTIONS:
-            continue
-        if not _accept_bootstrap_fit(
-            params_fit,
-            res,
-            model,
-            boot_datasets,
-            solver_failure_mode=solver_failure_mode,
-        ):
-            continue
-        param_samples.append(params_fit)
-        n_success += 1
-
-    # Stack successful samples and compute percentile intervals.
-    if not param_samples:
-        samples = np.full((0, len(params)), np.nan)
-    else:
-        samples = np.vstack(param_samples)
-
-    logk_samples = samples[:, : model.n_logk] if model.n_logk else np.full((samples.shape[0], 0), np.nan)
-
-    if logk_samples.size == 0:
-        ci_low = np.full((model.n_logk,), np.nan)
-        ci_high = np.full((model.n_logk,), np.nan)
-    else:
-        ci_low = np.percentile(logk_samples, 2.5, axis=0)
-        ci_high = np.percentile(logk_samples, 97.5, axis=0)
-
-    return BootstrapResult(
-        param_samples=samples,
-        logk_samples=logk_samples,
-        ci_low=ci_low,
-        ci_high=ci_high,
-        n_success=n_success,
+    return _bootstrap_params_impl(
+        params=params,
+        model=model,
+        datasets=datasets,
         n_boot=n_boot,
+        method=method,
+        seed=seed,
+        logk_bounds=logk_bounds,
+        logk_jitter=logk_jitter,
+        predict_all_fn=_predict_all,
+        fit_with_initial_fn=_fit_with_initial,
+        param_bounds_fn=_param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+        max_nfev=max_nfev,
+        solver_failure_mode=solver_failure_mode,
     )
 
 
@@ -748,7 +493,6 @@ def _exception_failure_result(
     datasets: List[Dataset],
     exc: Exception,
 ) -> FitResult:
-    # Convert per-model exceptions into a normal failure result payload.
     model = MODEL_SPECS[model_name]
     n_delta = sum(ds.n_peaks * model.n_delta_per_peak for ds in datasets)
     n_params = int(model.n_logk + n_delta)
@@ -769,7 +513,6 @@ def _iter_fit_jobs(
     model_names: Sequence[str],
     replicates: bool,
 ):
-    # Yield (datasets_for_fit, model_name) jobs for shared and per-dataset modes.
     if replicates:
         for model_name in model_names:
             yield datasets, model_name
@@ -792,10 +535,8 @@ def fit_models(
     logk_jitter: float,
     solver_failure_mode: str = "fail-fast",
 ) -> List[FitResult]:
-    """Fit all requested models, optionally as simultaneous replicates."""
     results = []
     for fit_datasets, model_name in _iter_fit_jobs(datasets, model_names, replicates):
-        # Fit one model to either all replicates or a single dataset.
         try:
             result = fit_model(
                 fit_datasets,
