@@ -52,11 +52,19 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
     vals = np.asarray(y, dtype=float)
     finite = vals[np.isfinite(vals)]
     if finite.size == 0:
-        return 1e3
-    scale = float(np.max(np.abs(finite)))
+        return 1.0
+    scale = float(np.std(finite))
     if not np.isfinite(scale) or scale <= 0:
-        scale = 1.0
-    return float(scale * 1e3)
+        q75, q25 = np.percentile(finite, [75.0, 25.0])
+        scale = float((q75 - q25) / 1.349)
+    if not np.isfinite(scale) or scale <= 0:
+        span = float(np.max(finite) - np.min(finite))
+        scale = span
+    if not np.isfinite(scale) or scale <= 0:
+        scale = float(np.max(np.abs(finite))) * 1e-2
+    if not np.isfinite(scale) or scale <= 0:
+        scale = 1e-3
+    return float(max(scale * 8.0, 1e-3))
 
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
@@ -116,27 +124,53 @@ def _residual_vector(
         n_valid = int(np.count_nonzero(valid_mask))
         if n_valid == 0:
             continue
-        penalty = np.full((n_valid,), _residual_penalty_scale(ds.y), dtype=float)
+        penalty_scale = _residual_penalty_scale(ds.y)
+
+        y_pred = None
         try:
             y_pred, _ = predict_dataset(model, ds, logk, delta, solver_failure_mode=solver_failure_mode)
         except _NUMERIC_EXCEPTIONS:
+            y_pred = None
+
+        if solver_failure_mode == "fail-fast" and model.is_binding:
+            retry_needed = y_pred is None
+            if y_pred is not None:
+                retry_needed = not np.all(np.isfinite(y_pred[valid_mask]))
+            if retry_needed:
+                y_pred_retry = None
+                try:
+                    y_pred_retry, _ = predict_dataset(model, ds, logk, delta, solver_failure_mode="continue")
+                except _NUMERIC_EXCEPTIONS:
+                    y_pred_retry = None
+
+                best_pred = y_pred
+                best_count = -1
+                if best_pred is not None:
+                    best_count = int(np.count_nonzero(np.isfinite(best_pred[valid_mask])))
+                if y_pred_retry is not None:
+                    retry_count = int(np.count_nonzero(np.isfinite(y_pred_retry[valid_mask])))
+                    if retry_count > best_count:
+                        best_pred = y_pred_retry
+                y_pred = best_pred
+
+        if y_pred is None:
             if penalty_counter is not None:
                 penalty_counter["count"] = penalty_counter.get("count", 0) + 1
-            residuals.append(penalty)
+            residuals.append(np.full((n_valid,), penalty_scale, dtype=float))
             continue
-        if not np.all(np.isfinite(y_pred[valid_mask])):
-            if penalty_counter is not None:
-                penalty_counter["count"] = penalty_counter.get("count", 0) + 1
-            residuals.append(penalty)
-            continue
+
         res = ds.y - y_pred
         res_valid = res[valid_mask]
-        if not np.all(np.isfinite(res_valid)):
+        finite_mask = np.isfinite(res_valid)
+        ds_residual = np.full((n_valid,), penalty_scale, dtype=float)
+        if np.any(finite_mask):
+            ds_residual[finite_mask] = res_valid[finite_mask]
+        residuals.append(ds_residual)
+
+        failed_count = n_valid - int(np.count_nonzero(finite_mask))
+        if failed_count > 0:
             if penalty_counter is not None:
                 penalty_counter["count"] = penalty_counter.get("count", 0) + 1
-            residuals.append(penalty)
-            continue
-        residuals.append(res_valid.ravel())
     if not residuals:
         return np.array([], dtype=float)
     return np.concatenate(residuals)
@@ -437,7 +471,7 @@ def fit_model(
     except RuntimeError as exc:
         if str(exc).startswith("BIC calculation failed:"):
             raise ModelFitError(str(exc)) from exc
-        raise
+        raise ModelFitError(str(exc)) from exc
 
 
 def _accept_bootstrap_fit(
