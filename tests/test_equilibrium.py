@@ -81,3 +81,87 @@ def test_solve_12_rejects_unknown_failure_mode():
 
     with pytest.raises(ValueError, match="failure_mode"):
         solve_12(h0, g0, 1e4, 1e3, failure_mode="unknown")
+
+
+HIGH_K_PARAMS = [
+    (1e8, 1e6),
+    (1e10, 1e8),
+    (1e12, 1e10),
+    (1e12, 1e12),
+]
+
+
+@pytest.mark.parametrize("k1,k2", HIGH_K_PARAMS)
+def test_solve_12_high_k_low_free_guest(k1, k2):
+    h0 = np.array([1e-3, 1e-3, 1e-3], dtype=float)
+    g0 = np.array([5e-4, 1e-3, 2e-3], dtype=float)
+
+    species = solve_12(h0, g0, k1, k2)
+
+    assert species.hg2 is not None
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    assert np.all(np.isfinite(species.hg))
+    assert np.all(np.isfinite(species.hg2))
+    np.testing.assert_allclose(
+        species.h + species.hg + species.hg2, h0, rtol=1e-5, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        species.g + species.hg + 2 * species.hg2, g0, rtol=1e-5, atol=1e-12
+    )
+
+
+@pytest.mark.parametrize("k1,k2", HIGH_K_PARAMS)
+def test_solve_21_high_k_low_free_guest(k1, k2):
+    h0 = np.array([1e-3, 2e-3, 3e-3], dtype=float)
+    g0 = np.array([5e-4, 1e-3, 1e-3], dtype=float)
+
+    species = solve_21(h0, g0, k1, k2)
+
+    assert species.h2g is not None
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    assert np.all(np.isfinite(species.hg))
+    assert np.all(np.isfinite(species.h2g))
+    np.testing.assert_allclose(
+        species.h + species.hg + 2 * species.h2g, h0, rtol=1e-5, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        species.g + species.hg + species.h2g, g0, rtol=1e-5, atol=1e-12
+    )
+
+
+@pytest.mark.parametrize("k1,k2", [(1e10, 1e8), (1e12, 1e12)])
+def test_solve_12_near_saturation(k1, k2):
+    h0 = np.array([1e-3, 1e-3], dtype=float)
+    g0 = np.array([1e-6, 1e-3], dtype=float)
+
+    species = solve_12(h0, g0, k1, k2)
+
+    assert species.hg2 is not None
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    np.testing.assert_allclose(
+        species.h + species.hg + species.hg2, h0, rtol=1e-5, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        species.g + species.hg + 2 * species.hg2, g0, rtol=1e-5, atol=1e-12
+    )
+
+
+@pytest.mark.parametrize("k1,k2", [(1e10, 1e8), (1e12, 1e12)])
+def test_solve_21_near_saturation(k1, k2):
+    h0 = np.array([2e-3, 2e-3], dtype=float)
+    g0 = np.array([1e-6, 1e-3], dtype=float)
+
+    species = solve_21(h0, g0, k1, k2)
+
+    assert species.h2g is not None
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    np.testing.assert_allclose(
+        species.h + species.hg + 2 * species.h2g, h0, rtol=1e-5, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        species.g + species.hg + species.h2g, g0, rtol=1e-5, atol=1e-12
+    )

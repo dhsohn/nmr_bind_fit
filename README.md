@@ -87,7 +87,7 @@ flowchart TD
     I --> J[Nonlinear least squares using least_squares]
     J --> K[Predict shifts]
     K --> K1[1:1: closed form]
-    K --> K2[1:2 and 2:1: Newton-Raphson then bisection]
+    K --> K2[1:2 and 2:1: Brent root-finding]
     K --> L{Finite predictions?}
     L -->|No| L1[Mark model failed]
     L -->|Yes| M[Residuals]
@@ -102,4 +102,4 @@ flowchart TD
 
 ## Methods Summary
 
-NMR chemical shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding (H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (scipy.optimize.least_squares). The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Newton-Raphson and bisection fallback. Uncertainty is evaluated by bootstrap resampling (default 1000) with small logK perturbations in each refit. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. One shared residual variance term is estimated for model comparison and counted as one additional information-criteria parameter (k = p + 1). Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts. At very large K or extreme concentration ratios, the free-guest root can approach the lower bound (1e-18), leading to saturation and reduced sensitivity to K.
+NMR chemical shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (H + G <=> HG), 1:2 binding (H + G <=> HG; HG + G <=> HG2), 2:1 binding (H + G <=> HG; H + HG <=> H2G), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (scipy.optimize.least_squares). The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Brent's method (scipy.optimize.brentq). Uncertainty is evaluated by bootstrap resampling (default 1000) with small logK perturbations in each refit. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. One shared residual variance term is estimated for model comparison and counted as one additional information-criteria parameter (k = p + 1). Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts.

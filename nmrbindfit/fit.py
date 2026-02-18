@@ -322,7 +322,7 @@ def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[ob
     for ds, species in zip(datasets, species_list):
         stats = getattr(species, "solver_stats", None)
         if stats is not None:
-            fail_points += int(getattr(stats, "fallback_fail", 0))
+            fail_points += int(getattr(stats, "fail", 0))
             total_points += int(getattr(stats, "points", ds.n_points))
     message = "Equilibrium solver produced non-finite predictions."
     if total_points > 0:

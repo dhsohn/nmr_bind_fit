@@ -31,12 +31,9 @@ class DatasetLike(Protocol):
 
 class SolverStatsLike(Protocol):
     points: int
-    newton_success: int
-    newton_fail: int
-    newton_max_iter: int
-    fallback_success: int
-    fallback_fail: int
-    fallback_method: str
+    success: int
+    fail: int
+    method: str
     failed_indices: List[int]
 
 

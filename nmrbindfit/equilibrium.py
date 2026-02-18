@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
+from scipy.optimize import brentq
 
 
 @dataclass
@@ -22,12 +23,9 @@ class SpeciesResult:
 @dataclass
 class SolverStats:
     points: int = 0
-    newton_success: int = 0
-    newton_fail: int = 0
-    newton_max_iter: int = 0
-    fallback_success: int = 0
-    fallback_fail: int = 0
-    fallback_method: str = "bisection"
+    success: int = 0
+    fail: int = 0
+    method: str = "brentq"
     failed_indices: list[int] = field(default_factory=list)
 
 
@@ -91,102 +89,6 @@ def _scale_species_from_logs(
     return tuple(float(v) for v in values)
 
 
-def _newton_1d(
-    f: Callable[[float], float],
-    df: Callable[[float], float],
-    x0: float,
-    lower: float,
-    upper: float,
-    tol: float = 1e-12,
-    max_iter: int = 100,
-) -> Tuple[Optional[float], str]:
-    """Newton-Raphson with simple safeguards for a 1D root."""
-    # Clamp the initial guess and guard against invalid steps.
-    x = float(np.clip(x0, lower, upper))
-    for _ in range(max_iter):
-        fx = f(x)
-        if not np.isfinite(fx):
-            return None, "nonfinite"
-        if abs(fx) < tol:
-            return x, "success"
-        dfx = df(x)
-        if not np.isfinite(dfx) or dfx == 0:
-            return None, "derivative"
-        step = fx / dfx
-        x_new = x - step
-        if not np.isfinite(x_new) or x_new <= lower or x_new >= upper:
-            x_new = x - 0.5 * step
-        if not np.isfinite(x_new) or x_new <= lower or x_new >= upper:
-            x_new = 0.5 * (x + np.clip(x_new, lower, upper))
-        if abs(x_new - x) < tol * max(1.0, abs(x)):
-            fx_new = f(x_new)
-            if np.isfinite(fx_new) and abs(fx_new) < tol:
-                return x_new, "success"
-            return None, "convergence"
-        x = x_new
-    return None, "max_iter"
-
-
-def _solve_newton(
-    f: Callable[[float], float],
-    df: Callable[[float], float],
-    guesses: Tuple[float, ...],
-    lower: float,
-    upper: float,
-    tol: float = 1e-12,
-    max_iter: int = 100,
-) -> Tuple[Optional[float], str]:
-    # Try multiple initial guesses to improve convergence robustness.
-    statuses = []
-    for guess in guesses:
-        x, status = _newton_1d(f, df, guess, lower, upper, tol=tol, max_iter=max_iter)
-        if x is not None and np.isfinite(x):
-            return x, "success"
-        statuses.append(status)
-    if "max_iter" in statuses:
-        return None, "max_iter"
-    return None, "fail"
-
-
-def _solve_bisection(
-    f: Callable[[float], float],
-    lower: float,
-    upper: float,
-    tol: float = 1e-12,
-    max_iter: int = 200,
-) -> Optional[float]:
-    """Bracketed bisection used only when a sign change is available."""
-    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
-        return None
-    f_low = f(lower)
-    f_high = f(upper)
-    if not np.isfinite(f_low) or not np.isfinite(f_high):
-        return None
-    if f_low == 0:
-        return float(lower)
-    if f_high == 0:
-        return float(upper)
-    if (f_low > 0 and f_high > 0) or (f_low < 0 and f_high < 0):
-        return None
-
-    lo = lower
-    hi = upper
-    for _ in range(max_iter):
-        mid = 0.5 * (lo + hi)
-        f_mid = f(mid)
-        if not np.isfinite(f_mid):
-            return None
-        if abs(f_mid) < tol or abs(hi - lo) < tol * max(1.0, abs(mid)):
-            return float(mid)
-        if (f_low >= 0 and f_mid <= 0) or (f_low <= 0 and f_mid >= 0):
-            hi = mid
-            f_high = f_mid
-        else:
-            lo = mid
-            f_low = f_mid
-    return None
-
-
 def solve_12_point(
     h_tot: float,
     g_tot: float,
@@ -218,11 +120,6 @@ def solve_12_point(
             if not np.isfinite(b) or not np.isfinite(c) or not np.isfinite(d):
                 return float("nan")
             return ((g + b) * g + c) * g + d
-
-        def df(g: float) -> float:
-            if not np.isfinite(b) or not np.isfinite(c):
-                return float("nan")
-            return (3.0 * g + 2.0 * b) * g + c
     else:
         B = k1 + prod
         C = 1.0 + k1 * (h_tot - g_tot)
@@ -231,33 +128,23 @@ def solve_12_point(
         def f(g: float) -> float:
             return ((A * g + B) * g + C) * g + D
 
-        def df(g: float) -> float:
-            return (3.0 * A * g + 2.0 * B) * g + C
-
-    # Enforce a small lower bound to keep log terms finite.
-    lower = 1e-18
-    upper = max(g_tot, lower * 10.0)
-    guesses = []
-    if x0 is not None:
-        guesses.append(float(x0))
-    guesses.extend([g_tot, g_tot * 0.5, g_tot * 0.1, upper])
-    # Use Newton first, then fall back to bisection if needed.
-    g, status = _solve_newton(f, df, tuple(guesses), lower, upper)
-    if g is None:
-        if stats is not None:
-            stats.newton_fail += 1
-            if status == "max_iter":
-                stats.newton_max_iter += 1
-        g = _solve_bisection(f, lower, upper)
-        if g is None:
-            if stats is not None:
-                stats.fallback_fail += 1
-            raise RuntimeError("Equilibrium solver failed.")
-        if stats is not None:
-            stats.fallback_success += 1
+    # Adaptive lower bound: estimate minimum free guest under full saturation.
+    with np.errstate(over="ignore"):
+        binding_capacity = k1 * h_tot * (1.0 + 2.0 * k2 * h_tot)
+    if np.isfinite(binding_capacity) and binding_capacity > 0:
+        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
     else:
+        lower = 1e-300
+    upper = max(g_tot, lower * 10.0)
+
+    try:
+        g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
         if stats is not None:
-            stats.newton_success += 1
+            stats.success += 1
+    except ValueError:
+        if stats is not None:
+            stats.fail += 1
+        raise RuntimeError("Equilibrium solver failed.")
 
     logk1 = _log_or_neg_inf(k1)
     logk2 = _log_or_neg_inf(k2)
@@ -267,6 +154,7 @@ def solve_12_point(
         dtype=float,
     )
     h, hg, hg2 = _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 1.0))
+
     return h, g, hg, hg2
 
 
@@ -317,54 +205,31 @@ def solve_21_point(
         term2 = 0.5 * (h_tot - b_h)
         return g + term1 + term2 - g_tot
 
-    def df(g: float) -> float:
-        # Numerical derivative for robustness when an analytic form is messy.
-        eps = max(1e-12, 1e-6 * abs(g))
-        g_low = max(lower, g - eps)
-        g_high = min(upper, g + eps)
-        if g_high == g_low:
-            return float("nan")
-        f_low = f(g_low)
-        f_high = f(g_high)
-        if not np.isfinite(f_low) or not np.isfinite(f_high):
-            return float("nan")
-        return (f_high - f_low) / (g_high - g_low)
-
-    # Enforce a small lower bound to keep log terms finite.
-    lower = 1e-18
-    upper = max(g_tot, lower * 10.0)
-    guesses = []
-    if x0 is not None:
-        guesses.append(float(x0))
-    guesses.extend([g_tot, g_tot * 0.5, g_tot * 0.1, upper])
-    # Use Newton first, then fall back to bisection if needed.
-    g, status = _solve_newton(f, df, tuple(guesses), lower, upper)
-    if g is None:
-        if stats is not None:
-            stats.newton_fail += 1
-            if status == "max_iter":
-                stats.newton_max_iter += 1
-        g = _solve_bisection(f, lower, upper)
-        if g is None:
-            if stats is not None:
-                stats.fallback_fail += 1
-            raise RuntimeError("Equilibrium solver failed.")
-        if stats is not None:
-            stats.fallback_success += 1
+    # Adaptive lower bound: estimate minimum free guest under full saturation.
+    with np.errstate(over="ignore"):
+        binding_capacity = k1 * h_tot * (1.0 + k2 * h_tot)
+    if np.isfinite(binding_capacity) and binding_capacity > 0:
+        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
     else:
-        if stats is not None:
-            stats.newton_success += 1
+        lower = 1e-300
+    upper = max(g_tot, lower * 10.0)
 
-    h_raw, _ = _h_and_bh_from_g(g)
-    logh = _log_or_neg_inf(h_raw)
-    logk1 = _log_or_neg_inf(k1)
-    logk2 = _log_or_neg_inf(k2)
-    logg = _log_or_neg_inf(g)
-    log_species = np.array(
-        [logh, logk1 + logh + logg, logk1 + logk2 + 2.0 * logh + logg],
-        dtype=float,
-    )
-    h, hg, h2g = _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 2.0))
+    try:
+        g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
+        if stats is not None:
+            stats.success += 1
+    except ValueError:
+        if stats is not None:
+            stats.fail += 1
+        raise RuntimeError("Equilibrium solver failed.")
+
+    # Derive species directly from the root decomposition so both
+    # host and guest mass balances hold by construction of f(g)=0.
+    h_raw, b_h = _h_and_bh_from_g(g)
+    h = max(0.0, h_raw)
+    hg = max(0.0, b_h - h_raw)
+    h2g = max(0.0, 0.5 * (h_tot - b_h))
+
     return h, g, hg, h2g
 
 

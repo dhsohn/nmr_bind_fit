@@ -125,12 +125,9 @@ def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[s
     # Combine solver statistics across species lists.
     totals = {
         "solver_points": 0,
-        "solver_newton_success": 0,
-        "solver_newton_fail": 0,
-        "solver_newton_max_iter": 0,
-        "solver_fallback_success": 0,
-        "solver_fallback_fail": 0,
-        "solver_fallback_method": set(),
+        "solver_success": 0,
+        "solver_fail": 0,
+        "solver_method": set(),
     }
     found = False
     for species in species_list:
@@ -139,18 +136,15 @@ def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[s
             continue
         found = True
         totals["solver_points"] += int(stats.points)
-        totals["solver_newton_success"] += int(stats.newton_success)
-        totals["solver_newton_fail"] += int(stats.newton_fail)
-        totals["solver_newton_max_iter"] += int(stats.newton_max_iter)
-        totals["solver_fallback_success"] += int(stats.fallback_success)
-        totals["solver_fallback_fail"] += int(stats.fallback_fail)
-        method = stats.fallback_method
+        totals["solver_success"] += int(stats.success)
+        totals["solver_fail"] += int(stats.fail)
+        method = stats.method
         if method:
-            totals["solver_fallback_method"].add(str(method))
+            totals["solver_method"].add(str(method))
     if not found:
         return None
-    methods = totals["solver_fallback_method"]
-    totals["solver_fallback_method"] = ", ".join(sorted(methods)) if methods else "N/A"
+    methods = totals["solver_method"]
+    totals["solver_method"] = ", ".join(sorted(methods)) if methods else "N/A"
     return totals
 
 
@@ -252,12 +246,9 @@ def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
     if solver_stats is None:
         return {
             "solver_points": "N/A",
-            "solver_newton_success": "N/A",
-            "solver_newton_fail": "N/A",
-            "solver_newton_max_iter": "N/A",
-            "solver_fallback_success": "N/A",
-            "solver_fallback_fail": "N/A",
-            "solver_fallback_method": "N/A",
+            "solver_success": "N/A",
+            "solver_fail": "N/A",
+            "solver_method": "N/A",
         }
     return solver_stats
 
@@ -289,11 +280,11 @@ def _build_model_warnings(
     if res.penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {res.penalty_count}")
 
-    if solver_stats is not None and solver_stats.get("solver_fallback_fail", 0) not in {"N/A", None}:
-        n_fail = _as_int(solver_stats.get("solver_fallback_fail", 0))
+    if solver_stats is not None and solver_stats.get("solver_fail", 0) not in {"N/A", None}:
+        n_fail = _as_int(solver_stats.get("solver_fail", 0))
         n_points = _as_int(solver_stats.get("solver_points", 0))
         if n_fail > 0 and n_points > 0:
-            warnings.append(f"solver fallback failures ({n_fail}/{n_points})")
+            warnings.append(f"solver failures ({n_fail}/{n_points})")
 
     for ds, species in zip(res.datasets, res.species):
         stats = species.solver_stats
@@ -323,12 +314,9 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
         stats_base.update(
             {
                 "solver_points": str(solver_stats["solver_points"]),
-                "solver_newton_success": str(solver_stats["solver_newton_success"]),
-                "solver_newton_fail": str(solver_stats["solver_newton_fail"]),
-                "solver_newton_max_iter": str(solver_stats["solver_newton_max_iter"]),
-                "solver_fallback_success": str(solver_stats["solver_fallback_success"]),
-                "solver_fallback_fail": str(solver_stats["solver_fallback_fail"]),
-                "solver_fallback_method": str(solver_stats["solver_fallback_method"]),
+                "solver_success": str(solver_stats["solver_success"]),
+                "solver_fail": str(solver_stats["solver_fail"]),
+                "solver_method": str(solver_stats["solver_method"]),
             }
         )
     return {_label_stats_key(k): v for k, v in stats_base.items()}
@@ -495,24 +483,49 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
             "title": "Statistical Model Comparison",
             "content": (
                 "Model comparison employed the Bayesian Information Criterion (BIC) as the primary "
-                "ranking index, defined as BIC = n·ln(RSS/n) + k·ln(n), where n is the number of "
-                "observations, RSS is the residual sum of squares, and k is the number of estimated "
-                "parameters. The corrected Akaike Information Criterion (AICc) was reported as "
+                "ranking index, defined as BIC = −2 ℓ(θ̂) + k·ln(n), where ℓ(θ̂) is the maximized "
+                "Gaussian log-likelihood, n is the number of observations, and k is the number of "
+                "estimated parameters. Under the assumption of i.i.d. Gaussian residuals with MLE "
+                "variance σ̂² = RSS/n, this equals n·ln(2π·RSS/n) + n + k·ln(n); for model ranking "
+                "the terms additive in n cancel, yielding equivalent ordering to n·ln(RSS/n) + k·ln(n). "
+                "The corrected Akaike Information Criterion (AICc) was reported as "
                 "supporting information. These criteria were interpreted as measures of relative support "
                 "among the tested candidates and considered together with chemical plausibility and "
                 "spectral consistency. One shared residual variance term (σ²) was estimated for model "
                 "comparison and counted as one additional information-criteria parameter (k = p + 1). "
                 "The effective sample size n was defined as the total number of finite residual scalars "
                 "across all datasets, titration points, and ppm peaks; missing observations were excluded. "
+                "Residual correlation between peaks was not modeled (diagonal covariance assumed). "
                 "A ΔBIC < 2 between the best and next-best model was flagged as weak discrimination."
             ),
         }
     )
 
     # 5. Uncertainty Quantification
+    method_desc = {
+        "residual": (
+            "Residual resampling: fitted residuals were mean-centered per peak column and "
+            "resampled with replacement across titration points, then added back to the "
+            "fitted values to generate pseudo-datasets."
+        ),
+        "parametric": (
+            "Parametric resampling: Gaussian noise was generated independently for each "
+            "peak column using the column-wise residual standard deviation (ddof = 1), then "
+            "added to the fitted values. This per-column variance estimate allows for modest "
+            "heteroscedasticity across peaks while the model-comparison criteria (BIC/AICc) "
+            "use a single pooled variance; the two serve different inferential purposes "
+            "(uncertainty quantification vs. model ranking) and are therefore not inconsistent."
+        ),
+        "points": (
+            "Case (points) resampling: entire titration-point rows (concentrations and "
+            "observed shifts) were resampled with replacement, preserving the covariate "
+            "structure within each row."
+        ),
+    }
     bootstrap_note = (
         f"Bootstrap uncertainty was evaluated using {args.bootstrap} iterations with "
         f"{args.bootstrap_method} resampling. "
+        f"{method_desc.get(args.bootstrap_method, '')} "
         f"Bootstrap refits used a small log₁₀(K) start perturbation "
         f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
         "The 95% confidence interval was derived from the 2.5th and 97.5th percentiles of the "
