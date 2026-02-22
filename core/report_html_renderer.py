@@ -38,9 +38,9 @@ _CSS = r"""
 /* ── Reset & Base ────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-@import url('https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap');
-
 :root {
+  --font-serif: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, 'Helvetica Neue', Arial, sans-serif;
   --navy: #1a365d;
   --navy-light: #2c5282;
   --slate-700: #334155;
@@ -66,7 +66,7 @@ _CSS = r"""
 html { font-size: 15px; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   color: var(--text);
   background: var(--slate-50);
   line-height: 1.7;
@@ -88,7 +88,7 @@ body {
   margin-bottom: 36px;
 }
 .report-header h1 {
-  font-family: 'Crimson Text', Georgia, 'Times New Roman', serif;
+  font-family: var(--font-serif);
   font-size: 2rem;
   font-weight: 700;
   color: var(--navy);
@@ -110,7 +110,7 @@ body {
   margin-bottom: 36px;
 }
 .toc h2 {
-  font-family: 'Crimson Text', Georgia, serif;
+  font-family: var(--font-serif);
   font-size: 1.15rem;
   color: var(--navy);
   margin-bottom: 10px;
@@ -144,7 +144,7 @@ body {
   box-shadow: var(--shadow);
 }
 .exec-summary h2 {
-  font-family: 'Crimson Text', Georgia, serif;
+  font-family: var(--font-serif);
   font-size: 1.2rem;
   margin-bottom: 12px;
   opacity: .9;
@@ -157,7 +157,7 @@ body {
 
 /* ── Section Headings ────────────────────────────── */
 h2.section-title {
-  font-family: 'Crimson Text', Georgia, serif;
+  font-family: var(--font-serif);
   font-size: 1.4rem;
   color: var(--navy);
   margin-top: 44px;
@@ -325,7 +325,7 @@ tr.best-model td { background: var(--success-bg) !important; font-weight: 500; }
   border-bottom: 1px solid var(--slate-200);
 }
 .model-card-header h3 {
-  font-family: 'Crimson Text', Georgia, serif;
+  font-family: var(--font-serif);
   font-size: 1.15rem;
   color: var(--navy);
   margin: 0;
