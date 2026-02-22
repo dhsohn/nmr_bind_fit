@@ -1,7 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from nmrbindfit.cli import _build_dataset_labels, _dataset_key
+from core.cli import _build_dataset_labels, _dataset_key
 
 
 def test_dataset_key_disambiguates_same_stem_different_paths():

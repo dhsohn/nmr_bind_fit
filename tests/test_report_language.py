@@ -1,8 +1,8 @@
 import argparse
 from types import SimpleNamespace
 
-from nmrbindfit.report import DecisionEntry, _decision_paragraphs
-from nmrbindfit.report_pipeline import _replicate_dataset_dir_labels, build_decisions, build_report_artifacts
+from core.report import DecisionEntry, _decision_paragraphs
+from core.report_pipeline import _replicate_dataset_dir_labels, build_decisions, build_report_artifacts
 
 
 def test_build_decisions_uses_provisional_language():

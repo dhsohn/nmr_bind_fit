@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-import nmrbindfit.equilibrium as equilibrium
-from nmrbindfit.equilibrium import solve_11, solve_12, solve_21
+import core.equilibrium as equilibrium
+from core.equilibrium import solve_11, solve_12, solve_21
 
 
 def test_solve_11_mass_balance():

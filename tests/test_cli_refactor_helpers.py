@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nmrbindfit.cli import _index_results, _resolve_inputs, _resolve_logk_config, build_parser, run_fit
+from core.cli import _index_results, _resolve_inputs, _resolve_logk_config, build_parser, run_fit
 
 
 def test_resolve_logk_config_defaults_and_fixed_bounds():

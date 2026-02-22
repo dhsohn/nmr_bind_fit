@@ -247,7 +247,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     # Define CLI flags and defaults.
-    parser = argparse.ArgumentParser(prog="nmrbindfit")
+    parser = argparse.ArgumentParser(prog="nmr_bind_fit")
     parser.add_argument(
         "command",
         nargs="?",

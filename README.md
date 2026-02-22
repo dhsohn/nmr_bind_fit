@@ -21,13 +21,13 @@ pip install openpyxl
 Single file fit with all models and 1000 bootstrap iterations:
 
 ```
-python -m nmrbindfit.cli --input data.csv --bootstrap 1000
+nmr_bind_fit --input data.csv --bootstrap 1000
 ```
 
 Multiple replicate files with shared binding constants:
 
 ```
-python -m nmrbindfit.cli --input data1.xlsx data2.xlsx --replicates
+nmr_bind_fit --input data1.xlsx data2.xlsx --replicates
 ```
 
 For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns
@@ -70,7 +70,7 @@ The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `
 
 ```mermaid
 flowchart TD
-    A[CLI nmrbindfit] --> B[Load input files CSV or XLSX]
+    A[CLI nmr_bind_fit] --> B[Load input files CSV or XLSX]
     B --> C{Validate columns}
     C -->|Host or Guest missing| C1[Drop row]
     C -->|ppm missing| C2[Drop ppm column]

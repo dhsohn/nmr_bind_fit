@@ -4,9 +4,9 @@ from typing import cast
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-import nmrbindfit.fit as fit
-from nmrbindfit.io import Dataset
-from nmrbindfit.models import MODEL_SPECS
+import core.fit as fit
+from core.io import Dataset
+from core.models import MODEL_SPECS
 
 
 class _DummyResult:
