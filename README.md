@@ -24,6 +24,27 @@ Single file fit with all models and 1000 bootstrap iterations:
 nmr_bind_fit --input data.csv --bootstrap 1000
 ```
 
+If concentrations are not in molar (`M`), set the input unit for report text:
+
+```
+nmr_bind_fit --input data.csv --concentration-unit mM
+```
+
+To use BCa-style bootstrap CI instead of percentile CI:
+
+```
+nmr_bind_fit --input data.csv --bootstrap-ci-method bca
+```
+
+Note: the current BCa implementation uses a bootstrap-sample-based acceleration
+approximation for computational efficiency.
+
+To include informational residual diagnostics in the report:
+
+```
+nmr_bind_fit --input data.csv --residual-diagnostics
+```
+
 Multiple replicate files with shared binding constants:
 
 ```
@@ -32,7 +53,8 @@ nmr_bind_fit --input data1.xlsx data2.xlsx --replicates
 
 For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns
 with missing values are dropped before fitting, and point-wise nonlinear solver failures in
-1:2/2:1 models use fail-fast behavior. log10 K is constrained to [0, 12] (K in [1e0, 1e12]).
+1:2/2:1 models use fail-fast behavior. log10 K is constrained to [0, 12] (K in [1e0, 1e12] in
+reciprocal concentration units; default concentration unit is `M`).
 
 ## Input Format
 

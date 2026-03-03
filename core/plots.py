@@ -56,10 +56,43 @@ def _style_axes(ax: plt.Axes) -> None:
 
 def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
     # Create a dense grid of equivalents for smooth fit curves.
-    eq_vals = np.linspace(np.min(ds.x), np.max(ds.x), n)
-    h_ref = float(np.median(ds.h_tot))
-    h_vals = np.full_like(eq_vals, h_ref)
-    g_vals = eq_vals * h_ref
+    eq_obs = np.asarray(ds.x, dtype=float)
+    h_obs = np.asarray(ds.h_tot, dtype=float)
+    eq_vals = np.linspace(np.min(eq_obs), np.max(eq_obs), n)
+
+    finite_h = h_obs[np.isfinite(h_obs)]
+    h_ref = float(np.median(finite_h)) if finite_h.size else 1.0
+    if finite_h.size and np.isfinite(h_ref):
+        h_mean = float(np.mean(finite_h))
+        h_cv = float(np.std(finite_h) / abs(h_mean)) if h_mean != 0 else float("inf")
+    else:
+        h_cv = 0.0
+
+    if h_cv <= 0.01:
+        h_vals = np.full_like(eq_vals, h_ref)
+    else:
+        mask = np.isfinite(eq_obs) & np.isfinite(h_obs)
+        if np.count_nonzero(mask) < 2:
+            h_vals = np.full_like(eq_vals, h_ref)
+        else:
+            eq_sorted = eq_obs[mask]
+            h_sorted = h_obs[mask]
+            order = np.argsort(eq_sorted)
+            eq_sorted = eq_sorted[order]
+            h_sorted = h_sorted[order]
+
+            eq_unique, inv = np.unique(eq_sorted, return_inverse=True)
+            h_unique = np.zeros_like(eq_unique, dtype=float)
+            counts = np.zeros_like(eq_unique, dtype=float)
+            np.add.at(h_unique, inv, h_sorted)
+            np.add.at(counts, inv, 1.0)
+            h_unique = h_unique / counts
+
+            if eq_unique.size == 1:
+                h_vals = np.full_like(eq_vals, float(h_unique[0]))
+            else:
+                h_vals = np.interp(eq_vals, eq_unique, h_unique)
+    g_vals = eq_vals * h_vals
     x_vals = eq_vals
 
     return Dataset(
@@ -146,7 +179,7 @@ def plot_residuals(
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
     for i, peak in enumerate(ds.y_cols):
-        fig, ax = plt.subplots(figsize=(7, 3))
+        fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
                    edgecolors="white", linewidths=0.4)
@@ -173,7 +206,7 @@ def plot_bootstrap_hist(
     if samples.size == 0:
         return files
     for i, name in enumerate(names):
-        fig, ax = plt.subplots(figsize=(6, 3.5))
+        fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
                 edgecolor="white", linewidth=0.5)
         ax.set_xlabel(f"$K$ ({name})" if name != "K" else "$K$")
@@ -199,7 +232,7 @@ def plot_fraction_bound(
         return []
     out_dir.mkdir(parents=True, exist_ok=True)
     f = _prepare_fraction_bound_values(model, ds, logk, delta)
-    fig, ax = plt.subplots(figsize=(7, 3.5))
+    fig, ax = plt.subplots(figsize=(7, 4.5))
     ax.scatter(ds.x, f, color=_CLR_DATA, s=28, zorder=3,
                edgecolors="white", linewidths=0.4)
     ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")

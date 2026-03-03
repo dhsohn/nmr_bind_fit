@@ -127,6 +127,11 @@ def test_bootstrap_all_nonconverged_yields_no_samples(monkeypatch):
     assert out.logk_samples.shape == (0, 1)
     assert np.isnan(out.ci_low).all()
     assert np.isnan(out.ci_high).all()
+    assert np.isnan(out.ci_low_percentile).all()
+    assert np.isnan(out.ci_high_percentile).all()
+    assert np.isnan(out.ci_low_bca).all()
+    assert np.isnan(out.ci_high_bca).all()
+    assert out.ci_method == "percentile"
 
 
 def test_accept_bootstrap_fit_rejects_nonfinite_predictions(monkeypatch):
@@ -148,3 +153,34 @@ def test_accept_bootstrap_fit_rejects_nonfinite_predictions(monkeypatch):
     )
 
     assert accepted is False
+
+
+def test_bootstrap_supports_bca_ci_method(monkeypatch):
+    ds = _make_dataset()
+    model = MODEL_SPECS["11"]
+    params = np.array([4.0, 7.0, 7.5], dtype=float)
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        return params0 + np.array([0.05, 0.0, 0.0]), _DummyResult(success=True)
+
+    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
+
+    out = fit.bootstrap_params(
+        params,
+        model,
+        [ds],
+        n_boot=5,
+        method="residual",
+        ci_method="bca",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+    )
+
+    assert out.ci_method == "bca"
+    assert out.ci_low.shape == (1,)
+    assert out.ci_high.shape == (1,)
+    assert out.ci_low_percentile.shape == (1,)
+    assert out.ci_high_percentile.shape == (1,)
+    assert out.ci_low_bca.shape == (1,)
+    assert out.ci_high_bca.shape == (1,)

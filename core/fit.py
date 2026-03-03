@@ -16,6 +16,7 @@ from .fit_optimizer import param_bounds as _param_bounds_impl
 from .fit_optimizer import select_best_multistart as _select_best_multistart_impl
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
+from .stats import residual_diagnostics as _residual_diagnostics_impl
 
 
 @dataclass
@@ -29,6 +30,7 @@ class FitResult:
     rss: float
     rmse: float
     r2: float
+    r2_per_peak: List[float]
     bic: float
     aicc: float
     n: int
@@ -37,6 +39,7 @@ class FitResult:
     y_pred: List[np.ndarray]
     species: List
     residuals: List[np.ndarray]
+    residual_diagnostics: Dict[str, float]
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
 
@@ -201,24 +204,25 @@ def _rss_value(residuals: List[np.ndarray]) -> float:
     return rss
 
 
-def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> float:
-    y_all = []
-    y_pred_all = []
+def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> Tuple[float, List[float]]:
+    r2_per_peak: List[float] = []
     for ds, y_pred in zip(datasets, y_pred_list):
-        mask = np.isfinite(ds.y) & np.isfinite(y_pred)
-        if not np.any(mask):
-            continue
-        y_all.append(ds.y[mask].ravel())
-        y_pred_all.append(y_pred[mask].ravel())
-    if not y_all:
-        return float("nan")
-    y_all = np.concatenate(y_all)
-    y_pred_all = np.concatenate(y_pred_all)
-    ss_res = np.sum((y_all - y_pred_all) ** 2)
-    ss_tot = np.sum((y_all - np.mean(y_all)) ** 2)
-    if ss_tot == 0:
-        return float("nan")
-    return float(1.0 - ss_res / ss_tot)
+        for peak_idx in range(ds.n_peaks):
+            y_obs_col = ds.y[:, peak_idx]
+            y_pred_col = y_pred[:, peak_idx]
+            mask = np.isfinite(y_obs_col) & np.isfinite(y_pred_col)
+            if not np.any(mask):
+                continue
+            obs = y_obs_col[mask]
+            pred = y_pred_col[mask]
+            ss_tot = float(np.sum((obs - np.mean(obs)) ** 2))
+            if ss_tot <= 0:
+                continue
+            ss_res = float(np.sum((obs - pred) ** 2))
+            r2_per_peak.append(float(1.0 - ss_res / ss_tot))
+    if not r2_per_peak:
+        return float("nan"), []
+    return float(np.mean(r2_per_peak)), r2_per_peak
 
 
 def _fit_with_initial(
@@ -273,6 +277,7 @@ def _failed_fit_result(
         rss=float("nan"),
         rmse=float("nan"),
         r2=float("nan"),
+        r2_per_peak=[],
         bic=float("nan"),
         aicc=float("nan"),
         n=n,
@@ -281,6 +286,7 @@ def _failed_fit_result(
         y_pred=[],
         species=species if species is not None else [],
         residuals=[],
+        residual_diagnostics={},
         bootstrap=None,
         penalty_count=0,
     )
@@ -345,11 +351,13 @@ def _build_successful_fit_result(
     best_res: OptimizeResult,
     bootstrap: int,
     bootstrap_method: str,
+    bootstrap_ci_method: str,
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
     max_nfev: int,
     solver_failure_mode: str,
+    compute_residual_diagnostics: bool,
 ) -> FitResult:
     param_names = _param_names_multi(model, datasets)
     y_pred_list, species_list, residuals = _predict_all(
@@ -373,8 +381,14 @@ def _build_successful_fit_result(
     p = int(len(best_params))
     dof = int(n - p)
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
-    r2 = _r2_score(datasets, y_pred_list)
+    r2, r2_per_peak = _r2_score(datasets, y_pred_list)
     bic, aicc = _information_criteria(datasets, residuals, p)
+    diag: Dict[str, float] = {}
+    if compute_residual_diagnostics:
+        finite_residuals = [res[np.isfinite(res)] for res in residuals]
+        if finite_residuals:
+            stacked = np.concatenate(finite_residuals)
+            diag = _residual_diagnostics_impl(stacked)
 
     bootstrap_result = None
     if bootstrap > 0:
@@ -387,6 +401,7 @@ def _build_successful_fit_result(
             seed=seed,
             logk_bounds=logk_bounds,
             logk_jitter=logk_jitter,
+            ci_method=bootstrap_ci_method,
             max_nfev=max_nfev,
             solver_failure_mode=solver_failure_mode,
         )
@@ -401,6 +416,7 @@ def _build_successful_fit_result(
         rss=rss,
         rmse=rmse,
         r2=r2,
+        r2_per_peak=r2_per_peak,
         bic=bic,
         aicc=aicc,
         n=n,
@@ -409,6 +425,7 @@ def _build_successful_fit_result(
         y_pred=y_pred_list,
         species=species_list,
         residuals=residuals,
+        residual_diagnostics=diag,
         bootstrap=bootstrap_result,
         penalty_count=int(getattr(best_res, "penalty_count", 0)),
     )
@@ -421,10 +438,12 @@ def fit_model(
     max_nfev: int = 5000,
     bootstrap: int = 0,
     bootstrap_method: str = "residual",
+    bootstrap_ci_method: str = "percentile",
     seed: Optional[int] = None,
     logk_bounds: Optional[Tuple[float, float]] = None,
     logk_jitter: float = 0.1,
     solver_failure_mode: str = "fail-fast",
+    residual_diagnostics: bool = False,
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
     try:
@@ -462,11 +481,13 @@ def fit_model(
             best_res=best_res,
             bootstrap=bootstrap,
             bootstrap_method=bootstrap_method,
+            bootstrap_ci_method=bootstrap_ci_method,
             seed=seed,
             logk_bounds=logk_bounds,
             logk_jitter=logk_jitter,
             max_nfev=max_nfev,
             solver_failure_mode=solver_failure_mode,
+            compute_residual_diagnostics=residual_diagnostics,
         )
     except RuntimeError as exc:
         if str(exc).startswith("BIC calculation failed:"):
@@ -501,6 +522,7 @@ def bootstrap_params(
     seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
+    ci_method: str = "percentile",
     max_nfev: int = 5000,
     solver_failure_mode: str = "fail-fast",
 ) -> BootstrapResult:
@@ -510,6 +532,7 @@ def bootstrap_params(
         datasets=datasets,
         n_boot=n_boot,
         method=method,
+        ci_method=ci_method,
         seed=seed,
         logk_bounds=logk_bounds,
         logk_jitter=logk_jitter,
@@ -568,6 +591,8 @@ def fit_models(
     logk_bounds: Optional[Tuple[float, float]],
     logk_jitter: float,
     solver_failure_mode: str = "fail-fast",
+    bootstrap_ci_method: str = "percentile",
+    residual_diagnostics: bool = False,
 ) -> List[FitResult]:
     results = []
     for fit_datasets, model_name in _iter_fit_jobs(datasets, model_names, replicates):
@@ -579,10 +604,12 @@ def fit_models(
                 max_nfev=max_nfev,
                 bootstrap=bootstrap,
                 bootstrap_method=bootstrap_method,
+                bootstrap_ci_method=bootstrap_ci_method,
                 seed=seed,
                 logk_bounds=logk_bounds,
                 logk_jitter=logk_jitter,
                 solver_failure_mode=solver_failure_mode,
+                residual_diagnostics=residual_diagnostics,
             )
         except ModelFitError as exc:
             result = _exception_failure_result(model_name, fit_datasets, exc)

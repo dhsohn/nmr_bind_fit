@@ -46,6 +46,11 @@ class BootstrapLike(Protocol):
     logk_samples: np.ndarray
     ci_low: np.ndarray
     ci_high: np.ndarray
+    ci_low_percentile: np.ndarray
+    ci_high_percentile: np.ndarray
+    ci_low_bca: np.ndarray
+    ci_high_bca: np.ndarray
+    ci_method: str
     n_success: int
     n_boot: int
 
@@ -64,8 +69,11 @@ class FitResultLike(Protocol):
     message: str
     rss: float
     rmse: float
+    r2: float
+    r2_per_peak: List[float]
     bic: float
     aicc: float
+    residual_diagnostics: dict
     species: List[SpeciesLike]
     residuals: List[np.ndarray]
     bootstrap: Optional[BootstrapLike]

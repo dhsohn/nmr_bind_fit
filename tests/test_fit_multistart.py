@@ -213,3 +213,19 @@ def test_multistart_propagates_unexpected_exception(monkeypatch):
             max_nfev=10,
             bootstrap=0,
         )
+
+
+def test_fit_model_reports_residual_diagnostics_when_enabled():
+    ds = _make_dataset()
+
+    result = fit.fit_model(
+        [ds],
+        "nb",
+        logk_starts=[1.0],
+        max_nfev=100,
+        bootstrap=0,
+        residual_diagnostics=True,
+    )
+
+    assert result.success is True
+    assert "residual_n" in result.residual_diagnostics

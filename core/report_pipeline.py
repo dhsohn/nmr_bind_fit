@@ -19,21 +19,26 @@ SUMMARY_LABELS = {
     "dataset": "Dataset",
     "model": "Model",
     "K": "Binding constant",
-    "bootstrap_K_CI": "Confidence Interval(CI)",
-    "bootstrap_K_SE": "Standard Error(SE)",
-    "RSS": "Residual sum of squares",
-    "RMSE": "Root mean square error",
-    "BIC": "Bayesian Information Criterion",
-    "AICc": "Corrected Akaike Information Criterion",
+    "bootstrap_K_CI": "95 % CI",
+    "R2": "R² (mean)",
+    "BIC": "BIC",
+    "AICc": "AICc",
 }
 
 
 STATS_LABELS = {
+    "R2": "Coefficient of determination (mean per-peak)",
+    "R2_per_peak": "R² per peak",
     "RSS": "Residual sum of squares",
     "RMSE": "Root mean square error",
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
     "penalty_events": "Optimization penalty events",
+    "bootstrap_logK_SE": "Bootstrap SE (log10 K)",
+    "residual_n": "Residual count",
+    "shapiro_stat": "Shapiro-Wilk statistic",
+    "shapiro_p": "Shapiro-Wilk p-value",
+    "durbin_watson": "Durbin-Watson statistic",
 }
 
 
@@ -238,6 +243,42 @@ def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
     return _filter_finite_rows(k_samples)
 
 
+def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
+    # Return finite bootstrap logK samples for SE reporting.
+    if res.bootstrap is None or res.model.n_logk == 0:
+        return np.full((0, res.model.n_logk), np.nan)
+    samples = getattr(res.bootstrap, "logk_samples", np.full((0, res.model.n_logk), np.nan))
+    if samples.size == 0:
+        return np.full((0, res.model.n_logk), np.nan)
+    return _filter_finite_rows(samples)
+
+
+def _bootstrap_logk_se_text(res: FitResultLike) -> str:
+    # Format bootstrap SE in log10(K) space.
+    samples = _bootstrap_logk_samples(res)
+    if samples.shape[0] <= 1:
+        return "N/A"
+    se_vals = [_safe_std(samples[:, i]) for i in range(samples.shape[1])]
+    return ";".join(f"{value:.6g}" for value in se_vals)
+
+
+def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
+    # Return selected bootstrap CI in linear K space.
+    if res.bootstrap is None or res.model.n_logk == 0:
+        return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
+    low_log = np.asarray(
+        getattr(res.bootstrap, "ci_low", np.full((res.model.n_logk,), np.nan)),
+        dtype=float,
+    )
+    high_log = np.asarray(
+        getattr(res.bootstrap, "ci_high", np.full((res.model.n_logk,), np.nan)),
+        dtype=float,
+    )
+    if low_log.shape != (res.model.n_logk,) or high_log.shape != (res.model.n_logk,):
+        return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
+    return _safe_pow10(low_log), _safe_pow10(high_log)
+
+
 def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
@@ -265,11 +306,9 @@ def _build_model_warnings(
     if dropped_peaks != "None":
         warnings.append(f"Dropped chemical shift columns with missing values: {dropped_peaks}")
 
-    k_samples = _bootstrap_k_samples(res)
-    if args.bootstrap_ci_width is not None and k_samples.size > 0:
-        k_ci_low = np.percentile(k_samples, 2.5, axis=0)
-        k_ci_high = np.percentile(k_samples, 97.5, axis=0)
-        if np.any((k_ci_high - k_ci_low) > args.bootstrap_ci_width):
+    k_ci_low, k_ci_high = _bootstrap_k_ci(res)
+    if args.bootstrap_ci_width is not None and k_ci_low.size > 0:
+        if np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)):
             warnings.append("bootstrap CI too wide")
 
     if res.bootstrap is not None and res.bootstrap.n_boot > 0:
@@ -303,7 +342,16 @@ def _build_model_warnings(
 
 def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
     # Build stats block for report tables.
+    r2_per_peak = getattr(res, "r2_per_peak", [])
+    r2_per_peak_text = (
+        ";".join(f"{value:.6g}" for value in r2_per_peak)
+        if r2_per_peak
+        else "N/A"
+    )
     stats_base = {
+        "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
+        "R2_per_peak": r2_per_peak_text,
+        "bootstrap_logK_SE": _bootstrap_logk_se_text(res),
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
         "BIC": f"{res.bic:.6g}",
@@ -319,6 +367,16 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
                 "solver_method": str(solver_stats["solver_method"]),
             }
         )
+    diagnostics = getattr(res, "residual_diagnostics", {})
+    if diagnostics:
+        if "residual_n" in diagnostics:
+            stats_base["residual_n"] = f"{diagnostics['residual_n']:.0f}"
+        if "shapiro_stat" in diagnostics:
+            stats_base["shapiro_stat"] = f"{diagnostics['shapiro_stat']:.6g}"
+        if "shapiro_p" in diagnostics:
+            stats_base["shapiro_p"] = f"{diagnostics['shapiro_p']:.6g}"
+        if "durbin_watson" in diagnostics:
+            stats_base["durbin_watson"] = f"{diagnostics['durbin_watson']:.6g}"
     return {_label_stats_key(k): v for k, v in stats_base.items()}
 
 
@@ -328,28 +386,18 @@ def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> 
     k_vals = _safe_pow10(logk_vals)
     k_str = ";".join(f"{v:.6g}" for v in k_vals) if res.model.n_logk else "N/A"
 
-    k_samples = _bootstrap_k_samples(res)
-    if k_samples.size == 0:
+    k_ci_low, k_ci_high = _bootstrap_k_ci(res)
+    if k_ci_low.size == 0 or not np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high)):
         boot_k_ci = "N/A"
-        boot_k_se = "N/A"
     else:
-        k_ci_low = np.percentile(k_samples, 2.5, axis=0)
-        k_ci_high = np.percentile(k_samples, 97.5, axis=0)
         boot_k_ci = ";".join(f"[{low:.6g}, {high:.6g}]" for low, high in zip(k_ci_low, k_ci_high))
-        if k_samples.shape[0] > 1:
-            boot_k_se_vals = [_safe_std(k_samples[:, i]) for i in range(k_samples.shape[1])]
-            boot_k_se = ";".join(f"{v:.6g}" for v in boot_k_se_vals)
-        else:
-            boot_k_se = "N/A"
 
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
         "K": k_str,
         "bootstrap_K_CI": boot_k_ci,
-        "bootstrap_K_SE": boot_k_se,
-        "RSS": f"{res.rss:.6g}",
-        "RMSE": f"{res.rmse:.6g}",
+        "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
         "BIC": f"{res.bic:.6g}",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
     }
@@ -423,6 +471,8 @@ def build_report_artifacts(
 def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
+    concentration_unit = str(getattr(args, "concentration_unit", "M")).strip() or "M"
+    k_unit = f"{concentration_unit}⁻¹"
 
     # 1. Data Interpretation
     sections.append(
@@ -467,10 +517,10 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
                 "Parameters were estimated by nonlinear least-squares minimization using "
                 "scipy.optimize.least_squares (Trust Region Reflective algorithm). "
                 "The 1:1 equilibrium was solved analytically via the closed-form quadratic solution. "
-                "The 1:2 and 2:1 equilibria were solved numerically point-by-point using Newton–Raphson "
-                "iteration with bisection fallback for convergence robustness. "
+                "The 1:2 and 2:1 equilibria were solved numerically point-by-point using Brent's method "
+                "(scipy.optimize.brentq; xtol=1e-50, rtol=1e-15). "
                 "Binding constants were parameterized as log₁₀(K) and constrained to [0, 12] "
-                "(K ∈ [1, 10¹²] M⁻¹) during optimization to ensure stable, physically meaningful estimation. "
+                f"(K ∈ [1, 10¹²] {k_unit}) during optimization to ensure stable, physically meaningful estimation. "
                 "ppm columns containing missing values were dropped before fitting. "
                 "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
             ),
@@ -522,14 +572,24 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
             "structure within each row."
         ),
     }
+    bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
+    if bootstrap_ci_method == "bca":
+        ci_desc = (
+            "The 95% confidence interval was derived from BCa-adjusted bootstrap quantiles, "
+            "with the acceleration term approximated from bootstrap samples for computational efficiency."
+        )
+    else:
+        ci_desc = (
+            "The 95% confidence interval was derived from the 2.5th and 97.5th percentiles of the "
+            "bootstrap distribution."
+        )
     bootstrap_note = (
         f"Bootstrap uncertainty was evaluated using {args.bootstrap} iterations with "
         f"{args.bootstrap_method} resampling. "
         f"{method_desc.get(args.bootstrap_method, '')} "
         f"Bootstrap refits used a small log₁₀(K) start perturbation "
         f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
-        "The 95% confidence interval was derived from the 2.5th and 97.5th percentiles of the "
-        "bootstrap distribution."
+        f"{ci_desc}"
         if args.bootstrap > 0
         else "Bootstrap uncertainty was not evaluated in this analysis."
     )
@@ -600,13 +660,14 @@ def build_decisions(
                 decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
-            k_samples = _bootstrap_k_samples(best)
-            if k_samples.size > 0:
-                k_ci_low = np.percentile(k_samples, 2.5, axis=0)
-                k_ci_high = np.percentile(k_samples, 97.5, axis=0)
-                if np.any((k_ci_high - k_ci_low) > args.bootstrap_ci_width):
-                    decisions.append("- bootstrap CI too wide")
-                    reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
+            k_ci_low, k_ci_high = _bootstrap_k_ci(best)
+            if k_ci_low.size > 0 and np.any(
+                np.isfinite(k_ci_low)
+                & np.isfinite(k_ci_high)
+                & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)
+            ):
+                decisions.append("- bootstrap CI too wide")
+                reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
         decisions.append("")
         decision_entries.append(
             DecisionEntry(

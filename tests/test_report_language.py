@@ -1,8 +1,16 @@
 import argparse
 from types import SimpleNamespace
 
+import numpy as np
+
 from core.report import DecisionEntry, _decision_paragraphs
-from core.report_pipeline import _replicate_dataset_dir_labels, build_decisions, build_report_artifacts
+from core.report_pipeline import (
+    _build_summary_row,
+    _replicate_dataset_dir_labels,
+    build_decisions,
+    build_methods_sections,
+    build_report_artifacts,
+)
 
 
 def test_build_decisions_uses_provisional_language():
@@ -82,3 +90,72 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
     assert summary_rows == []
     assert model_entries == []
     assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]
+
+
+def test_build_methods_sections_uses_brent_and_cli_concentration_units():
+    args = SimpleNamespace(
+        replicates=False,
+        bootstrap=0,
+        bootstrap_method="residual",
+        bootstrap_logk_jitter=0.1,
+        concentration_unit="mM",
+    )
+    ds = SimpleNamespace(name="sample", path="sample.csv")
+
+    sections = build_methods_sections(args, [ds])
+    param_section = next(section for section in sections if section["title"] == "Parameter Estimation")
+    content = param_section["content"]
+
+    assert "Brent's method" in content
+    assert "scipy.optimize.brentq" in content
+    assert "xtol=1e-50, rtol=1e-15" in content
+    assert "mM⁻¹" in content
+    assert "Newton" not in content
+
+
+def test_build_methods_sections_mentions_bca_when_selected():
+    args = SimpleNamespace(
+        replicates=False,
+        bootstrap=100,
+        bootstrap_method="residual",
+        bootstrap_ci_method="bca",
+        bootstrap_logk_jitter=0.1,
+        concentration_unit="M",
+    )
+    ds = SimpleNamespace(name="sample", path="sample.csv")
+
+    sections = build_methods_sections(args, [ds])
+    uq_section = next(section for section in sections if section["title"] == "Uncertainty Quantification")
+    assert "BCa-adjusted bootstrap quantiles" in uq_section["content"]
+
+
+def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
+    bootstrap = SimpleNamespace(
+        param_samples=np.array([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=float),
+        logk_samples=np.array([[1.0], [2.0], [3.0]], dtype=float),
+        ci_low=np.array([1.2], dtype=float),
+        ci_high=np.array([2.8], dtype=float),
+        ci_low_percentile=np.array([1.05], dtype=float),
+        ci_high_percentile=np.array([2.95], dtype=float),
+        ci_low_bca=np.array([1.2], dtype=float),
+        ci_high_bca=np.array([2.8], dtype=float),
+        ci_method="bca",
+        n_success=3,
+        n_boot=3,
+    )
+    res = SimpleNamespace(
+        model=SimpleNamespace(n_logk=1),
+        params=np.array([2.0], dtype=float),
+        bootstrap=bootstrap,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=11.0,
+        penalty_count=0,
+    )
+
+    row = _build_summary_row(res, "sample", "11")
+
+    assert row["95 % CI"] == f"[{10**1.2:.6g}, {10**2.8:.6g}]"

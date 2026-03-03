@@ -5,6 +5,7 @@ from typing import Callable, List, Optional, Tuple, Type
 
 import numpy as np
 from scipy.optimize import OptimizeResult
+from scipy.stats import norm
 
 from .io import Dataset
 from .models import ModelSpec
@@ -16,8 +17,66 @@ class BootstrapResult:
     logk_samples: np.ndarray
     ci_low: np.ndarray
     ci_high: np.ndarray
+    ci_low_percentile: np.ndarray
+    ci_high_percentile: np.ndarray
+    ci_low_bca: np.ndarray
+    ci_high_bca: np.ndarray
+    ci_method: str
     n_success: int
     n_boot: int
+
+
+def _bca_ci_approx(
+    samples: np.ndarray,
+    original_stat: float,
+    alpha: float = 0.05,
+) -> Tuple[float, float]:
+    # Approximate BCa interval using bootstrap samples with jackknife-over-samples acceleration.
+    vals = np.asarray(samples, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size < 3 or not np.isfinite(original_stat):
+        return float("nan"), float("nan")
+
+    n = int(vals.size)
+    prop_less = float(np.mean(vals < original_stat))
+    # Avoid ±inf in inverse-normal transform.
+    eps = 0.5 / n
+    prop_less = float(np.clip(prop_less, eps, 1.0 - eps))
+    z0 = float(norm.ppf(prop_less))
+
+    # Jackknife-over-bootstrap-samples approximation for acceleration.
+    total = float(np.sum(vals))
+    jackknife = (total - vals) / float(n - 1)
+    jack_mean = float(np.mean(jackknife))
+    diffs = jack_mean - jackknife
+    denom = float(np.sum(diffs**2))
+    if denom <= 0.0 or not np.isfinite(denom):
+        a = 0.0
+    else:
+        num = float(np.sum(diffs**3))
+        a = num / (6.0 * (denom ** 1.5))
+        if not np.isfinite(a):
+            a = 0.0
+
+    z_low = float(norm.ppf(alpha / 2.0))
+    z_high = float(norm.ppf(1.0 - alpha / 2.0))
+
+    def _adjusted_prob(z_alpha: float) -> float:
+        z_term = z0 + z_alpha
+        denom_term = 1.0 - a * z_term
+        if denom_term == 0.0:
+            return float("nan")
+        p = float(norm.cdf(z0 + (z_term / denom_term)))
+        return float(np.clip(p, 0.0, 1.0))
+
+    p_low = _adjusted_prob(z_low)
+    p_high = _adjusted_prob(z_high)
+    if not np.isfinite(p_low) or not np.isfinite(p_high):
+        return float("nan"), float("nan")
+    return (
+        float(np.percentile(vals, 100.0 * p_low)),
+        float(np.percentile(vals, 100.0 * p_high)),
+    )
 
 
 def _residual_bootstrap(
@@ -160,9 +219,13 @@ def bootstrap_params(
     fit_with_initial_fn: Callable[..., Tuple[np.ndarray, OptimizeResult]],
     param_bounds_fn: Callable[[np.ndarray, ModelSpec, Optional[Tuple[float, float]]], Tuple[np.ndarray, np.ndarray]],
     numeric_exceptions: Tuple[Type[BaseException], ...],
+    ci_method: str = "percentile",
     max_nfev: int = 5000,
     solver_failure_mode: str = "fail-fast",
 ) -> BootstrapResult:
+    if ci_method not in {"percentile", "bca"}:
+        raise ValueError("ci_method must be one of: percentile, bca")
+
     rng = np.random.default_rng(seed)
     param_samples = []
     n_success = 0
@@ -215,18 +278,38 @@ def bootstrap_params(
 
     logk_samples = samples[:, : model.n_logk] if model.n_logk else np.full((samples.shape[0], 0), np.nan)
 
-    if logk_samples.size == 0:
-        ci_low = np.full((model.n_logk,), np.nan)
-        ci_high = np.full((model.n_logk,), np.nan)
+    ci_low_percentile = np.full((model.n_logk,), np.nan)
+    ci_high_percentile = np.full((model.n_logk,), np.nan)
+    ci_low_bca = np.full((model.n_logk,), np.nan)
+    ci_high_bca = np.full((model.n_logk,), np.nan)
+
+    if logk_samples.size > 0:
+        ci_low_percentile = np.percentile(logk_samples, 2.5, axis=0)
+        ci_high_percentile = np.percentile(logk_samples, 97.5, axis=0)
+
+        if ci_method == "bca":
+            for i in range(model.n_logk):
+                bca_low, bca_high = _bca_ci_approx(logk_samples[:, i], float(params[i]), alpha=0.05)
+                ci_low_bca[i] = bca_low
+                ci_high_bca[i] = bca_high
+
+    if ci_method == "bca":
+        ci_low = np.where(np.isfinite(ci_low_bca), ci_low_bca, ci_low_percentile)
+        ci_high = np.where(np.isfinite(ci_high_bca), ci_high_bca, ci_high_percentile)
     else:
-        ci_low = np.percentile(logk_samples, 2.5, axis=0)
-        ci_high = np.percentile(logk_samples, 97.5, axis=0)
+        ci_low = ci_low_percentile.copy()
+        ci_high = ci_high_percentile.copy()
 
     return BootstrapResult(
         param_samples=samples,
         logk_samples=logk_samples,
         ci_low=ci_low,
         ci_high=ci_high,
+        ci_low_percentile=ci_low_percentile,
+        ci_high_percentile=ci_high_percentile,
+        ci_low_bca=ci_low_bca,
+        ci_high_bca=ci_high_bca,
+        ci_method=ci_method,
         n_success=n_success,
         n_boot=n_boot,
     )

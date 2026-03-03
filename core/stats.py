@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Dict, Tuple
 
 import numpy as np
+from scipy.stats import shapiro
 
 
 def gaussian_loglik(
@@ -41,3 +42,35 @@ def aicc_from_loglik(loglik: float, n: int, p: int) -> float:
     if denom <= 0:
         return float("nan")
     return float(-2.0 * loglik + 2.0 * p + (2.0 * p * (p + 1)) / denom)
+
+
+def residual_diagnostics(
+    residuals: np.ndarray,
+    *,
+    shapiro_max_n: int = 5000,
+) -> Dict[str, float]:
+    """Compute informational residual diagnostics (normality, autocorrelation)."""
+    res = np.asarray(residuals, dtype=float)
+    flat = res[np.isfinite(res)]
+    result: Dict[str, float] = {}
+    if flat.size == 0:
+        return result
+
+    result["residual_n"] = float(flat.size)
+
+    if flat.size >= 3:
+        sample = flat[: min(int(flat.size), int(shapiro_max_n))]
+        sample_range = float(np.max(sample) - np.min(sample))
+        if sample_range > 0.0:
+            stat, p_value = shapiro(sample)
+            result["shapiro_stat"] = float(stat)
+            result["shapiro_p"] = float(p_value)
+            result["shapiro_n"] = float(sample.size)
+
+    if flat.size >= 2:
+        denom = float(np.sum(flat**2))
+        if denom > 0:
+            diff = np.diff(flat)
+            dw = float(np.sum(diff**2) / denom)
+            result["durbin_watson"] = dw
+    return result

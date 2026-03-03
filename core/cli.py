@@ -176,6 +176,13 @@ def _display_model_name(name: str) -> str:
 def run_fit(args: argparse.Namespace) -> None:
     if args.bootstrap < 0:
         raise ValueError("--bootstrap must be non-negative.")
+    args.concentration_unit = str(getattr(args, "concentration_unit", "M")).strip()
+    if not args.concentration_unit:
+        raise ValueError("--concentration-unit must be non-empty.")
+    args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
+    if args.bootstrap_ci_method not in {"percentile", "bca"}:
+        raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")
+    args.residual_diagnostics = bool(getattr(args, "residual_diagnostics", False))
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
     datasets = load_datasets(
@@ -198,10 +205,12 @@ def run_fit(args: argparse.Namespace) -> None:
         max_nfev=args.max_nfev,
         bootstrap=args.bootstrap,
         bootstrap_method=args.bootstrap_method,
+        bootstrap_ci_method=args.bootstrap_ci_method,
         seed=args.seed,
         logk_bounds=logk_bounds,
         logk_jitter=args.bootstrap_logk_jitter,
         solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
+        residual_diagnostics=args.residual_diagnostics,
     )
 
     # Prepare output directory for reports and plots.
@@ -258,7 +267,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
     parser.add_argument("--bootstrap", type=_non_negative_int, default=1000, help="Bootstrap iterations")
+    parser.add_argument(
+        "--concentration-unit",
+        default="M",
+        help="Input concentration unit (for report K units, default: M)",
+    )
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
+    parser.add_argument(
+        "--bootstrap-ci-method",
+        choices=["percentile", "bca"],
+        default="percentile",
+        help="Bootstrap CI method (default: percentile)",
+    )
     parser.add_argument(
         "--bootstrap-logk-jitter",
         type=float,
@@ -273,6 +293,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument(
+        "--residual-diagnostics",
+        action="store_true",
+        help="Compute informational residual diagnostics (Shapiro-Wilk, Durbin-Watson)",
+    )
     parser.add_argument(
         "--bootstrap-ci-width",
         type=float,
