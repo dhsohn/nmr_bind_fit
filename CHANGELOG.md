@@ -10,6 +10,7 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 - JOSS-readiness project metadata, including license, citation metadata, contribution guide, and CI configuration.
 - Example synthetic titration datasets and tutorial documentation.
+- Draft JOSS paper, BibTeX references, Zenodo metadata, and release/DOI checklist.
 
 ### Changed
 
