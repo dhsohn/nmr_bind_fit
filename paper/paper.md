@@ -53,7 +53,7 @@ The repository includes a test suite covering equilibrium solvers, model predict
 
 # AI usage disclosure
 
-Generative AI tools, including OpenAI GPT-based sessions and Hermes Agent, were used to assist with code review, refactoring planning, documentation drafting, and preparation of this draft JOSS paper. The human author made the scientific and software-design decisions, reviewed and edited AI-assisted text and code, ran the test suite, and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted materials. Before submission, this disclosure should be checked against the final record of AI-assisted work and updated with any additional tools or model names used during preparation.
+Generative AI tools, specifically GPT-5.5 and Opus 4.8, were used to assist with code review and refinement of the draft JOSS paper. All AI-assisted outputs were reviewed, edited, and verified by the human author, who made the scientific and software-design decisions and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted materials.
 
 # Acknowledgements
 
