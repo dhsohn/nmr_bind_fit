@@ -187,8 +187,7 @@ between candidates.
    is provisional.
 
 2. **ΔBIC check (discriminating power).**
-   Compute the BIC gap to the next-best candidate,
-   $$\Delta\mathrm{BIC} = \mathrm{BIC}_{2\mathrm{nd}} - \mathrm{BIC}_{\mathrm{best}}$$:
+   Compute the BIC gap to the next-best candidate, $\Delta\text{BIC} = \text{BIC}\text{(2nd)} - \text{BIC}\text{(best)}$:
 
    $$\Delta\text{BIC} < 2 \;\Rightarrow\; \text{flag as "weak discrimination"}$$
 
