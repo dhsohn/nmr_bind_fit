@@ -188,7 +188,7 @@ between candidates.
 
 2. **ΔBIC check (discriminating power).**
    Compute the BIC gap to the next-best candidate,
-   $\Delta\text{BIC} = \text{BIC}_\text{2nd} - \text{BIC}_\text{best}$:
+   $$\Delta\mathrm{BIC} = \mathrm{BIC}_{2\mathrm{nd}} - \mathrm{BIC}_{\mathrm{best}}$$:
 
    $$\Delta\text{BIC} < 2 \;\Rightarrow\; \text{flag as "weak discrimination"}$$
 
@@ -197,12 +197,12 @@ between candidates.
    $\ge 10$ "very strong" evidence. This tool conservatively uses **2** as the threshold for
    weak discrimination.
 
-3. **Bootstrap CI-width check (estimate stability).**
+4. **Bootstrap CI-width check (estimate stability).**
    When `--bootstrap-ci-width` is set and the best model is a binding model, if the bootstrap
    confidence interval width for K exceeds the threshold, a "bootstrap CI too wide" warning is
    added — a sign that K is weakly identified by the data.
 
-4. **Record the outcome.** All checks (ΔBIC, CI width, solver failures, penalty events, etc.)
+5. **Record the outcome.** All checks (ΔBIC, CI width, solver failures, penalty events, etc.)
    are written with their reasons to `decision.txt`, `summary.csv`, and `report.html`.
 
 ### Bootstrap uncertainty quantification
