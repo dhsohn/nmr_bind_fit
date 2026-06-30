@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Daehyup Sohn" },
+    { name = "Dae Hyup Sohn" },
 ]
 maintainers = [
-    { name = "Daehyup Sohn" },
+    { name = "Dae Hyup Sohn" },
 ]
 keywords = [
     "NMR",

@@ -4,7 +4,7 @@
   "description": "nmr_bind_fit is a Python command-line workflow for NMR chemical-shift titration binding analysis. It fits 1:1, sequential 1:2, sequential 2:1, and non-binding candidate models, reports information-criterion model comparisons and bootstrap uncertainty, and generates reproducible analysis summaries for host-guest binding studies.",
   "creators": [
     {
-      "name": "Sohn, Daehyup",
+      "name": "Sohn, Dae Hyup",
       "affiliation": "Hanyang University"
     }
   ],

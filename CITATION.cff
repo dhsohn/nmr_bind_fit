@@ -4,7 +4,7 @@ title: "nmr_bind_fit: transparent model comparison and uncertainty reporting for
 version: 0.1.0
 authors:
   - family-names: Sohn
-    given-names: Daehyup
+    given-names: Dae Hyup
 repository-code: "https://github.com/dhsohn/nmr_bind_fit"
 url: "https://github.com/dhsohn/nmr_bind_fit"
 license: MIT
