@@ -1,7 +1,7 @@
 import numpy as np
 
-from core.io import Dataset
-from core.models import MODEL_SPECS, predict_dataset
+from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.models import MODEL_SPECS, predict_dataset
 
 
 def test_predict_shape_11():

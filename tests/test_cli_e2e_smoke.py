@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from core.cli import build_parser, run_fit
+from nmr_bind_fit.cli import build_parser, run_fit
 
 
 def test_run_fit_writes_report_artifacts(tmp_path, monkeypatch):

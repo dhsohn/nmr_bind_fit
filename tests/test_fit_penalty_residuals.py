@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import core.fit as fit
-from core.io import Dataset
-from core.models import MODEL_SPECS
+import nmr_bind_fit.fit as fit
+from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.models import MODEL_SPECS
 
 
 def _make_dataset() -> Dataset:

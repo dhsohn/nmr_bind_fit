@@ -51,7 +51,7 @@ Four candidates are fit independently to the same data.
 | **2:1** | H + G ⇌ HG (K₁); H + HG ⇌ H₂G (K₂) | $K_1, K_2$ | H, HG, H₂G | 3 |
 | **Non-binding (nb)** | none, linear drift | — | a₀, a₁ | 2 |
 
-(Implementation: `MODEL_SPECS` in `core/models.py`.)
+(Implementation: `MODEL_SPECS` in `nmr_bind_fit/models.py`.)
 
 ### 2.1 Predictive equations
 
@@ -71,7 +71,7 @@ $$
 w_{H_2G} = \frac{2\,[H_2G]}{[H]_t}
 $$
 
-(Implementation: `_weights_21` in `core/models.py`.) This is not a numerical trick but a
+(Implementation: `_weights_21` in `nmr_bind_fit/models.py`.) This is not a numerical trick but a
 direct consequence of host mass conservation.
 
 **Non-binding (control model)** — the simple linear drift expected in the absence of binding:
@@ -105,7 +105,7 @@ data that do not in fact support binding — the kind of false positive examined
   $\log_{10}K$ estimate pinned at 0 or 12 indicates the estimate is not trustworthy (see §6).
 - **Multistart**: fits are launched from a grid of $\log_{10}K$ starting values to avoid
   local minima; among successful fits, the solution with the lowest RSS is retained
-  (`select_best_multistart` in `core/fit_optimizer.py`).
+  (`select_best_multistart` in `nmr_bind_fit/fit_optimizer.py`).
 - **Missing data**: rows with missing host/guest concentrations are dropped; any ppm column
   containing missing values is excluded entirely (remaining peaks retained).
 - **Solver failures**: per-point solver failures in 1:2/2:1 use fail-fast behavior; penalty
@@ -158,7 +158,7 @@ between candidates.
 
 ### 4.3 Likelihood, n, and k — exact definitions
 
-(Implementation: `core/stats.py`, `core/fit_criteria.py`.)
+(Implementation: `nmr_bind_fit/stats.py`, `nmr_bind_fit/fit_criteria.py`.)
 
 - **One shared variance is estimated.** Residuals from all datasets, points, and peaks are
   pooled to estimate a single residual variance $\sigma^2$ (Gaussian likelihood). This shared
@@ -179,7 +179,7 @@ between candidates.
 
 ## 5. Model-selection decision rules
 
-(Implementation: `build_decisions` in `core/report_pipeline.py`.)
+(Implementation: `build_decisions` in `nmr_bind_fit/report_pipeline.py`.)
 
 1. **Select the lowest-BIC model as the provisional working model.**
    The candidate with the lowest BIC is adopted as the "tentative working model among the
@@ -196,12 +196,12 @@ between candidates.
    $\ge 10$ "very strong" evidence. This tool conservatively uses **2** as the threshold for
    weak discrimination.
 
-4. **Bootstrap CI-width check (estimate stability).**
+3. **Bootstrap CI-width check (estimate stability).**
    When `--bootstrap-ci-width` is set and the best model is a binding model, if the bootstrap
    confidence interval width for K exceeds the threshold, a "bootstrap CI too wide" warning is
    added — a sign that K is weakly identified by the data.
 
-5. **Record the outcome.** All checks (ΔBIC, CI width, solver failures, penalty events, etc.)
+4. **Record the outcome.** All checks (ΔBIC, CI width, solver failures, penalty events, etc.)
    are written with their reasons to `decision.txt`, `summary.csv`, and `report.html`.
 
 ### Bootstrap uncertainty quantification
@@ -261,7 +261,7 @@ report.
 ## 7. Residual diagnostics (informational)
 
 With `--residual-diagnostics`, the following are computed (implementation:
-`residual_diagnostics` in `core/stats.py`). **These do not automatically change model
+`residual_diagnostics` in `nmr_bind_fit/stats.py`). **These do not automatically change model
 selection; they are informational.**
 
 - **Shapiro–Wilk test** — residual normality. A small p-value casts doubt on the Gaussian

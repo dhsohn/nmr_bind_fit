@@ -2,8 +2,8 @@ from pathlib import Path
 
 import numpy as np
 
-from core.io import Dataset
-from core.plots import _grid_dataset
+from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.plots import _grid_dataset
 
 
 def _dataset(h_tot: np.ndarray) -> Dataset:

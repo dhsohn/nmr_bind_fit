@@ -2,8 +2,8 @@ from pathlib import Path
 
 import numpy as np
 
-import core.fit as fit
-from core.io import Dataset
+import nmr_bind_fit.fit as fit
+from nmr_bind_fit.io import Dataset
 
 
 def _dataset(y: np.ndarray) -> Dataset:

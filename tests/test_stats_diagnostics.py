@@ -1,6 +1,6 @@
 import numpy as np
 
-from core.stats import residual_diagnostics
+from nmr_bind_fit.stats import residual_diagnostics
 
 
 def test_residual_diagnostics_returns_shapiro_and_dw():
