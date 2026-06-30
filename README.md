@@ -2,6 +2,10 @@
 
 NMR chemical shift titration binding fits with model comparison (1:1, 1:2, 2:1, non-binding).
 
+This README is a quick-start usage guide. For the detailed rationale behind how a binding
+model is confirmed — the statistical criteria (BIC/AICc, ΔBIC, bootstrap CI) and the
+chemical plausibility checks — see [docs/binding_model_selection.md](docs/binding_model_selection.md).
+
 ## Install
 
 This package is pure Python. Install dependencies with pip:

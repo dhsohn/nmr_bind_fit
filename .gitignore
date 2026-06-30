@@ -14,3 +14,9 @@ output/
 input1.xlsx
 input2.xlsx
 input3.xlsx
+
+# Local Korean reference copy (not for publication)
+docs/binding_model_selection.ko.md
+
+# Local reference papers (PDFs), not for publication
+*.pdf
