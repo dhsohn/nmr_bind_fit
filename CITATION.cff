@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use nmr_bind_fit in your research, please cite the software repository and the archived release used for your analysis."
+title: "nmr_bind_fit: transparent model comparison and uncertainty reporting for NMR host-guest titrations"
+version: 0.1.0
+authors:
+  - family-names: Sohn
+    given-names: Daehyup
+repository-code: "https://github.com/dhsohn/nmr_bind_fit"
+url: "https://github.com/dhsohn/nmr_bind_fit"
+license: MIT
+keywords:
+  - NMR
+  - host-guest chemistry
+  - supramolecular chemistry
+  - binding titration
+  - model comparison
+  - bootstrap
+abstract: >-
+  nmr_bind_fit is a Python command-line workflow for NMR chemical-shift
+  titration binding analysis. It fits 1:1, sequential 1:2, sequential 2:1,
+  and non-binding candidate models, reports information-criterion model
+  comparisons and bootstrap uncertainty, and generates reproducible analysis
+  summaries for host-guest binding studies.

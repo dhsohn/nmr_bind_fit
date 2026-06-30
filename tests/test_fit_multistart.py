@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import core.fit as fit
-from core.io import Dataset
+import nmr_bind_fit.fit as fit
+from nmr_bind_fit.io import Dataset
 
 
 class _DummyResult:

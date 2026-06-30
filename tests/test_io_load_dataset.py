@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.io import _compute_equivalents, load_dataset
+from nmr_bind_fit.io import _compute_equivalents, load_dataset
 
 
 def test_load_dataset_drops_incomplete_ppm_column(tmp_path):

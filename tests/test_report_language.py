@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from core.report import DecisionEntry, _decision_paragraphs
-from core.report_pipeline import (
+from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs
+from nmr_bind_fit.report_pipeline import (
     _build_summary_row,
     _replicate_dataset_dir_labels,
     build_decisions,

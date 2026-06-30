@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 
-import core.fit as fit
-from core.io import Dataset
-from core.stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
+import nmr_bind_fit.fit as fit
+from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
 
 
 def _dataset(name: str, n_points: int, n_peaks: int) -> Dataset:
