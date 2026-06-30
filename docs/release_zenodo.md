@@ -1,5 +1,7 @@
 # Release and Zenodo DOI checklist
 
+Archived v0.1.0 DOI: [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370).
+
 This checklist prepares `nmr_bind_fit` for a JOSS-facing archived release. Do not invent a DOI: Zenodo creates the DOI only after the GitHub repository is connected to Zenodo and a GitHub release is published.
 
 ## Preconditions
