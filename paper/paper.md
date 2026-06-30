@@ -9,7 +9,7 @@ tags:
   - binding titration
   - model comparison
 authors:
-  - name: Daehyup Sohn
+  - name: Dae Hyup Sohn
     corresponding: true
     affiliation: 1
 affiliations:
