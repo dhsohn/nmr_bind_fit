@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -23,10 +24,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package and development dependencies
+      - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,excel]"
+          python -m pip install -e ".[test,excel]"
+
+      - name: Install lint dependencies
+        run: python -m pip install "ruff>=0.5"
 
       - name: Lint with ruff
         run: python -m ruff check .
