@@ -92,13 +92,12 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
     assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]
 
 
-def test_build_methods_sections_uses_brent_and_cli_concentration_units():
+def test_build_methods_sections_uses_brent_and_molar_k_units():
     args = SimpleNamespace(
         replicates=False,
         bootstrap=0,
         bootstrap_method="residual",
         bootstrap_logk_jitter=0.1,
-        concentration_unit="mM",
     )
     ds = SimpleNamespace(name="sample", path="sample.csv")
 
@@ -109,7 +108,7 @@ def test_build_methods_sections_uses_brent_and_cli_concentration_units():
     assert "Brent's method" in content
     assert "scipy.optimize.brentq" in content
     assert "xtol=1e-50, rtol=1e-15" in content
-    assert "mM⁻¹" in content
+    assert "M⁻¹" in content
     assert "Newton" not in content
 
 
@@ -120,7 +119,6 @@ def test_build_methods_sections_mentions_bca_when_selected():
         bootstrap_method="residual",
         bootstrap_ci_method="bca",
         bootstrap_logk_jitter=0.1,
-        concentration_unit="M",
     )
     ds = SimpleNamespace(name="sample", path="sample.csv")
 

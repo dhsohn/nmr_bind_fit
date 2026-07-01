@@ -475,8 +475,8 @@ def build_report_artifacts(
 def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
-    concentration_unit = str(getattr(args, "concentration_unit", "M")).strip() or "M"
-    k_unit = f"{concentration_unit}⁻¹"
+    # Inputs are required to be in molar (M), so binding constants are reported in M⁻¹.
+    k_unit = "M⁻¹"
 
     # 1. Data Interpretation
     sections.append(

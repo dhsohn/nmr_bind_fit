@@ -17,6 +17,11 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 - Renamed the import package namespace from `core` to `nmr_bind_fit` while keeping the CLI command `nmr_bind_fit`.
 - Expanded packaging metadata and optional dependency groups.
+- Input concentrations are now required to be in molar (M); binding constants are always reported in M⁻¹. This keeps the fixed `K` bounds (`[1e0, 1e12]`) chemically meaningful across datasets.
+
+### Removed
+
+- Removed the `--concentration-unit` flag. It only relabeled report text while the fit and `K` bounds used raw numeric values, so a non-M unit silently misaligned the bounds' chemical meaning. Supply concentrations in molar (M) instead.
 
 ## [0.1.0] - 2026-06-30
 
