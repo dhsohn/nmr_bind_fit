@@ -4,16 +4,17 @@ from typing import cast
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-import nmr_bind_fit.fit as fit
+from nmr_bind_fit.fit_bootstrap import accept_bootstrap_fit, bootstrap_params
+from nmr_bind_fit.fit_optimizer import param_bounds
 from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.models import MODEL_SPECS
 
+_NUMERIC_EXCEPTIONS = (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
 
-class _DummyResult:
+
+class _DummyResult(OptimizeResult):
     def __init__(self, success: bool):
-        self.success = success
-        self.fun = np.array([1.0], dtype=float)
-        self.message = "ok" if success else "failed"
+        super().__init__(success=success, fun=np.array([1.0], dtype=float), message="ok" if success else "failed")
 
 
 def _make_dataset() -> Dataset:
@@ -33,7 +34,13 @@ def _make_dataset() -> Dataset:
     )
 
 
-def test_bootstrap_counts_only_converged_refits(monkeypatch):
+def _finite_predict_all(params, model, datasets, solver_failure_mode="fail-fast"):
+    y_pred_list = [np.array(ds.y, copy=True) for ds in datasets]
+    residuals = [np.zeros_like(ds.y) for ds in datasets]
+    return y_pred_list, [], residuals
+
+
+def test_bootstrap_counts_only_converged_refits():
     ds = _make_dataset()
     model = MODEL_SPECS["11"]
     params = np.array([4.0, 7.0, 7.5], dtype=float)
@@ -47,17 +54,19 @@ def test_bootstrap_counts_only_converged_refits(monkeypatch):
             return params0 + 0.2, _DummyResult(success=True)
         return params0 + 0.3, _DummyResult(success=True)
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
-
-    out = fit.bootstrap_params(
-        params,
-        model,
-        [ds],
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
         n_boot=3,
         method="residual",
         seed=0,
         logk_bounds=None,
         logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
     )
 
     assert out.n_success == 2
@@ -67,7 +76,7 @@ def test_bootstrap_counts_only_converged_refits(monkeypatch):
     np.testing.assert_allclose(out.param_samples[1], params + 0.3)
 
 
-def test_bootstrap_excludes_nonfinite_params(monkeypatch):
+def test_bootstrap_excludes_nonfinite_params():
     ds = _make_dataset()
     model = MODEL_SPECS["11"]
     params = np.array([4.0, 7.0, 7.5], dtype=float)
@@ -81,17 +90,19 @@ def test_bootstrap_excludes_nonfinite_params(monkeypatch):
             return bad, _DummyResult(success=True)
         return params0 + 0.2, _DummyResult(success=True)
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
-
-    out = fit.bootstrap_params(
-        params,
-        model,
-        [ds],
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
         n_boot=2,
         method="residual",
         seed=0,
         logk_bounds=None,
         logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
     )
 
     assert out.n_success == 1
@@ -100,7 +111,7 @@ def test_bootstrap_excludes_nonfinite_params(monkeypatch):
     np.testing.assert_allclose(out.param_samples[0], params + 0.2)
 
 
-def test_bootstrap_all_nonconverged_yields_no_samples(monkeypatch):
+def test_bootstrap_all_nonconverged_yields_no_samples():
     ds = _make_dataset()
     model = MODEL_SPECS["11"]
     params = np.array([4.0, 7.0, 7.5], dtype=float)
@@ -108,17 +119,19 @@ def test_bootstrap_all_nonconverged_yields_no_samples(monkeypatch):
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
         return params0, _DummyResult(success=False)
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
-
-    out = fit.bootstrap_params(
-        params,
-        model,
-        [ds],
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
         n_boot=2,
         method="residual",
         seed=0,
         logk_bounds=None,
         logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
     )
 
     assert out.n_success == 0
@@ -134,7 +147,7 @@ def test_bootstrap_all_nonconverged_yields_no_samples(monkeypatch):
     assert out.ci_method == "percentile"
 
 
-def test_accept_bootstrap_fit_rejects_nonfinite_predictions(monkeypatch):
+def test_accept_bootstrap_fit_rejects_nonfinite_predictions():
     ds = _make_dataset()
     model = MODEL_SPECS["11"]
     params = np.array([4.0, 7.0, 7.5], dtype=float)
@@ -143,19 +156,19 @@ def test_accept_bootstrap_fit_rejects_nonfinite_predictions(monkeypatch):
         bad = np.full_like(ds.y, np.nan)
         return [bad], [], [np.zeros_like(ds.y)]
 
-    monkeypatch.setattr(fit, "_predict_all", fake_predict_all)
-
-    accepted = fit._accept_bootstrap_fit(
+    accepted = accept_bootstrap_fit(
         params,
         cast(OptimizeResult, _DummyResult(success=True)),
         model,
         [ds],
+        predict_all_fn=fake_predict_all,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
     )
 
     assert accepted is False
 
 
-def test_bootstrap_supports_bca_ci_method(monkeypatch):
+def test_bootstrap_supports_bca_ci_method():
     ds = _make_dataset()
     model = MODEL_SPECS["11"]
     params = np.array([4.0, 7.0, 7.5], dtype=float)
@@ -163,18 +176,20 @@ def test_bootstrap_supports_bca_ci_method(monkeypatch):
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
         return params0 + np.array([0.05, 0.0, 0.0]), _DummyResult(success=True)
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
-
-    out = fit.bootstrap_params(
-        params,
-        model,
-        [ds],
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
         n_boot=5,
         method="residual",
         ci_method="bca",
         seed=0,
         logk_bounds=None,
         logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
     )
 
     assert out.ci_method == "bca"

@@ -1,17 +1,19 @@
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import pytest
+from scipy.optimize import OptimizeResult
 
 import nmr_bind_fit.fit as fit
+from nmr_bind_fit.fit_optimizer import param_bounds, select_best_multistart
 from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.models import MODEL_SPECS, ModelSpec
 
 
-class _DummyResult:
+class _DummyResult(OptimizeResult):
     def __init__(self, success: bool, rss: float, message: str):
-        self.success = success
-        self.fun = np.array([np.sqrt(rss)], dtype=float)
-        self.message = message
+        super().__init__(success=success, fun=np.array([np.sqrt(rss)], dtype=float), message=message)
 
 
 def _make_dataset() -> Dataset:
@@ -31,8 +33,28 @@ def _make_dataset() -> Dataset:
     )
 
 
-def test_multistart_prefers_success_over_lower_rss_failure(monkeypatch):
+def _build_initial_params(model: ModelSpec, datasets: list[Dataset], logk_vals: Sequence[float]) -> np.ndarray:
+    ds = datasets[0]
+    return np.array([*logk_vals, ds.y[0, 0], ds.y[-1, 0]], dtype=float)
+
+
+def _select_with_fake_optimizer(fit_with_initial_fn):
     ds = _make_dataset()
+    model = MODEL_SPECS["11"]
+    return select_best_multistart(
+        model,
+        [ds],
+        logk_grid=[(1.0,), (2.0,)],
+        max_nfev=10,
+        logk_bounds=None,
+        build_initial_params_fn=_build_initial_params,
+        fit_with_initial_fn=fit_with_initial_fn,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=(RuntimeError,),
+    )
+
+
+def test_select_best_multistart_prefers_success_over_lower_rss_failure():
     call_count = {"n": 0}
 
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
@@ -41,23 +63,16 @@ def test_multistart_prefers_success_over_lower_rss_failure(monkeypatch):
             return params0, _DummyResult(success=False, rss=1.0, message="failed_low_rss")
         return params0 + 0.05, _DummyResult(success=True, rss=4.0, message="converged")
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
 
-    result = fit.fit_model(
-        [ds],
-        "11",
-        logk_starts=[1.0, 2.0],
-        max_nfev=10,
-        bootstrap=0,
-    )
-
-    assert result.success is True
-    assert result.message == "converged"
-    assert result.params[0] > 2.0
+    assert params is not None
+    assert res is not None
+    assert res.success is True
+    assert res.message == "converged"
+    assert params[0] > 2.0
 
 
-def test_multistart_all_fail_uses_best_failure(monkeypatch):
-    ds = _make_dataset()
+def test_select_best_multistart_all_fail_uses_best_failure():
     call_count = {"n": 0}
 
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
@@ -66,23 +81,15 @@ def test_multistart_all_fail_uses_best_failure(monkeypatch):
             return params0, _DummyResult(success=False, rss=4.0, message="failed_high_rss")
         return params0, _DummyResult(success=False, rss=1.0, message="failed_low_rss")
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
 
-    result = fit.fit_model(
-        [ds],
-        "11",
-        logk_starts=[1.0, 2.0],
-        max_nfev=10,
-        bootstrap=0,
-    )
-
-    assert result.success is False
-    assert result.message == "failed_low_rss"
-    assert np.isnan(result.rss)
+    assert params is not None
+    assert res is not None
+    assert res.success is False
+    assert res.message == "failed_low_rss"
 
 
-def test_multistart_skips_exception_and_keeps_success(monkeypatch):
-    ds = _make_dataset()
+def test_select_best_multistart_skips_numeric_exception_and_keeps_success():
     call_count = {"n": 0}
 
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
@@ -91,18 +98,12 @@ def test_multistart_skips_exception_and_keeps_success(monkeypatch):
             raise RuntimeError("numeric failure")
         return params0, _DummyResult(success=True, rss=2.0, message="converged")
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
 
-    result = fit.fit_model(
-        [ds],
-        "11",
-        logk_starts=[1.0, 2.0],
-        max_nfev=10,
-        bootstrap=0,
-    )
-
-    assert result.success is True
-    assert result.message == "converged"
+    assert params is not None
+    assert res is not None
+    assert res.success is True
+    assert res.message == "converged"
 
 
 def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
@@ -197,22 +198,12 @@ def test_fit_models_propagates_unexpected_exception(monkeypatch):
         )
 
 
-def test_multistart_propagates_unexpected_exception(monkeypatch):
-    ds = _make_dataset()
-
+def test_select_best_multistart_propagates_unexpected_exception():
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds, solver_failure_mode="fail-fast"):
         raise IndexError("unexpected coding bug")
 
-    monkeypatch.setattr(fit, "_fit_with_initial", fake_fit_with_initial)
-
     with pytest.raises(IndexError, match="unexpected coding bug"):
-        fit.fit_model(
-            [ds],
-            "11",
-            logk_starts=[1.0, 2.0],
-            max_nfev=10,
-            bootstrap=0,
-        )
+        _select_with_fake_optimizer(fake_fit_with_initial)
 
 
 def test_fit_model_reports_residual_diagnostics_when_enabled():
