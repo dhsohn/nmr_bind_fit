@@ -10,6 +10,7 @@ tags:
   - model comparison
 authors:
   - name: Dae Hyup Sohn
+    orcid: 0000-0002-1743-1312
     corresponding: true
     affiliation: 1
 affiliations:
@@ -33,7 +34,7 @@ Binding constants in supramolecular chemistry are most useful when they are acco
 
 # State of the field
 
-The need for transparent binding-constant determination, uncertainty estimation, and alternatives to oversimplified graphical approaches has been emphasized repeatedly in supramolecular data-analysis guidance [@Thordarson2011; @Hibbert2016]. Existing workflows often involve spreadsheets, general-purpose nonlinear least-squares tools, custom scripts, or web-based fitting tools. These can be effective for individual analyses, but they may leave important choices implicit: which stoichiometries were tested, how non-binding behavior was ruled out, whether a more complex model was penalized for extra parameters, and how uncertainty or weak discrimination was communicated.
+The need for transparent binding-constant determination, uncertainty estimation, and alternatives to oversimplified graphical approaches has been emphasized repeatedly in supramolecular data-analysis guidance [@Thordarson2011; @Hibbert2016]. Existing workflows often involve spreadsheets, general-purpose nonlinear least-squares tools, custom scripts, or dedicated web-based fitting tools such as Bindfit (supramolecular.org) [@Hibbert2016]. These can be effective for individual analyses, but they may leave important choices implicit: which stoichiometries were tested, how non-binding behavior was ruled out, whether a more complex model was penalized for extra parameters, and how uncertainty or weak discrimination was communicated.
 
 `nmr_bind_fit` is not intended to replace broad chemical modeling environments or bespoke analyses for unusual equilibria. Its contribution is narrower and workflow-oriented: it packages a reproducible, inspectable, command-line analysis path for a common class of host-resonance NMR titrations. The software combines mass-balance-based candidate models, consistent model comparison, bootstrap uncertainty, and report generation in a single open-source Python package. By emphasizing a non-binding control and provisional model language, it complements best-practice recommendations for transparent supramolecular analysis rather than presenting model selection as a fully automated chemical verdict.
 
