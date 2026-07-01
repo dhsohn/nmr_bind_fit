@@ -53,4 +53,10 @@ The repository includes a test suite covering equilibrium solvers, model predict
 
 # AI usage disclosure
 
-Generative AI tools, specifically GPT-5.5 and Opus 4.8, were used to assist with code review and refinement of the draft JOSS paper. All AI-assisted outputs were reviewed, edited, and verified by the human author, who made the scientific and software-design decisions and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted materials.
+Generative AI tools were used during both the development of this software and the preparation of this paper:
+
+- **Software (code, tests, documentation).** Anthropic Claude (Opus 4.8 and Opus 4.6, via Claude Code) and OpenAI GPT-5.5 were used to help draft and refactor parts of the implementation, tests, docstrings, and documentation, and to draft pull-request descriptions. Several commits in the repository carry `Co-Authored-By` trailers recording this assistance.
+- **Code review.** Automated review tools, including OpenAI Codex, were used to review pull requests during development.
+- **Paper.** Claude Opus 4.8 and OpenAI GPT-5.5 were used to review and refine drafts of this paper.
+
+All AI-assisted output was reviewed, edited, tested, and verified by the author. The author made the scientific and software-design decisions — including the choice of binding models, the equilibrium formulations, and the statistical methodology — and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted software and paper.
