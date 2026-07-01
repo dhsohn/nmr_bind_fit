@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import glob
-from datetime import datetime
 import re
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -15,9 +15,13 @@ import numpy as np
 from .fit import fit_models
 from .io import load_datasets
 from .report import write_decision_txt, write_report_html, write_summary_csv
-from .report_pipeline import build_decisions, build_methods_sections, build_methods_text, build_report_artifacts
+from .report_pipeline import (
+    build_decisions,
+    build_methods_sections,
+    build_methods_text,
+    build_report_artifacts,
+)
 from .types import DatasetLike, FitResultLike
-
 
 MODEL_LABELS = {
     "11": "H : G = 1 : 1",

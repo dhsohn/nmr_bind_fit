@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import html
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
-
-import html
-
 
 _NUMERIC_COLS = {
     "Binding constant",
