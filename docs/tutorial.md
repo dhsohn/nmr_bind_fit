@@ -16,6 +16,11 @@ Or from GitHub:
 python -m pip install git+https://github.com/dhsohn/nmr_bind_fit.git
 ```
 
+The tutorial commands assume you are working from a clone or downloaded source
+tree that contains the repository's `examples/` directory. A direct GitHub
+`pip install` installs the command-line tool, but it does not create an
+`examples/` directory in your current working directory.
+
 ## 2. Inspect the example data
 
 The example files live in `examples/` and use the required column names:
