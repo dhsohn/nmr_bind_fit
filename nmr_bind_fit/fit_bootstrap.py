@@ -1,3 +1,5 @@
+"""Bootstrap resampling for binding-constant uncertainty."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

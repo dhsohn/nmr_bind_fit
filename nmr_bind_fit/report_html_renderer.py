@@ -1,3 +1,5 @@
+"""HTML rendering of fit summaries, model tables, and decision reports."""
+
 from __future__ import annotations
 
 from datetime import datetime

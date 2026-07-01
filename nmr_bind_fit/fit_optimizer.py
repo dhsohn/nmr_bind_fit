@@ -1,3 +1,5 @@
+"""Nonlinear least-squares optimization and multistart selection."""
+
 from __future__ import annotations
 
 import itertools
@@ -15,6 +17,7 @@ def param_bounds(
     model: ModelSpec,
     logk_bounds: Optional[Tuple[float, float]],
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Build lower/upper parameter bounds, constraining only the logK entries."""
     if logk_bounds is None or model.n_logk == 0:
         return np.full_like(params0, -np.inf), np.full_like(params0, np.inf)
     lower = np.full_like(params0, -np.inf)
@@ -33,6 +36,7 @@ def fit_with_initial(
     bounds: Tuple[np.ndarray, np.ndarray],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[np.ndarray, OptimizeResult]:
+    """Run a single bounded least-squares fit from one initial guess."""
     penalty_counter = {"count": 0}
 
     def residual_fn(current_params: np.ndarray, current_model: ModelSpec, current_datasets: List[Dataset]) -> np.ndarray:
@@ -62,6 +66,7 @@ def build_logk_grid(
     logk_starts: Sequence[float],
     logk_bounds: Optional[Tuple[float, float]],
 ) -> List[Tuple[float, ...]]:
+    """Build the multistart grid of logK starting points within bounds."""
     if model.n_logk == 0:
         return [()]
     starts = list(logk_starts)
@@ -84,6 +89,7 @@ def select_best_multistart(
     numeric_exceptions: Tuple[Type[BaseException], ...],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
+    """Fit from every grid start and return the lowest-RSS successful result."""
     best_success_params = None
     best_success_res = None
     best_success_rss = None
