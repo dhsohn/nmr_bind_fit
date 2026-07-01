@@ -29,8 +29,7 @@ The example files live in `examples/` and use the required column names:
 - `[G]t`: total guest concentration in molar (M);
 - `ppm_*`: observed chemical-shift columns.
 
-Concentrations must be supplied in molar (M) so that reported binding constants
-are in M⁻¹; convert other units (mM, µM) to molar before fitting.
+Convert other units (mM, µM) to molar before fitting.
 
 For example:
 

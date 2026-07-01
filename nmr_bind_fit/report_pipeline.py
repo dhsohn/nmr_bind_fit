@@ -475,7 +475,7 @@ def build_report_artifacts(
 def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
-    # Inputs are required to be in molar (M), so binding constants are reported in M⁻¹.
+    # K is reported in M⁻¹ (molar inputs).
     k_unit = "M⁻¹"
 
     # 1. Data Interpretation
