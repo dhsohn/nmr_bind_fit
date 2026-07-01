@@ -26,6 +26,10 @@ Please use GitHub issues for bug reports, reproducibility problems, and feature 
 
 Please do not upload confidential spectra, unpublished chemical structures, or private experimental data unless you are allowed to share them publicly.
 
+## Questions and support
+
+Please use GitHub issues for usage questions, installation problems, reproducibility questions, and requests for clarification about the documented workflow. For questions involving unpublished or confidential data, describe the software behavior with a synthetic or anonymized minimal example rather than uploading private spectra, chemical structures, or raw experimental records.
+
 ## Pull requests
 
 Pull requests should keep the workflow reproducible and conservative. In particular:
@@ -33,7 +37,7 @@ Pull requests should keep the workflow reproducible and conservative. In particu
 1. Add or update tests for changes in fitting, model comparison, reporting, or input/output behavior.
 2. Keep model-selection language transparent: the lowest-BIC model is a provisional working model among tested candidates, not an automatic chemical truth claim.
 3. Preserve fail-fast behavior for numerical solver failures unless the change explicitly documents and tests a different policy.
-4. Run `python -m pytest -q` before opening a pull request.
+4. Run `python -m ruff check .` and `python -m pytest -q` before opening a pull request.
 
 ## Documentation changes
 

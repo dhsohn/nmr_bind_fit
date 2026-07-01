@@ -53,12 +53,13 @@ def test_solve_11_mass_balance_extreme_k_sweep(k):
     np.testing.assert_allclose(species.g + species.hg, g0, rtol=1e-5, atol=1e-12)
 
 
-def test_solve_12_continue_mode_keeps_last_success_seed(monkeypatch):
-    x0_seen = []
+def test_solve_12_continue_mode_records_failed_point_and_continues(monkeypatch):
+    calls = 0
 
-    def fake_solve_12_point(h_tot, g_tot, k1, k2, x0=None, stats=None):
-        x0_seen.append(x0)
-        if len(x0_seen) == 2:
+    def fake_solve_12_point(h_tot, g_tot, k1, k2, stats=None):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
             raise RuntimeError("synthetic failure")
         return float(h_tot), 0.25, 0.0, 0.0
 
@@ -68,7 +69,7 @@ def test_solve_12_continue_mode_keeps_last_success_seed(monkeypatch):
     g0 = np.array([0.0, 5e-4, 1e-3], dtype=float)
     species = solve_12(h0, g0, 1e4, 1e3, failure_mode="continue")
 
-    assert x0_seen == [None, 0.25, 0.25]
+    assert calls == 3
     assert species.solver_stats is not None
     assert species.solver_stats.failed_indices == [1]
     assert np.isnan(species.h[1])
