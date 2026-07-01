@@ -1,21 +1,28 @@
 <!-- Thank you for contributing to nmr_bind_fit. -->
 
-## Summary
+## Motivation
 
-<!-- What does this change do, and why? -->
+<!-- What problem does this solve, and why now? -->
 
-## Type of change
+## Changes
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Documentation
-- [ ] Maintenance / refactor / CI
+<!-- What did you change, and what did you deliberately not change? -->
 
-## Checklist
+## Verification
 
-- [ ] Added or updated tests for changes in fitting, model comparison, reporting, or I/O behavior.
-- [ ] Kept model-selection language transparent (lowest-BIC is a provisional working model, not an automatic chemical-truth claim).
-- [ ] Preserved fail-fast behavior for numerical solver failures (or documented and tested a different policy).
-- [ ] Ran `python -m ruff check .` and `python -m pytest -q` locally.
-- [ ] Updated `CHANGELOG.md` under `[Unreleased]` if user-facing behavior changed.
-- [ ] Disclosed substantial AI assistance in this description, if applicable.
+<!--
+How did you confirm the change is correct? For code changes, include:
+- `python -m pytest -q`
+- `python -m ruff check .`
+- any CLI smoke test or manual check.
+For docs-only changes, note "No functional change" and how the text was checked.
+-->
+
+<!--
+Please also:
+- Update CHANGELOG.md under [Unreleased] if user-facing behavior changed.
+- Keep model-selection language transparent (lowest-BIC is a provisional working
+  model, not an automatic chemical-truth claim).
+- Preserve fail-fast behavior for numerical solver failures unless documented.
+- Disclose substantial AI assistance in this description, if applicable.
+-->
