@@ -1,10 +1,12 @@
+"""Report writers (summary CSV, decision text, HTML) for fit results."""
+
 from __future__ import annotations
 
+import csv
+import html
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
-
-import html
 
 from .report_html_renderer import write_report_html as _write_report_html_impl
 
@@ -67,8 +69,6 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
 
 
 def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
-    import csv
-
     if not rows:
         return
     fieldnames = list(rows[0].keys())

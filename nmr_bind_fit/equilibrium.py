@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import brentq
@@ -26,7 +26,7 @@ class SolverStats:
     success: int = 0
     fail: int = 0
     method: str = "brentq"
-    failed_indices: list[int] = field(default_factory=list)
+    failed_indices: List[int] = field(default_factory=list)
 
 
 def _normalize_failure_mode(failure_mode: str) -> str:

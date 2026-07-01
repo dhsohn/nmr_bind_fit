@@ -1,3 +1,5 @@
+"""Model fitting orchestration for NMR binding titrations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -490,8 +492,6 @@ def fit_model(
             compute_residual_diagnostics=residual_diagnostics,
         )
     except RuntimeError as exc:
-        if str(exc).startswith("BIC calculation failed:"):
-            raise ModelFitError(str(exc)) from exc
         raise ModelFitError(str(exc)) from exc
 
 
