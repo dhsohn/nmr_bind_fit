@@ -94,7 +94,6 @@ def solve_12_point(
     g_tot: float,
     k1: float,
     k2: float,
-    x0: Optional[float] = None,
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 1:2 binding for a single point via free-guest root finding."""
@@ -163,7 +162,6 @@ def solve_21_point(
     g_tot: float,
     k1: float,
     k2: float,
-    x0: Optional[float] = None,
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 2:1 binding for a single point via free-guest root finding."""
@@ -249,13 +247,11 @@ def solve_12(
     hg = np.full_like(h_tot, np.nan)
     hg2 = np.full_like(h_tot, np.nan)
 
-    g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
-        # Use the previous free-guest solution as the next initial guess.
         stats.points += 1
         try:
-            h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+            h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, stats=stats)
         except RuntimeError:
             stats.failed_indices.append(i)
             if mode == "continue":
@@ -265,7 +261,6 @@ def solve_12(
         g[i] = g_i
         hg[i] = hg_i
         hg2[i] = hg2_i
-        g_prev = g_i
 
     return SpeciesResult(h=h, g=g, hg=hg, hg2=hg2, solver_stats=stats)
 
@@ -286,13 +281,11 @@ def solve_21(
     hg = np.full_like(h_tot, np.nan)
     h2g = np.full_like(h_tot, np.nan)
 
-    g_prev = None
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
-        # Use the previous free-guest solution as the next initial guess.
         stats.points += 1
         try:
-            h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, x0=g_prev, stats=stats)
+            h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, stats=stats)
         except RuntimeError:
             stats.failed_indices.append(i)
             if mode == "continue":
@@ -302,6 +295,5 @@ def solve_21(
         g[i] = g_i
         hg[i] = hg_i
         h2g[i] = h2g_i
-        g_prev = g_i
 
     return SpeciesResult(h=h, g=g, hg=hg, h2g=h2g, solver_stats=stats)

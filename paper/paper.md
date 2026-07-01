@@ -54,7 +54,3 @@ The repository includes a test suite covering equilibrium solvers, model predict
 # AI usage disclosure
 
 Generative AI tools, specifically GPT-5.5 and Opus 4.8, were used to assist with code review and refinement of the draft JOSS paper. All AI-assisted outputs were reviewed, edited, and verified by the human author, who made the scientific and software-design decisions and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted materials.
-
-# Acknowledgements
-
-Funding acknowledgements, institutional acknowledgements, and any relevant related-publication details should be finalized before submission.
