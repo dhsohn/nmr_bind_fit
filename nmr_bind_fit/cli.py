@@ -180,9 +180,6 @@ def _display_model_name(name: str) -> str:
 def run_fit(args: argparse.Namespace) -> None:
     if args.bootstrap < 0:
         raise ValueError("--bootstrap must be non-negative.")
-    args.concentration_unit = str(getattr(args, "concentration_unit", "M")).strip()
-    if not args.concentration_unit:
-        raise ValueError("--concentration-unit must be non-empty.")
     args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
     if args.bootstrap_ci_method not in {"percentile", "bca"}:
         raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")
@@ -271,11 +268,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
     parser.add_argument("--bootstrap", type=_non_negative_int, default=1000, help="Bootstrap iterations")
-    parser.add_argument(
-        "--concentration-unit",
-        default="M",
-        help="Input concentration unit (for report K units, default: M)",
-    )
     parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
     parser.add_argument(
         "--bootstrap-ci-method",

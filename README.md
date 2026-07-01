@@ -64,13 +64,7 @@ Run bootstrap uncertainty estimation:
 nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 1000
 ```
 
-If concentrations are not in molar (`M`), set the input unit for report text:
-
-```bash
-nmr_bind_fit --input data.csv --concentration-unit mM
-```
-
-The numerical fit uses the concentration values exactly as supplied; the input concentration unit defines the reciprocal unit of the reported binding constants.
+Input concentrations must be in molar (`M`). Convert data recorded in other units (for example mM or µM) to molar before running the fit.
 
 To include informational residual diagnostics in the report:
 
@@ -92,14 +86,14 @@ nmr_bind_fit --input data.csv --bootstrap-ci-method bca
 
 Note: the current BCa-style implementation uses a bootstrap-sample-based acceleration approximation for computational efficiency. The default percentile bootstrap interval is the conservative choice for publication-facing analyses.
 
-For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns with missing values are dropped before fitting, and point-wise nonlinear solver failures in 1:2/2:1 models use fail-fast behavior. `log10 K` is constrained to `[0, 12]` (`K` in `[1e0, 1e12]` in reciprocal concentration units).
+For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns with missing values are dropped before fitting, and point-wise nonlinear solver failures in 1:2/2:1 models use fail-fast behavior. `log10 K` is constrained to `[0, 12]` (`K` in `[1e0, 1e12]` `M⁻¹`).
 
 ## Input format
 
 CSV or XLSX with:
 
-- `[H]t` — total host concentration;
-- `[G]t` — total guest concentration;
+- `[H]t` — total host concentration in molar (`M`);
+- `[G]t` — total guest concentration in molar (`M`);
 - one or more ppm columns, for example `ppm`, `ppm_H1`, `ppm_H2`.
 
 The concentration column names are fixed and must be exactly `[H]t` and `[G]t`.

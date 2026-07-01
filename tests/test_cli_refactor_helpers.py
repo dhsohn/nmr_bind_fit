@@ -62,12 +62,21 @@ def test_build_parser_rejects_negative_bootstrap(capsys):
     assert "--bootstrap must be non-negative." in err
 
 
-def test_build_parser_sets_default_concentration_unit():
+def test_build_parser_sets_default_flags():
     parser = build_parser()
     args = parser.parse_args(["--input", "sample.csv", "--bootstrap", "0"])
-    assert args.concentration_unit == "M"
     assert args.bootstrap_ci_method == "percentile"
     assert args.residual_diagnostics is False
+
+
+def test_build_parser_removed_concentration_unit_flag():
+    parser = build_parser()
+    # The flag no longer exists on the parsed namespace.
+    args = parser.parse_args(["--input", "sample.csv", "--bootstrap", "0"])
+    assert not hasattr(args, "concentration_unit")
+    # Supplying it is now an error rather than being silently accepted.
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--input", "sample.csv", "--concentration-unit", "mM"])
 
 
 def test_run_fit_rejects_negative_bootstrap_when_parser_is_bypassed():
@@ -75,7 +84,6 @@ def test_run_fit_rejects_negative_bootstrap_when_parser_is_bypassed():
         input=["sample.csv"],
         ppm_cols=None,
         bootstrap=-1,
-        concentration_unit="M",
         bootstrap_method="residual",
         bootstrap_logk_jitter=0.1,
         k_starts=None,
@@ -88,32 +96,11 @@ def test_run_fit_rejects_negative_bootstrap_when_parser_is_bypassed():
         run_fit(args)
 
 
-def test_run_fit_rejects_empty_concentration_unit_when_parser_is_bypassed():
-    args = argparse.Namespace(
-        input=["sample.csv"],
-        ppm_cols=None,
-        bootstrap=0,
-        concentration_unit="  ",
-        bootstrap_ci_method="percentile",
-        residual_diagnostics=False,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=100,
-        seed=None,
-        bootstrap_ci_width=None,
-    )
-    with pytest.raises(ValueError, match="--concentration-unit must be non-empty."):
-        run_fit(args)
-
-
 def test_run_fit_rejects_unknown_bootstrap_ci_method_when_parser_is_bypassed():
     args = argparse.Namespace(
         input=["sample.csv"],
         ppm_cols=None,
         bootstrap=0,
-        concentration_unit="M",
         bootstrap_ci_method="unknown",
         residual_diagnostics=False,
         bootstrap_method="residual",

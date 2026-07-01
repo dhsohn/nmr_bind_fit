@@ -25,9 +25,11 @@ tree that contains the repository's `examples/` directory. A direct GitHub
 
 The example files live in `examples/` and use the required column names:
 
-- `[H]t`: total host concentration;
-- `[G]t`: total guest concentration;
+- `[H]t`: total host concentration in molar (M);
+- `[G]t`: total guest concentration in molar (M);
 - `ppm_*`: observed chemical-shift columns.
+
+Convert other units (mM, µM) to molar before fitting.
 
 For example:
 

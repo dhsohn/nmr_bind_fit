@@ -100,7 +100,7 @@ data that do not in fact support binding — the kind of false positive examined
   solved at every point — the simplifying approximation that free guest equals total guest is
   *not* used — in line with the rigorous equilibrium treatment of Hargrove et al. (2010).
 - **K parameterization**: estimated as $\log_{10}(K)$ and **constrained to [0, 12]**
-  → $K \in [1,\ 10^{12}]$ (reciprocal concentration units; default concentration unit M).
+  → $K \in [1,\ 10^{12}]\ \text{M}^{-1}$ (concentrations in molar, M).
   This range ensures physically meaningful and numerically stable estimation. A
   $\log_{10}K$ estimate pinned at 0 or 12 indicates the estimate is not trustworthy (see §6).
 - **Multistart**: fits are launched from a grid of $\log_{10}K$ starting values to avoid
