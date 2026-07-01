@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/dhsohn/nmr_bind_fit/actions/workflows/ci.yml/badge.svg)](https://github.com/dhsohn/nmr_bind_fit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21071370.svg)](https://doi.org/10.5281/zenodo.21071370)
 
 `nmr_bind_fit` is a Python command-line workflow for NMR chemical-shift titration binding analysis. It fits 1:1, sequential 1:2, sequential 2:1, and non-binding candidate models, then reports information-criterion model comparisons, bootstrap uncertainty, diagnostic warnings, and publication-oriented HTML summaries.

@@ -8,6 +8,8 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Added
 
+- Community-maintenance scaffolding: GitHub issue forms (bug report, feature request), a pull-request template, and Dependabot configuration for GitHub Actions and pip.
+- Python version badge in the README.
 - Zenodo DOI metadata for the archived v0.1.0 release (10.5281/zenodo.21071370).
 - JOSS-readiness project metadata, including license, citation metadata, contribution guide, and CI configuration.
 - Example synthetic titration datasets and tutorial documentation.

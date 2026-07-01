@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage questions and support
+    url: https://github.com/dhsohn/nmr_bind_fit/blob/main/CONTRIBUTING.md#questions-and-support
+    about: >
+      For usage questions, installation help, or clarification about the
+      documented workflow. Describe behavior with synthetic or anonymized
+      examples rather than uploading private data.

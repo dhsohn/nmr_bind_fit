@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducibility problem, incorrect result, or crash.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve `nmr_bind_fit`.
+
+        Please do **not** upload confidential spectra, unpublished chemical
+        structures, or private experimental data. Use synthetic or anonymized
+        minimal examples instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command that was run
+      description: The exact CLI command or Python call.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input description
+      description: >
+        Input format and a minimal example if possible. State whether the data
+        are synthetic/example data or real unpublished data.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output / traceback
+      description: Relevant `summary.csv`, `decision.txt`, or the full traceback.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "nmr_bind_fit version (e.g. 0.1.0 or a commit SHA)."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and OS
+      description: "e.g. Python 3.11 on macOS 14."
+    validations:
+      required: true
