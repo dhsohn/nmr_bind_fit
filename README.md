@@ -22,6 +22,12 @@ Install the latest code from GitHub:
 python -m pip install git+https://github.com/dhsohn/nmr_bind_fit.git
 ```
 
+The quick-start commands below read the synthetic CSV files from this
+repository's `examples/` directory. A direct `pip install` installs the command
+line tool, but it does not create an `examples/` directory in your current
+working tree; clone/download the repository examples first, or replace the paths
+with your own input files.
+
 For editable development from a local clone:
 
 ```bash
@@ -48,6 +54,7 @@ python -m pytest -q
 Run a single-file fit across all candidate models:
 
 ```bash
+# Run from a clone/source tree that contains examples/synthetic_11.csv.
 nmr_bind_fit --input examples/synthetic_11.csv
 ```
 
