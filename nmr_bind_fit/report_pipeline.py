@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
 from .models import ModelSpec, split_params_multi
-from .plots import plot_bootstrap_hist, plot_fraction_bound, plot_isotherms, plot_residuals
+from .plots import (
+    plot_bootstrap_hist,
+    plot_fraction_bound,
+    plot_isotherms,
+    plot_residuals,
+)
 from .report import DecisionEntry, ModelEntry, ParamEntry
 from .types import DatasetLike, FitResultLike, SpeciesLike
-
 
 SUMMARY_LABELS = {
     "dataset": "Dataset",

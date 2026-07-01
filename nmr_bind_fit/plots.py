@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Tuple
 
-import numpy as np
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .io import Dataset
-from .models import ModelSpec, predict_dataset, fraction_bound
+from .models import ModelSpec, fraction_bound, predict_dataset
 from .types import DatasetLike
 
 # ── Publication-quality defaults ──────────────────────────────────────────────
