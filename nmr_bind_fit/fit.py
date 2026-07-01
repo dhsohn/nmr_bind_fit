@@ -9,13 +9,10 @@ import numpy as np
 from scipy.optimize import OptimizeResult
 
 from .fit_bootstrap import BootstrapResult
-from .fit_bootstrap import accept_bootstrap_fit as _accept_bootstrap_fit_impl
 from .fit_bootstrap import bootstrap_params as _bootstrap_params_impl
-from .fit_criteria import information_criteria as _information_criteria_impl
-from .fit_optimizer import build_logk_grid as _build_logk_grid_impl
-from .fit_optimizer import fit_with_initial as _fit_with_initial_impl
-from .fit_optimizer import param_bounds as _param_bounds_impl
-from .fit_optimizer import select_best_multistart as _select_best_multistart_impl
+from .fit_criteria import information_criteria
+from .fit_optimizer import build_logk_grid, param_bounds, select_best_multistart
+from .fit_optimizer import fit_with_initial as _optimizer_fit_with_initial
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
 from .stats import residual_diagnostics as _residual_diagnostics_impl
@@ -235,7 +232,8 @@ def _fit_with_initial(
     bounds: Tuple[np.ndarray, np.ndarray],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[np.ndarray, OptimizeResult]:
-    return _fit_with_initial_impl(
+    """Bind fit.py's residual-vector policy to the lower-level optimizer."""
+    return _optimizer_fit_with_initial(
         model=model,
         datasets=datasets,
         params0=params0,
@@ -244,14 +242,6 @@ def _fit_with_initial(
         bounds=bounds,
         solver_failure_mode=solver_failure_mode,
     )
-
-
-def _param_bounds(
-    params0: np.ndarray,
-    model: ModelSpec,
-    logk_bounds: Optional[Tuple[float, float]],
-) -> Tuple[np.ndarray, np.ndarray]:
-    return _param_bounds_impl(params0, model, logk_bounds)
 
 
 def _total_observations(datasets: List[Dataset]) -> int:
@@ -294,36 +284,6 @@ def _failed_fit_result(
     )
 
 
-def _select_best_multistart(
-    model: ModelSpec,
-    datasets: List[Dataset],
-    logk_grid: Sequence[Tuple[float, ...]],
-    max_nfev: int,
-    logk_bounds: Optional[Tuple[float, float]],
-    solver_failure_mode: str = "fail-fast",
-) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
-    return _select_best_multistart_impl(
-        model=model,
-        datasets=datasets,
-        logk_grid=logk_grid,
-        max_nfev=max_nfev,
-        logk_bounds=logk_bounds,
-        build_initial_params_fn=_build_initial_params,
-        fit_with_initial_fn=_fit_with_initial,
-        param_bounds_fn=_param_bounds,
-        numeric_exceptions=_NUMERIC_EXCEPTIONS,
-        solver_failure_mode=solver_failure_mode,
-    )
-
-
-def _build_logk_grid(
-    model: ModelSpec,
-    logk_starts: Sequence[float],
-    logk_bounds: Optional[Tuple[float, float]],
-) -> List[Tuple[float, ...]]:
-    return _build_logk_grid_impl(model, logk_starts, logk_bounds)
-
-
 def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[object]) -> str:
     fail_points = 0
     total_points = 0
@@ -336,14 +296,6 @@ def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[ob
     if total_points > 0:
         message = f"{message} Failed points: {fail_points}/{total_points}."
     return message
-
-
-def _information_criteria(
-    datasets: List[Dataset],
-    residuals: List[np.ndarray],
-    p: int,
-) -> Tuple[float, float]:
-    return _information_criteria_impl(datasets, residuals, p)
 
 
 def _build_successful_fit_result(
@@ -384,7 +336,7 @@ def _build_successful_fit_result(
     dof = int(n - p)
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
     r2, r2_per_peak = _r2_score(datasets, y_pred_list)
-    bic, aicc = _information_criteria(datasets, residuals, p)
+    bic, aicc = information_criteria(datasets, residuals, p)
     diag: Dict[str, float] = {}
     if compute_residual_diagnostics:
         finite_residuals = [res[np.isfinite(res)] for res in residuals]
@@ -449,16 +401,20 @@ def fit_model(
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
     try:
-        logk_grid = _build_logk_grid(model, logk_starts, logk_bounds)
+        logk_grid = build_logk_grid(model, logk_starts, logk_bounds)
     except ValueError as exc:
         raise ModelFitError(str(exc)) from exc
 
-    best_params, best_res = _select_best_multistart(
+    best_params, best_res = select_best_multistart(
         model,
         datasets,
         logk_grid,
         max_nfev=max_nfev,
         logk_bounds=logk_bounds,
+        build_initial_params_fn=_build_initial_params,
+        fit_with_initial_fn=_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
         solver_failure_mode=solver_failure_mode,
     )
 
@@ -495,24 +451,6 @@ def fit_model(
         raise ModelFitError(str(exc)) from exc
 
 
-def _accept_bootstrap_fit(
-    params_fit: np.ndarray,
-    res: OptimizeResult,
-    model: ModelSpec,
-    datasets: List[Dataset],
-    solver_failure_mode: str = "fail-fast",
-) -> bool:
-    return _accept_bootstrap_fit_impl(
-        params_fit,
-        res,
-        model,
-        datasets,
-        predict_all_fn=_predict_all,
-        numeric_exceptions=_NUMERIC_EXCEPTIONS,
-        solver_failure_mode=solver_failure_mode,
-    )
-
-
 def bootstrap_params(
     params: np.ndarray,
     model: ModelSpec,
@@ -526,6 +464,7 @@ def bootstrap_params(
     max_nfev: int = 5000,
     solver_failure_mode: str = "fail-fast",
 ) -> BootstrapResult:
+    """Run bootstrap resampling using fit.py prediction and optimizer policies."""
     return _bootstrap_params_impl(
         params=params,
         model=model,
@@ -538,7 +477,7 @@ def bootstrap_params(
         logk_jitter=logk_jitter,
         predict_all_fn=_predict_all,
         fit_with_initial_fn=_fit_with_initial,
-        param_bounds_fn=_param_bounds,
+        param_bounds_fn=param_bounds,
         numeric_exceptions=_NUMERIC_EXCEPTIONS,
         max_nfev=max_nfev,
         solver_failure_mode=solver_failure_mode,
