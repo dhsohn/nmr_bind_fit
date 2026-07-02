@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import glob
 import re
+import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -178,6 +179,8 @@ def _display_model_name(name: str) -> str:
 
 
 def run_fit(args: argparse.Namespace) -> None:
+    # Defensively re-validate for callers that build args directly and bypass
+    # the parser (the CLI type converter already rejects negative --bootstrap).
     if args.bootstrap < 0:
         raise ValueError("--bootstrap must be non-negative.")
     args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
@@ -313,7 +316,13 @@ def main() -> None:
     # Parse CLI arguments and run the requested command.
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except (FileNotFoundError, ValueError) as exc:
+        # Report expected input/validation problems as a clean message and a
+        # nonzero exit status instead of an uncaught traceback.
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
