@@ -522,17 +522,50 @@ def fit_models(
     datasets: List[Dataset],
     model_names: Sequence[str],
     logk_starts: Sequence[float],
-    replicates: bool,
-    max_nfev: int,
-    bootstrap: int,
-    bootstrap_method: str,
-    seed: Optional[int],
-    logk_bounds: Optional[Tuple[float, float]],
-    logk_jitter: float,
+    replicates: bool = False,
+    max_nfev: int = 5000,
+    bootstrap: int = 0,
+    bootstrap_method: str = "residual",
+    seed: Optional[int] = None,
+    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_jitter: float = 0.1,
     solver_failure_mode: str = "fail-fast",
     bootstrap_ci_method: str = "percentile",
     residual_diagnostics: bool = False,
 ) -> List[FitResult]:
+    """Fit candidate models and return one :class:`FitResult` per fit job.
+
+    This is the primary programmatic entry point (mirrored by the ``nmr_bind_fit``
+    command-line interface). Each requested model is fitted by multistart
+    nonlinear least squares; failures are captured as unsuccessful ``FitResult``
+    objects rather than raised, so the returned list always has one entry per job.
+
+    Args:
+        datasets: Datasets to fit (see :func:`nmr_bind_fit.io.load_datasets`).
+        model_names: Candidate model codes, e.g. ``["11", "12", "21", "nb"]``.
+        logk_starts: log10(K) multistart initial values; the grid is the
+            Cartesian product across a model's binding constants.
+        replicates: If True, fit all datasets simultaneously with shared binding
+            constants and dataset-specific chemical shifts. If False (default),
+            fit each dataset independently.
+        max_nfev: Maximum optimizer function evaluations per start.
+        bootstrap: Number of bootstrap refits for uncertainty; 0 disables it.
+        bootstrap_method: Resampling scheme: ``"residual"``, ``"points"``, or
+            ``"parametric"``.
+        seed: Seed for the bootstrap random generator (None for nondeterministic).
+        logk_bounds: Optional ``(low, high)`` bounds on log10(K).
+        logk_jitter: Std. dev. of the log10(K) start perturbation per refit.
+        solver_failure_mode: Per-point equilibrium-solver policy for 1:2/2:1
+            models: ``"fail-fast"`` or ``"continue"``.
+        bootstrap_ci_method: Confidence-interval method: ``"percentile"`` or
+            ``"bca"``.
+        residual_diagnostics: If True, compute informational residual
+            diagnostics (Shapiro-Wilk, Durbin-Watson).
+
+    Returns:
+        One :class:`FitResult` per (dataset-group, model) job, in job order.
+        Check ``FitResult.success`` before using the fitted values.
+    """
     results = []
     for fit_datasets, model_name in _iter_fit_jobs(datasets, model_names, replicates):
         try:

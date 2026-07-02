@@ -49,7 +49,14 @@ def residual_diagnostics(
     *,
     shapiro_max_n: int = 5000,
 ) -> Dict[str, float]:
-    """Compute informational residual diagnostics (normality, autocorrelation)."""
+    """Compute informational residual diagnostics (normality, autocorrelation).
+
+    These are reporting aids, not acceptance tests. The Durbin-Watson statistic
+    treats the input as a single ordered series; when residuals are pooled across
+    several peaks or datasets before being passed here, the lag-1 differences at
+    concatenation boundaries are not physically meaningful, so the reported value
+    is an approximate, informational indicator rather than a per-series test.
+    """
     res = np.asarray(residuals, dtype=float)
     flat = res[np.isfinite(res)]
     result: Dict[str, float] = {}

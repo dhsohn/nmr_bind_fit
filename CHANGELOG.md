@@ -14,12 +14,16 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - JOSS-readiness project metadata, including license, citation metadata, contribution guide, and CI configuration.
 - Example synthetic titration datasets and tutorial documentation.
 - Draft JOSS paper, BibTeX references, Zenodo metadata, and release/DOI checklist.
+- `py.typed` marker so downstream users receive the package's type information (PEP 561).
 
 ### Changed
 
 - Renamed the import package namespace from `core` to `nmr_bind_fit` while keeping the CLI command `nmr_bind_fit`.
 - Expanded packaging metadata and optional dependency groups.
 - Input concentrations are now required to be in molar (M); binding constants are reported in M⁻¹.
+- The generated HTML report is now labeled consistently as `nmr_bind_fit` (previously "NMRBindFit").
+- The CLI now reports expected input and validation errors as a concise message with a nonzero exit status instead of an uncaught traceback.
+- `fit_models` now documents its parameters and defaults the optional ones, so it can be used as a library entry point with only datasets, model names, and log10(K) starts.
 
 ### Removed
 

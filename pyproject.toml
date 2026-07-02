@@ -71,6 +71,9 @@ nmr_bind_fit = "nmr_bind_fit.cli:main"
 [tool.setuptools.packages.find]
 include = ["nmr_bind_fit*"]
 
+[tool.setuptools.package-data]
+nmr_bind_fit = ["py.typed"]
+
 [tool.ruff.lint]
 extend-select = ["I", "D100"]
 
