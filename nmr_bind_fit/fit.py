@@ -339,10 +339,18 @@ def _build_successful_fit_result(
     bic, aicc = information_criteria(datasets, residuals, p)
     diag: Dict[str, float] = {}
     if compute_residual_diagnostics:
-        finite_residuals = [res[np.isfinite(res)] for res in residuals]
+        finite_residuals = []
+        for res in residuals:
+            for peak_idx in range(res.shape[1]):
+                series = res[:, peak_idx]
+                finite_residuals.append(series[np.isfinite(series)])
+        finite_residuals = [series for series in finite_residuals if series.size > 0]
         if finite_residuals:
             stacked = np.concatenate(finite_residuals)
-            diag = _residual_diagnostics_impl(stacked)
+            diag = _residual_diagnostics_impl(
+                stacked,
+                include_durbin_watson=len(finite_residuals) == 1,
+            )
 
     bootstrap_result = None
     if bootstrap > 0:

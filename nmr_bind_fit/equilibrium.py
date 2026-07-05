@@ -35,6 +35,23 @@ def _normalize_failure_mode(failure_mode: str) -> str:
     return failure_mode
 
 
+def _validate_positive_finite_constants(*values: float) -> Tuple[float, ...]:
+    constants = tuple(float(value) for value in values)
+    if any((not math.isfinite(value)) or value <= 0.0 for value in constants):
+        raise ValueError("Binding constants must be positive and finite.")
+    return constants
+
+
+def _validate_total_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    h_arr = np.asarray(h_tot, dtype=float)
+    g_arr = np.asarray(g_tot, dtype=float)
+    if h_arr.shape != g_arr.shape:
+        raise ValueError("Host and guest total arrays must have matching shape.")
+    if h_arr.ndim != 1:
+        raise ValueError("Host and guest total arrays must be one-dimensional.")
+    return h_arr, g_arr
+
+
 def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
     """Closed form 1:1 solution using the quadratic mass-balance equation."""
     h_tot = np.asarray(h_tot, dtype=float)
@@ -97,6 +114,7 @@ def solve_12_point(
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 1:2 binding for a single point via free-guest root finding."""
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
     if h_tot <= 0 and g_tot <= 0:
         return 0.0, 0.0, 0.0, 0.0
     if g_tot <= 0:
@@ -127,14 +145,8 @@ def solve_12_point(
         def f(g: float) -> float:
             return ((A * g + B) * g + C) * g + D
 
-    # Adaptive lower bound: estimate minimum free guest under full saturation.
-    with np.errstate(over="ignore"):
-        binding_capacity = k1 * h_tot * (1.0 + 2.0 * k2 * h_tot)
-    if np.isfinite(binding_capacity) and binding_capacity > 0:
-        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
-    else:
-        lower = 1e-300
-    upper = max(g_tot, lower * 10.0)
+    lower = 0.0
+    upper = float(g_tot)
 
     try:
         g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
@@ -165,6 +177,7 @@ def solve_21_point(
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 2:1 binding for a single point via free-guest root finding."""
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
     if h_tot <= 0 and g_tot <= 0:
         return 0.0, 0.0, 0.0, 0.0
     if g_tot <= 0:
@@ -203,14 +216,8 @@ def solve_21_point(
         term2 = 0.5 * (h_tot - b_h)
         return g + term1 + term2 - g_tot
 
-    # Adaptive lower bound: estimate minimum free guest under full saturation.
-    with np.errstate(over="ignore"):
-        binding_capacity = k1 * h_tot * (1.0 + k2 * h_tot)
-    if np.isfinite(binding_capacity) and binding_capacity > 0:
-        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
-    else:
-        lower = 1e-300
-    upper = max(g_tot, lower * 10.0)
+    lower = 0.0
+    upper = float(g_tot)
 
     try:
         g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
@@ -240,8 +247,8 @@ def solve_12(
 ) -> SpeciesResult:
     """Solve 1:2 binding across all points; aborts on the first failure."""
     mode = _normalize_failure_mode(failure_mode)
-    h_tot = np.asarray(h_tot, dtype=float)
-    g_tot = np.asarray(g_tot, dtype=float)
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
+    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)
@@ -256,7 +263,7 @@ def solve_12(
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue
-            break
+            raise
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i
@@ -274,8 +281,8 @@ def solve_21(
 ) -> SpeciesResult:
     """Solve 2:1 binding across all points; aborts on the first failure."""
     mode = _normalize_failure_mode(failure_mode)
-    h_tot = np.asarray(h_tot, dtype=float)
-    g_tot = np.asarray(g_tot, dtype=float)
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
+    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)
@@ -290,7 +297,7 @@ def solve_21(
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue
-            break
+            raise
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i

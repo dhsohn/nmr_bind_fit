@@ -59,15 +59,33 @@ def split_params_multi(
     datasets: Sequence[DatasetLike],
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     # Walk the parameter vector across datasets for replicate fits.
+    params = np.asarray(params, dtype=float)
     logk = params[: model.n_logk]
     deltas = []
     idx = model.n_logk
     for ds in datasets:
         count = ds.n_peaks * model.n_delta_per_peak
+        if idx + count > params.size:
+            raise ValueError("Parameter vector is shorter than expected for the selected model/datasets.")
         delta = params[idx : idx + count].reshape(ds.n_peaks, model.n_delta_per_peak)
         deltas.append(delta)
         idx += count
+    if idx != params.size:
+        raise ValueError("Parameter vector has unused trailing values for the selected model/datasets.")
     return logk, deltas
+
+
+def _logk_to_k(value: float, label: str) -> float:
+    logk_value = float(value)
+    if not np.isfinite(logk_value):
+        raise ValueError(f"{label} must be finite.")
+    try:
+        k = 10.0 ** logk_value
+    except OverflowError as exc:
+        raise ValueError(f"{label} overflows when converted to K.") from exc
+    if not np.isfinite(k) or k <= 0.0:
+        raise ValueError(f"{label} must convert to a positive finite K.")
+    return float(k)
 
 
 def _weights_11(species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
@@ -112,7 +130,7 @@ def predict_dataset(
 
     if model.name == "11":
         # Fit parameters are in log10(K); convert to linear K for equilibrium.
-        k = 10 ** float(logk[0])
+        k = _logk_to_k(logk[0], "logK")
         species = solve_11(h_tot, g_tot, k)
         weights = _weights_11(species, h_tot)
         y_pred = weights @ delta.T
@@ -120,8 +138,8 @@ def predict_dataset(
 
     if model.name == "12":
         # Stepwise binding constants for 1:2.
-        k1 = 10 ** float(logk[0])
-        k2 = 10 ** float(logk[1])
+        k1 = _logk_to_k(logk[0], "logK1")
+        k2 = _logk_to_k(logk[1], "logK2")
         species = solve_12(h_tot, g_tot, k1, k2, failure_mode=solver_failure_mode)
         weights = _weights_12(species, h_tot)
         y_pred = weights @ delta.T
@@ -129,8 +147,8 @@ def predict_dataset(
 
     if model.name == "21":
         # Stepwise binding constants for 2:1.
-        k1 = 10 ** float(logk[0])
-        k2 = 10 ** float(logk[1])
+        k1 = _logk_to_k(logk[0], "logK1")
+        k2 = _logk_to_k(logk[1], "logK2")
         species = solve_21(h_tot, g_tot, k1, k2, failure_mode=solver_failure_mode)
         weights = _weights_21(species, h_tot)
         y_pred = weights @ delta.T
@@ -147,7 +165,7 @@ def predict_dataset(
 
 
 def fraction_bound(model: ModelSpec, species: SpeciesResult, h_tot: np.ndarray) -> np.ndarray:
-    """Fraction bound defined on a host basis for host-resonance data."""
+    """Host-basis bound fraction for host-resonance data."""
     # Normalize bound species on a per-host basis for host-only resonances.
     if model.name == "11":
         return species.hg / h_tot

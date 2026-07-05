@@ -54,7 +54,7 @@ def _select_with_fake_optimizer(fit_with_initial_fn):
     )
 
 
-def test_select_best_multistart_prefers_success_over_lower_rss_failure():
+def test_select_best_multistart_keeps_lower_rss_failure_visible():
     call_count = {"n": 0}
 
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
@@ -67,9 +67,9 @@ def test_select_best_multistart_prefers_success_over_lower_rss_failure():
 
     assert params is not None
     assert res is not None
-    assert res.success is True
-    assert res.message == "converged"
-    assert params[0] > 2.0
+    assert res.success is False
+    assert res.message == "failed_low_rss"
+    assert params[0] == 1.0
 
 
 def test_select_best_multistart_all_fail_uses_best_failure():

@@ -7,7 +7,7 @@
 
 `nmr_bind_fit` is a Python command-line workflow for NMR chemical-shift titration binding analysis. It fits 1:1, sequential 1:2, sequential 2:1, and non-binding candidate models, then reports information-criterion model comparisons, bootstrap uncertainty, diagnostic warnings, and publication-oriented HTML summaries.
 
-The project is designed as a transparent decision-support tool for host-guest and supramolecular NMR titrations. It does **not** declare the lowest-BIC model to be chemical ground truth; statistical ranking must be interpreted together with fast-exchange behavior, saturation, spectral consistency, and feasible stoichiometry.
+The project is designed as a transparent decision-support tool for host-guest and supramolecular NMR titrations. It does **not** declare the lowest finite-BIC model to be chemical ground truth; statistical ranking must be interpreted together with fast-exchange behavior, saturation, spectral consistency, and feasible stoichiometry.
 
 For the detailed rationale behind model selection, including BIC/AICc, ΔBIC, bootstrap confidence intervals, and chemical plausibility checks, see [docs/binding_model_selection.md](docs/binding_model_selection.md). For a step-by-step example, see [docs/tutorial.md](docs/tutorial.md).
 
@@ -85,9 +85,9 @@ BCa-style intervals are available as an experimental option:
 nmr_bind_fit --input data.csv --bootstrap-ci-method bca
 ```
 
-Note: the current BCa-style implementation uses a bootstrap-sample-based acceleration approximation for computational efficiency. The default percentile bootstrap interval is the conservative choice for publication-facing analyses.
+Note: BCa-style intervals require enough successful bootstrap and jackknife refits; when those checks fail, the report falls back to percentile intervals or omits the CI with a warning. The default percentile bootstrap interval is the conservative choice for publication-facing analyses.
 
-For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns with missing values are dropped before fitting, and point-wise nonlinear solver failures in 1:2/2:1 models use fail-fast behavior. `log10 K` is constrained to `[0, 12]` (`K` in `[1e0, 1e12]` `M⁻¹`).
+For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns with missing or non-finite values are dropped before fitting, and point-wise nonlinear solver failures in 1:2/2:1 models use fail-fast behavior. `log10 K` is constrained to `[0, 12]` (`K` in `[1e0, 1e12]` `M⁻¹`).
 
 ## Input format
 
@@ -99,7 +99,7 @@ CSV or XLSX with:
 
 The concentration column names are fixed and must be exactly `[H]t` and `[G]t`.
 
-Rows are dropped when host/guest values are missing. If any ppm column contains missing values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents (`[G]t/[H]t`).
+Rows are dropped when host/guest values are missing. If any ppm column contains missing or non-finite values, that peak column is excluded while remaining peaks are retained. The x-axis is always equivalents (`[G]t/[H]t`).
 
 Example CSV:
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
@@ -371,7 +372,8 @@ tr.best-model td { background: var(--success-bg) !important; font-weight: 500; }
 
 
 def _slug(text: str) -> str:
-    return text.lower().replace(" ", "-").replace(":", "").replace("(", "").replace(")", "")
+    slug = re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip("-")
+    return slug or "section"
 
 
 def _fig_caption(fig_counter: _FigCounter, plot_path: str) -> str:
@@ -458,7 +460,7 @@ def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
 def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: Dict[str, str]) -> str:
     if not summary_rows:
         return ""
-    headers = [h for h in summary_rows[0].keys() if h != "Dataset"]
+    headers = list(summary_rows[0].keys())
     thead = "".join(
         f'<th{_cell_class(h)}>{html.escape(h)}</th>' for h in headers
     )
@@ -668,4 +670,4 @@ def write_report_html(
 </html>
 """
 
-    output_path.write_text(html_doc)
+    output_path.write_text(html_doc, encoding="utf-8")

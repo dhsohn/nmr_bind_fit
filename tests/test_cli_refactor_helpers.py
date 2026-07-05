@@ -36,6 +36,26 @@ def test_resolve_logk_config_rejects_negative_jitter():
         _resolve_logk_config(args)
 
 
+def test_resolve_logk_config_rejects_nan_k_starts():
+    args = SimpleNamespace(
+        k_starts="nan",
+        bootstrap_logk_jitter=0.1,
+    )
+
+    with pytest.raises(ValueError, match="All K starts must be finite."):
+        _resolve_logk_config(args)
+
+
+def test_resolve_logk_config_rejects_nan_jitter():
+    args = SimpleNamespace(
+        k_starts="10",
+        bootstrap_logk_jitter=float("nan"),
+    )
+
+    with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be finite."):
+        _resolve_logk_config(args)
+
+
 def test_resolve_logk_config_rejects_empty_k_starts_list():
     args = argparse.Namespace(
         k_starts=",",
@@ -112,6 +132,26 @@ def test_run_fit_rejects_unknown_bootstrap_ci_method_when_parser_is_bypassed():
         bootstrap_ci_width=None,
     )
     with pytest.raises(ValueError, match="--bootstrap-ci-method must be one of: percentile, bca."):
+        run_fit(args)
+
+
+def test_run_fit_rejects_nonpositive_max_nfev_when_parser_is_bypassed():
+    args = SimpleNamespace(
+        bootstrap=0,
+        bootstrap_ci_method="percentile",
+        residual_diagnostics=False,
+        input=["sample.csv"],
+        ppm_cols=None,
+        k_starts="10",
+        max_nfev=0,
+        bootstrap_method="residual",
+        seed=None,
+        replicates=False,
+        bootstrap_logk_jitter=0.1,
+        bootstrap_ci_width=None,
+    )
+
+    with pytest.raises(ValueError, match="--max-nfev must be positive."):
         run_fit(args)
 
 

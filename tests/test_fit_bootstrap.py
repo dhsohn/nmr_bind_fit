@@ -4,7 +4,11 @@ from typing import cast
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from nmr_bind_fit.fit_bootstrap import accept_bootstrap_fit, bootstrap_params
+from nmr_bind_fit.fit_bootstrap import (
+    MIN_BOOTSTRAP_CI_SAMPLES,
+    accept_bootstrap_fit,
+    bootstrap_params,
+)
 from nmr_bind_fit.fit_optimizer import param_bounds
 from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.models import MODEL_SPECS
@@ -109,6 +113,7 @@ def test_bootstrap_excludes_nonfinite_params():
     assert out.n_boot == 2
     assert out.param_samples.shape == (1, 3)
     np.testing.assert_allclose(out.param_samples[0], params + 0.2)
+    assert "Bootstrap CI omitted" in out.ci_warning
 
 
 def test_bootstrap_all_nonconverged_yields_no_samples():
@@ -180,7 +185,7 @@ def test_bootstrap_supports_bca_ci_method():
         params=params,
         model=model,
         datasets=[ds],
-        n_boot=5,
+        n_boot=MIN_BOOTSTRAP_CI_SAMPLES,
         method="residual",
         ci_method="bca",
         seed=0,
@@ -199,3 +204,34 @@ def test_bootstrap_supports_bca_ci_method():
     assert out.ci_high_percentile.shape == (1,)
     assert out.ci_low_bca.shape == (1,)
     assert out.ci_high_bca.shape == (1,)
+    assert np.isfinite(out.ci_low).all()
+    assert np.isfinite(out.ci_high).all()
+
+
+def test_bootstrap_omits_ci_for_too_few_successes():
+    ds = _make_dataset()
+    model = MODEL_SPECS["11"]
+    params = np.array([4.0, 7.0, 7.5], dtype=float)
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        return params0 + np.array([0.05, 0.0, 0.0]), _DummyResult(success=True)
+
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
+        n_boot=MIN_BOOTSTRAP_CI_SAMPLES - 1,
+        method="residual",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+    )
+
+    assert out.n_success == MIN_BOOTSTRAP_CI_SAMPLES - 1
+    assert np.isnan(out.ci_low).all()
+    assert np.isnan(out.ci_high).all()
+    assert "Bootstrap CI omitted" in out.ci_warning

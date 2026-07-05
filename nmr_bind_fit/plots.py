@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import List, Tuple
 
@@ -43,6 +44,11 @@ _CLR_DATA = "#2b2d42"
 _CLR_FIT = "#d90429"
 _CLR_ZERO = "#94a3b8"
 _CLR_HIST = "#334155"
+
+
+def _safe_file_stem(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("_")
+    return safe or "peak"
 
 
 def _style_axes(ax: plt.Axes) -> None:
@@ -162,8 +168,9 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"isotherm_{peak}.png"
-        pdf_path = out_dir / f"isotherm_{peak}.pdf"
+        peak_stem = _safe_file_stem(peak)
+        png_path = out_dir / f"isotherm_{peak_stem}.png"
+        pdf_path = out_dir / f"isotherm_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
@@ -187,8 +194,9 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"residual_{peak}.png"
-        pdf_path = out_dir / f"residual_{peak}.pdf"
+        peak_stem = _safe_file_stem(peak)
+        png_path = out_dir / f"residual_{peak_stem}.png"
+        pdf_path = out_dir / f"residual_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
@@ -236,7 +244,7 @@ def plot_fraction_bound(
     ax.scatter(ds.x, f, color=_CLR_DATA, s=28, zorder=3,
                edgecolors="white", linewidths=0.4)
     ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")
-    ax.set_ylabel("Fraction Bound")
+    ax.set_ylabel("Host Fraction Bound")
     ax.set_ylim(-0.02, 1.05)
     _style_axes(ax)
     fig.tight_layout()
