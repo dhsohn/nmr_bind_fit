@@ -56,6 +56,13 @@ def _parse_k_starts(value: Optional[str]) -> List[float]:
     return [float(v.strip()) for v in value.split(",") if v.strip()]
 
 
+def _validate_finite_number(value: float, message: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(message)
+    return parsed
+
+
 def _resolve_inputs(patterns: List[str]) -> List[Path]:
     # Expand glob patterns and validate file existence.
     paths: List[Path] = []
@@ -143,10 +150,16 @@ def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optiona
     k_starts = _parse_k_starts(args.k_starts)
     if not k_starts:
         raise ValueError("--k-starts must include at least one positive value.")
+    if any(not np.isfinite(v) for v in k_starts):
+        raise ValueError("All K starts must be finite.")
     if any(v <= 0 for v in k_starts):
         raise ValueError("All K starts must be positive.")
     if any(v < STRICT_K_MIN or v > STRICT_K_MAX for v in k_starts):
         raise ValueError(f"All K starts must be within [{STRICT_K_MIN:.0e}, {STRICT_K_MAX:.0e}].")
+    args.bootstrap_logk_jitter = _validate_finite_number(
+        args.bootstrap_logk_jitter,
+        "--bootstrap-logk-jitter must be finite.",
+    )
     if args.bootstrap_logk_jitter < 0:
         raise ValueError("--bootstrap-logk-jitter must be non-negative.")
     logk_starts = [float(np.log10(v)) for v in k_starts]
@@ -183,6 +196,15 @@ def run_fit(args: argparse.Namespace) -> None:
     # the parser (the CLI type converter already rejects negative --bootstrap).
     if args.bootstrap < 0:
         raise ValueError("--bootstrap must be non-negative.")
+    if args.max_nfev <= 0:
+        raise ValueError("--max-nfev must be positive.")
+    if args.bootstrap_ci_width is not None:
+        args.bootstrap_ci_width = _validate_finite_number(
+            args.bootstrap_ci_width,
+            "--bootstrap-ci-width must be finite.",
+        )
+        if args.bootstrap_ci_width <= 0:
+            raise ValueError("--bootstrap-ci-width must be positive.")
     args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
     if args.bootstrap_ci_method not in {"percentile", "bca"}:
         raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")

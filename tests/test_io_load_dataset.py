@@ -17,11 +17,12 @@ def test_load_dataset_drops_incomplete_ppm_column(tmp_path):
     )
     df.to_csv(path, index=False)
 
-    with pytest.warns(RuntimeWarning, match="Dropping ppm columns with missing values: ppm2"):
+    with pytest.warns(RuntimeWarning, match="Dropping ppm columns with missing or non-finite values: ppm2"):
         ds = load_dataset(path, ppm_cols=["ppm1", "ppm2"])
 
     assert ds.y_cols == ["ppm1"]
     assert ds.dropped_peaks == ["ppm2"]
+    assert ds.dropped_rows == 0
     assert ds.y.shape == (3, 1)
 
 
@@ -42,6 +43,7 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
     )
 
     assert ds.n_points == 2
+    assert ds.dropped_rows == 1
     assert ds.y.shape == (2, 1)
 
 
@@ -65,8 +67,28 @@ def test_load_dataset_masks_missing_ppm_values_when_requested(tmp_path):
 
     assert ds.y_cols == ["ppm1", "ppm2"]
     assert ds.dropped_peaks == []
+    assert ds.dropped_rows == 0
     assert ds.y.shape == (3, 2)
     assert np.isnan(ds.y[1, 0])
+
+
+def test_load_dataset_drops_ppm_column_with_inf(tmp_path):
+    path = tmp_path / "sample.csv"
+    df = pd.DataFrame(
+        {
+            "[H]t": [1e-3, 1e-3, 1e-3],
+            "[G]t": [0.0, 5e-4, 1e-3],
+            "ppm1": [7.1, 7.2, 7.3],
+            "ppm2": [8.1, np.inf, 8.3],
+        }
+    )
+    df.to_csv(path, index=False)
+
+    with pytest.warns(RuntimeWarning, match="non-finite values: ppm2"):
+        ds = load_dataset(path, ppm_cols=["ppm1", "ppm2"])
+
+    assert ds.y_cols == ["ppm1"]
+    assert ds.dropped_peaks == ["ppm2"]
 
 
 def test_load_dataset_reads_xlsx(tmp_path):

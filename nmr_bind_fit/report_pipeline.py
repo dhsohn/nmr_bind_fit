@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -22,11 +23,13 @@ from .types import DatasetLike, FitResultLike, SpeciesLike
 SUMMARY_LABELS = {
     "dataset": "Dataset",
     "model": "Model",
+    "status": "Status",
     "K": "Binding constant",
     "bootstrap_K_CI": "95 % CI",
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
+    "notes": "Notes",
 }
 
 
@@ -99,6 +102,33 @@ def _safe_path_token(value: str) -> str:
     return safe or "dataset"
 
 
+def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
+    # Preserve distinct dataset directories even when labels sanitize to the same token.
+    safe_labels = [_safe_path_token(label) for label in labels]
+    counts = Counter(safe_labels)
+    used: set[str] = set()
+    tokens: Dict[str, str] = {}
+
+    for idx, (label, safe) in enumerate(zip(labels, safe_labels), start=1):
+        candidates = []
+        if counts[safe] == 1:
+            candidates.append(safe)
+        candidates.append(f"{idx:02d}_{safe}")
+
+        token = next((candidate for candidate in candidates if candidate not in used), "")
+        if not token:
+            suffix = 1
+            token = f"{idx:02d}_{safe}_{suffix}"
+            while token in used:
+                suffix += 1
+                token = f"{idx:02d}_{safe}_{suffix}"
+
+        used.add(token)
+        tokens[label] = token
+
+    return tokens
+
+
 def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
     labels: List[str] = []
@@ -125,6 +155,22 @@ def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
                 items.append(f"{ds.name}: {cols}")
             else:
                 items.append(cols)
+    if not items:
+        return "None"
+    return "; ".join(items)
+
+
+def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
+    # Format concentration rows dropped before fitting for report warnings.
+    items: List[str] = []
+    multi = len(datasets) > 1
+    for ds in datasets:
+        dropped_rows = int(getattr(ds, "dropped_rows", 0))
+        if dropped_rows > 0:
+            if multi:
+                items.append(f"{ds.name}: {dropped_rows}")
+            else:
+                items.append(str(dropped_rows))
     if not items:
         return "None"
     return "; ".join(items)
@@ -191,10 +237,19 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     return params
 
 
-def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_dir: Path) -> List[str]:
+def _collect_plot_paths(
+    res: FitResultLike,
+    model_name: str,
+    ds_label: str,
+    out_dir: Path,
+    dataset_dir_token: Optional[str] = None,
+) -> List[str]:
     # Write model plots and return PNG paths relative to output root.
     model_dir = out_dir / f"model_{model_name}"
-    if len(res.datasets) > 1:
+    if ds_label != "Simultaneous Fitting":
+        token = dataset_dir_token or _safe_path_token(ds_label)
+        model_dir = model_dir / f"dataset_{token}"
+    elif len(res.datasets) > 1:
         model_dir = model_dir / f"dataset_{ds_label}"
     model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -211,7 +266,7 @@ def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_
         frac_files = plot_fraction_bound(model_spec, ds, logk, delta, ds_dir)
         for path in isotherm_files + residual_files + frac_files:
             if path.suffix.lower() == ".png":
-                plot_paths.append(str(path.relative_to(out_dir)))
+                plot_paths.append(path.relative_to(out_dir).as_posix())
 
     if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
         samples = res.bootstrap.param_samples.copy()
@@ -234,7 +289,7 @@ def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_
         boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
         for path in boot_files:
             if path.suffix.lower() == ".png":
-                plot_paths.append(str(path.relative_to(out_dir)))
+                plot_paths.append(path.relative_to(out_dir).as_posix())
 
     return plot_paths
 
@@ -308,7 +363,21 @@ def _build_model_warnings(
 
     dropped_peaks = _format_dropped_peaks(res.datasets)
     if dropped_peaks != "None":
-        warnings.append(f"Dropped chemical shift columns with missing values: {dropped_peaks}")
+        warnings.append(f"Dropped chemical shift columns with missing or non-finite values: {dropped_peaks}")
+
+    dropped_rows = _format_dropped_rows(res.datasets)
+    if dropped_rows != "None":
+        warnings.append(f"Dropped rows with missing required concentrations: {dropped_rows}")
+
+    if not np.isfinite(res.bic):
+        if getattr(res, "n", 0) <= getattr(res, "p", 0) + 1:
+            warnings.append(
+                "BIC/AICc unavailable: finite observations are not greater than fitted parameters plus variance"
+            )
+        elif np.isfinite(getattr(res, "rss", np.nan)) and res.rss <= 0:
+            warnings.append("BIC/AICc unavailable: residual variance is zero")
+        else:
+            warnings.append("BIC/AICc unavailable for this fit")
 
     k_ci_low, k_ci_high = _bootstrap_k_ci(res)
     if args.bootstrap_ci_width is not None and k_ci_low.size > 0:
@@ -319,6 +388,9 @@ def _build_model_warnings(
         n_fail = res.bootstrap.n_boot - res.bootstrap.n_success
         if n_fail > 0:
             warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
+        ci_warning = str(getattr(res.bootstrap, "ci_warning", "")).strip()
+        if ci_warning:
+            warnings.append(ci_warning)
 
     if res.penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {res.penalty_count}")
@@ -358,7 +430,7 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
         "bootstrap_logK_SE": _bootstrap_logk_se_text(res),
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
-        "BIC": f"{res.bic:.6g}",
+        "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
         "penalty_events": str(res.penalty_count),
     }
@@ -399,11 +471,29 @@ def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> 
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
+        "status": "success",
         "K": k_str,
         "bootstrap_K_CI": boot_k_ci,
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
-        "BIC": f"{res.bic:.6g}",
+        "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
+        "notes": "",
+    }
+    return {_label_summary_key(k): v for k, v in summary_base.items()}
+
+
+def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -> Dict[str, str]:
+    # Keep failed candidates visible in summary.csv for auditability.
+    summary_base = {
+        "dataset": ds_label,
+        "model": display_name,
+        "status": "failed",
+        "K": "N/A",
+        "bootstrap_K_CI": "N/A",
+        "R2": "N/A",
+        "BIC": "N/A",
+        "AICc": "N/A",
+        "notes": f"fit failed: {message}",
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
@@ -415,11 +505,12 @@ def _build_model_entry(
     res: FitResultLike,
     out_dir: Path,
     display_model_name: Callable[[str], str],
+    dataset_dir_token: Optional[str] = None,
 ) -> Tuple[ModelEntry, Dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
-    plot_paths = _collect_plot_paths(res, model_name, key, out_dir)
+    plot_paths = _collect_plot_paths(res, model_name, key, out_dir, dataset_dir_token)
     solver_stats = _solver_stats_for_result(res)
     warnings = _build_model_warnings(args, res, solver_stats)
     stats_dict = _build_stats_dict(res, solver_stats)
@@ -447,6 +538,7 @@ def build_report_artifacts(
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
+    dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
@@ -455,6 +547,7 @@ def build_report_artifacts(
             report_warnings.append(
                 f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
             )
+            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name), message))
         if not model_map:
             continue
         for model_name, res in model_map.items():
@@ -465,6 +558,7 @@ def build_report_artifacts(
                 res,
                 out_dir,
                 display_model_name,
+                dataset_dir_tokens.get(key),
             )
             model_entries.append(model_entry)
             summary_rows.append(summary_row)
@@ -525,7 +619,7 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
                 "(scipy.optimize.brentq; xtol=1e-50, rtol=1e-15). "
                 "Binding constants were parameterized as log₁₀(K) and constrained to [0, 12] "
                 f"(K ∈ [1, 10¹²] {k_unit}) during optimization to ensure stable, physically meaningful estimation. "
-                "ppm columns containing missing values were dropped before fitting. "
+                "ppm columns containing missing or non-finite values were dropped before fitting. "
                 "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
             ),
         }
@@ -579,8 +673,9 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
     if bootstrap_ci_method == "bca":
         ci_desc = (
-            "The 95% confidence interval was derived from BCa-adjusted bootstrap quantiles, "
-            "with the acceleration term approximated from bootstrap samples for computational efficiency."
+            "The 95% confidence interval was derived from BCa-style bootstrap quantiles using "
+            "leave-one-titration-point jackknife refits for the acceleration term. If those refits "
+            "cannot support a finite BCa interval, percentile bounds are reported with a warning."
         )
     else:
         ci_desc = (
@@ -634,7 +729,7 @@ def build_decisions(
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
-        bic_sorted = sorted(model_map.values(), key=lambda r: r.bic)
+        bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")
         if failures:
             decisions.append("Warnings:")
@@ -643,7 +738,10 @@ def build_decisions(
                     f"- excluded {display_model_name(model_name)} (fit failed: {message})"
                 )
         if not bic_sorted:
-            decisions.append("No successful model fits; see warnings.")
+            if model_map:
+                decisions.append("No model had a finite BIC for ranking; see warnings.")
+            else:
+                decisions.append("No successful model fits; see warnings.")
             decisions.append("")
             continue
 

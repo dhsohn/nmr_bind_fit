@@ -26,17 +26,23 @@ class BootstrapResult:
     ci_method: str
     n_success: int
     n_boot: int
+    ci_warning: str = ""
 
 
-def _bca_ci_approx(
+MIN_BOOTSTRAP_CI_SAMPLES = 20
+
+
+def _bca_ci(
     samples: np.ndarray,
     original_stat: float,
+    jackknife_stats: np.ndarray,
     alpha: float = 0.05,
 ) -> Tuple[float, float]:
-    # Approximate BCa interval using bootstrap samples with jackknife-over-samples acceleration.
     vals = np.asarray(samples, dtype=float)
     vals = vals[np.isfinite(vals)]
-    if vals.size < 3 or not np.isfinite(original_stat):
+    jack = np.asarray(jackknife_stats, dtype=float)
+    jack = jack[np.isfinite(jack)]
+    if vals.size < MIN_BOOTSTRAP_CI_SAMPLES or jack.size < 3 or not np.isfinite(original_stat):
         return float("nan"), float("nan")
 
     n = int(vals.size)
@@ -46,11 +52,8 @@ def _bca_ci_approx(
     prop_less = float(np.clip(prop_less, eps, 1.0 - eps))
     z0 = float(norm.ppf(prop_less))
 
-    # Jackknife-over-bootstrap-samples approximation for acceleration.
-    total = float(np.sum(vals))
-    jackknife = (total - vals) / float(n - 1)
-    jack_mean = float(np.mean(jackknife))
-    diffs = jack_mean - jackknife
+    jack_mean = float(np.mean(jack))
+    diffs = jack_mean - jack
     denom = float(np.sum(diffs**2))
     if denom <= 0.0 or not np.isfinite(denom):
         a = 0.0
@@ -104,6 +107,7 @@ def _residual_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -112,9 +116,12 @@ def _parametric_bootstrap(
     ds: Dataset,
     y_pred: np.ndarray,
     residuals: np.ndarray,
+    scale_factor: float = 1.0,
 ) -> Dataset:
     scale = np.nanstd(residuals, axis=0, ddof=1)
     scale = np.where(np.isfinite(scale), scale, 0.0)
+    if np.isfinite(scale_factor) and scale_factor > 0:
+        scale = scale * float(scale_factor)
     noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
     y_boot = y_pred + noise
     y_boot[~np.isfinite(ds.y)] = np.nan
@@ -127,6 +134,7 @@ def _parametric_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -144,6 +152,7 @@ def _points_bootstrap(
         y=ds.y[idx],
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -153,11 +162,12 @@ def _resample_bootstrap_dataset(
     ds: Dataset,
     y_pred: np.ndarray,
     residuals: np.ndarray,
+    parametric_scale_factor: float = 1.0,
 ) -> Dataset:
     if method == "points":
         return _points_bootstrap(rng, ds)
     if method == "parametric":
-        return _parametric_bootstrap(rng, ds, y_pred, residuals)
+        return _parametric_bootstrap(rng, ds, y_pred, residuals, scale_factor=parametric_scale_factor)
     return _residual_bootstrap(rng, ds, y_pred, residuals)
 
 
@@ -208,6 +218,70 @@ def accept_bootstrap_fit(
     return True
 
 
+def _drop_dataset_row(ds: Dataset, row_idx: int) -> Dataset:
+    keep = np.ones(ds.n_points, dtype=bool)
+    keep[row_idx] = False
+    return Dataset(
+        name=ds.name,
+        path=ds.path,
+        h_tot=ds.h_tot[keep],
+        g_tot=ds.g_tot[keep],
+        x=ds.x[keep],
+        y=ds.y[keep, :],
+        y_cols=ds.y_cols,
+        dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
+    )
+
+
+def _jackknife_logk_samples(
+    params: np.ndarray,
+    model: ModelSpec,
+    datasets: List[Dataset],
+    fit_with_initial_fn: Callable[..., Tuple[np.ndarray, OptimizeResult]],
+    param_bounds_fn: Callable[[np.ndarray, ModelSpec, Optional[Tuple[float, float]]], Tuple[np.ndarray, np.ndarray]],
+    numeric_exceptions: Tuple[Type[BaseException], ...],
+    logk_bounds: Optional[Tuple[float, float]],
+    max_nfev: int,
+    solver_failure_mode: str,
+    predict_all_fn: Callable[..., Tuple[List[np.ndarray], List[object], List[np.ndarray]]],
+) -> np.ndarray:
+    if model.n_logk == 0:
+        return np.full((0, 0), np.nan)
+
+    samples = []
+    bounds = param_bounds_fn(params, model, logk_bounds)
+    fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
+    if solver_failure_mode != "fail-fast":
+        fit_kwargs["solver_failure_mode"] = solver_failure_mode
+
+    for ds_idx, ds in enumerate(datasets):
+        if ds.n_points <= 1:
+            continue
+        for row_idx in range(ds.n_points):
+            jack_datasets = list(datasets)
+            jack_datasets[ds_idx] = _drop_dataset_row(ds, row_idx)
+            try:
+                params_fit, res = fit_with_initial_fn(model, jack_datasets, params.copy(), **fit_kwargs)
+            except numeric_exceptions:
+                continue
+            if not accept_bootstrap_fit(
+                params_fit,
+                res,
+                model,
+                jack_datasets,
+                predict_all_fn=predict_all_fn,
+                numeric_exceptions=numeric_exceptions,
+                solver_failure_mode=solver_failure_mode,
+            ):
+                continue
+            samples.append(params_fit[: model.n_logk])
+
+    if not samples:
+        return np.full((0, model.n_logk), np.nan)
+    return np.vstack(samples)
+
+
 def bootstrap_params(
     params: np.ndarray,
     model: ModelSpec,
@@ -227,6 +301,8 @@ def bootstrap_params(
 ) -> BootstrapResult:
     if ci_method not in {"percentile", "bca"}:
         raise ValueError("ci_method must be one of: percentile, bca")
+    if method not in {"residual", "points", "parametric"}:
+        raise ValueError("method must be one of: residual, points, parametric")
 
     rng = np.random.default_rng(seed)
     param_samples = []
@@ -239,11 +315,21 @@ def bootstrap_params(
         datasets,
         solver_failure_mode=solver_failure_mode,
     )
+    total_valid = int(sum(np.count_nonzero(np.isfinite(ds.y)) for ds in datasets))
+    dof = int(total_valid - len(params))
+    parametric_scale_factor = float(np.sqrt(total_valid / dof)) if dof > 0 else 1.0
 
     for _ in range(n_boot):
         boot_datasets: List[Dataset] = []
         for ds, y_pred, res in zip(datasets, y_pred_list, residuals):
-            boot = _resample_bootstrap_dataset(method, rng, ds, y_pred, res)
+            boot = _resample_bootstrap_dataset(
+                method,
+                rng,
+                ds,
+                y_pred,
+                res,
+                parametric_scale_factor=parametric_scale_factor,
+            )
             boot_datasets.append(boot)
 
         params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
@@ -284,16 +370,37 @@ def bootstrap_params(
     ci_high_percentile = np.full((model.n_logk,), np.nan)
     ci_low_bca = np.full((model.n_logk,), np.nan)
     ci_high_bca = np.full((model.n_logk,), np.nan)
+    ci_warning = ""
 
-    if logk_samples.size > 0:
+    if model.n_logk > 0 and n_success < MIN_BOOTSTRAP_CI_SAMPLES:
+        ci_warning = (
+            f"Bootstrap CI omitted: only {n_success} successful refits; "
+            f"at least {MIN_BOOTSTRAP_CI_SAMPLES} are required."
+        )
+    elif logk_samples.size > 0:
         ci_low_percentile = np.percentile(logk_samples, 2.5, axis=0)
         ci_high_percentile = np.percentile(logk_samples, 97.5, axis=0)
 
         if ci_method == "bca":
+            jackknife_logk = _jackknife_logk_samples(
+                params=params,
+                model=model,
+                datasets=datasets,
+                fit_with_initial_fn=fit_with_initial_fn,
+                param_bounds_fn=param_bounds_fn,
+                numeric_exceptions=numeric_exceptions,
+                logk_bounds=logk_bounds,
+                max_nfev=max_nfev,
+                solver_failure_mode=solver_failure_mode,
+                predict_all_fn=predict_all_fn,
+            )
             for i in range(model.n_logk):
-                bca_low, bca_high = _bca_ci_approx(logk_samples[:, i], float(params[i]), alpha=0.05)
+                jack_col = jackknife_logk[:, i] if jackknife_logk.size else np.array([], dtype=float)
+                bca_low, bca_high = _bca_ci(logk_samples[:, i], float(params[i]), jack_col, alpha=0.05)
                 ci_low_bca[i] = bca_low
                 ci_high_bca[i] = bca_high
+            if not np.all(np.isfinite(ci_low_bca) & np.isfinite(ci_high_bca)):
+                ci_warning = "BCa intervals could not be computed for all logK values; percentile bounds are reported."
 
     if ci_method == "bca":
         ci_low = np.where(np.isfinite(ci_low_bca), ci_low_bca, ci_low_percentile)
@@ -314,4 +421,5 @@ def bootstrap_params(
         ci_method=ci_method,
         n_success=n_success,
         n_boot=n_boot,
+        ci_warning=ci_warning,
     )

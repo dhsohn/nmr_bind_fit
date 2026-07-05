@@ -18,6 +18,14 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Changed
 
+- Hardened model fitting and reporting guardrails: invalid multivalent binding constants
+  are rejected, weak-binding solver brackets include the physical root, failed candidates
+  remain visible in `summary.csv`, and model selection now ranks only finite-BIC fits.
+- Bootstrap confidence intervals now require enough successful refits; BCa-style intervals
+  use leave-one-titration-point jackknife refits and warn when falling back to percentile
+  intervals.
+- Input handling now treats non-finite ppm values as invalid peak observations and reports
+  rows dropped for missing required concentrations.
 - Renamed the import package namespace from `core` to `nmr_bind_fit` while keeping the CLI command `nmr_bind_fit`.
 - Expanded packaging metadata and optional dependency groups.
 - Input concentrations are now required to be in molar (M); binding constants are reported in M⁻¹.

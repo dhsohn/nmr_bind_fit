@@ -20,9 +20,9 @@ def gaussian_loglik(
     if n == 0:
         return float("nan"), 0, 0
     rss = float(np.sum(res**2))
+    if not np.isfinite(rss) or rss <= 0:
+        return float("nan"), n, 1
     sigma2 = rss / n
-    if not np.isfinite(sigma2) or sigma2 <= 0:
-        sigma2 = 1e-30
     loglik = -0.5 * n * (np.log(2.0 * np.pi * sigma2) + 1.0)
     return float(loglik), n, 1
 
@@ -48,14 +48,14 @@ def residual_diagnostics(
     residuals: np.ndarray,
     *,
     shapiro_max_n: int = 5000,
+    include_durbin_watson: bool = True,
 ) -> Dict[str, float]:
     """Compute informational residual diagnostics (normality, autocorrelation).
 
     These are reporting aids, not acceptance tests. The Durbin-Watson statistic
-    treats the input as a single ordered series; when residuals are pooled across
-    several peaks or datasets before being passed here, the lag-1 differences at
-    concatenation boundaries are not physically meaningful, so the reported value
-    is an approximate, informational indicator rather than a per-series test.
+    treats the input as a single ordered series; callers that pass pooled
+    residuals should disable it because lag-1 differences at concatenation
+    boundaries are not physically meaningful.
     """
     res = np.asarray(residuals, dtype=float)
     flat = res[np.isfinite(res)]
@@ -74,7 +74,7 @@ def residual_diagnostics(
             result["shapiro_p"] = float(p_value)
             result["shapiro_n"] = float(sample.size)
 
-    if flat.size >= 2:
+    if include_durbin_watson and flat.size >= 2:
         denom = float(np.sum(flat**2))
         if denom > 0:
             diff = np.diff(flat)

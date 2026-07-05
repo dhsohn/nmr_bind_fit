@@ -89,13 +89,10 @@ def select_best_multistart(
     numeric_exceptions: Tuple[Type[BaseException], ...],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
-    """Fit from every grid start and return the lowest-RSS successful result."""
-    best_success_params = None
-    best_success_res = None
-    best_success_rss = None
-    best_failed_params = None
-    best_failed_res = None
-    best_failed_rss = None
+    """Fit from every grid start and return the lowest finite-RSS result."""
+    best_params = None
+    best_res = None
+    best_rss = None
 
     for logk_vals in logk_grid:
         params0 = build_initial_params_fn(model, datasets, logk_vals)
@@ -108,16 +105,15 @@ def select_best_multistart(
         except numeric_exceptions:
             continue
         rss = float(np.sum(res.fun**2))
-        if bool(getattr(res, "success", False)):
-            if best_success_rss is None or rss < best_success_rss:
-                best_success_rss = rss
-                best_success_params = params
-                best_success_res = res
-        elif best_failed_rss is None or rss < best_failed_rss:
-            best_failed_rss = rss
-            best_failed_params = params
-            best_failed_res = res
+        if not np.isfinite(rss):
+            continue
+        if best_rss is None or rss < best_rss:
+            best_rss = rss
+            best_params = params
+            best_res = res
+        elif best_rss is not None and np.isclose(rss, best_rss):
+            if best_res is not None and bool(getattr(res, "success", False)) and not bool(getattr(best_res, "success", False)):
+                best_params = params
+                best_res = res
 
-    if best_success_params is not None and best_success_res is not None:
-        return best_success_params, best_success_res
-    return best_failed_params, best_failed_res
+    return best_params, best_res

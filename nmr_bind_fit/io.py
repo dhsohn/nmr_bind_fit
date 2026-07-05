@@ -22,6 +22,7 @@ class Dataset:
     y: np.ndarray
     y_cols: List[str]
     dropped_peaks: List[str]
+    dropped_rows: int = 0
 
     @property
     def n_points(self) -> int:
@@ -96,10 +97,12 @@ def _drop_missing_required(
     data: pd.DataFrame,
     host_col: str,
     guest_col: str,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, int]:
     # Drop rows missing required concentration values.
     required_cols = [host_col, guest_col]
-    return data.dropna(axis=0, how="any", subset=required_cols)
+    before = int(len(data))
+    dropped = data.dropna(axis=0, how="any", subset=required_cols)
+    return dropped, before - int(len(dropped))
 
 
 def _drop_incomplete_ppm_columns(
@@ -108,18 +111,19 @@ def _drop_incomplete_ppm_columns(
 ) -> Tuple[pd.DataFrame, List[str], List[str]]:
     # Remove ppm columns containing any missing value.
     ppm_cols_list = list(ppm_cols)
-    ppm_view = data.loc[:, ppm_cols_list]
-    missing_by_col = ppm_view.isna().any(axis=0)
+    ppm_view = data.loc[:, ppm_cols_list].apply(pd.to_numeric, errors="coerce")
+    finite_mask = np.isfinite(ppm_view.to_numpy(dtype=float))
+    missing_by_col = pd.Series(~finite_mask.all(axis=0), index=ppm_cols_list)
     dropped_ppm = [col for col in ppm_cols_list if bool(missing_by_col.get(col, False))]
     if dropped_ppm:
         warnings.warn(
-            "Dropping ppm columns with missing values: " + ", ".join(dropped_ppm),
+            "Dropping ppm columns with missing or non-finite values: " + ", ".join(dropped_ppm),
             RuntimeWarning,
         )
     kept_ppm = [col for col in ppm_cols if col not in dropped_ppm]
     if not kept_ppm:
-        raise ValueError("No ppm columns remain after dropping columns with missing values.")
-    return data.loc[:, kept_ppm].copy(), kept_ppm, dropped_ppm
+        raise ValueError("No ppm columns remain after dropping columns with missing or non-finite values.")
+    return ppm_view.loc[:, kept_ppm].copy(), kept_ppm, dropped_ppm
 
 
 def _apply_missing_policy(
@@ -133,7 +137,10 @@ def _apply_missing_policy(
         kept_ppm = list(ppm_cols)
         if not kept_ppm:
             raise ValueError("No ppm columns remain after applying missing-value policy.")
-        return data.loc[:, kept_ppm].copy(), kept_ppm, []
+        ppm_view = data.loc[:, kept_ppm].apply(pd.to_numeric, errors="coerce")
+        ppm_array = ppm_view.to_numpy(dtype=float, copy=True)
+        ppm_array[~np.isfinite(ppm_array)] = np.nan
+        return pd.DataFrame(ppm_array, columns=kept_ppm, index=data.index), kept_ppm, []
     raise ValueError("missing_policy must be one of: drop-column, mask")
 
 
@@ -163,7 +170,7 @@ def load_dataset(
     ppm_cols = _resolve_ppm_cols(columns, ppm_cols)
 
     data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
-    data = _drop_missing_required(data, host_col, guest_col)
+    data, dropped_required_rows = _drop_missing_required(data, host_col, guest_col)
 
     ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)
     use_cols = [host_col, guest_col] + ppm_cols
@@ -189,6 +196,7 @@ def load_dataset(
         y=y,
         y_cols=ppm_cols,
         dropped_peaks=dropped_ppm,
+        dropped_rows=dropped_required_rows,
     )
 
 

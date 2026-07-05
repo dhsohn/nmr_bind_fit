@@ -19,6 +19,7 @@ class DatasetLike(Protocol):
     y: np.ndarray
     y_cols: List[str]
     dropped_peaks: List[str]
+    dropped_rows: int
 
     @property
     def n_points(self) -> int:
@@ -53,6 +54,7 @@ class BootstrapLike(Protocol):
     ci_method: str
     n_success: int
     n_boot: int
+    ci_warning: str
 
 
 class ModelLike(Protocol):
@@ -73,6 +75,8 @@ class FitResultLike(Protocol):
     r2_per_peak: List[float]
     bic: float
     aicc: float
+    n: int
+    p: int
     residual_diagnostics: dict
     species: List[SpeciesLike]
     residuals: List[np.ndarray]
