@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -99,6 +100,33 @@ def _safe_path_token(value: str) -> str:
     # Sanitize free-form labels before using them as directory names.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
     return safe or "dataset"
+
+
+def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
+    # Preserve distinct dataset directories even when labels sanitize to the same token.
+    safe_labels = [_safe_path_token(label) for label in labels]
+    counts = Counter(safe_labels)
+    used: set[str] = set()
+    tokens: Dict[str, str] = {}
+
+    for idx, (label, safe) in enumerate(zip(labels, safe_labels), start=1):
+        candidates = []
+        if counts[safe] == 1:
+            candidates.append(safe)
+        candidates.append(f"{idx:02d}_{safe}")
+
+        token = next((candidate for candidate in candidates if candidate not in used), "")
+        if not token:
+            suffix = 1
+            token = f"{idx:02d}_{safe}_{suffix}"
+            while token in used:
+                suffix += 1
+                token = f"{idx:02d}_{safe}_{suffix}"
+
+        used.add(token)
+        tokens[label] = token
+
+    return tokens
 
 
 def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
@@ -209,11 +237,18 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     return params
 
 
-def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_dir: Path) -> List[str]:
+def _collect_plot_paths(
+    res: FitResultLike,
+    model_name: str,
+    ds_label: str,
+    out_dir: Path,
+    dataset_dir_token: Optional[str] = None,
+) -> List[str]:
     # Write model plots and return PNG paths relative to output root.
     model_dir = out_dir / f"model_{model_name}"
     if ds_label != "Simultaneous Fitting":
-        model_dir = model_dir / f"dataset_{_safe_path_token(ds_label)}"
+        token = dataset_dir_token or _safe_path_token(ds_label)
+        model_dir = model_dir / f"dataset_{token}"
     elif len(res.datasets) > 1:
         model_dir = model_dir / f"dataset_{ds_label}"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -470,11 +505,12 @@ def _build_model_entry(
     res: FitResultLike,
     out_dir: Path,
     display_model_name: Callable[[str], str],
+    dataset_dir_token: Optional[str] = None,
 ) -> Tuple[ModelEntry, Dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
-    plot_paths = _collect_plot_paths(res, model_name, key, out_dir)
+    plot_paths = _collect_plot_paths(res, model_name, key, out_dir, dataset_dir_token)
     solver_stats = _solver_stats_for_result(res)
     warnings = _build_model_warnings(args, res, solver_stats)
     stats_dict = _build_stats_dict(res, solver_stats)
@@ -502,6 +538,7 @@ def build_report_artifacts(
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
+    dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
@@ -521,6 +558,7 @@ def build_report_artifacts(
                 res,
                 out_dir,
                 display_model_name,
+                dataset_dir_tokens.get(key),
             )
             model_entries.append(model_entry)
             summary_rows.append(summary_row)
