@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from nmr_bind_fit.io import Dataset
-from nmr_bind_fit.plots import _grid_dataset
+from nmr_bind_fit.plots import _grid_dataset, _safe_file_stems
 
 
 def _dataset(h_tot: np.ndarray) -> Dataset:
@@ -39,3 +39,10 @@ def test_grid_dataset_interpolates_host_when_cv_is_high():
     assert not np.allclose(grid.h_tot, np.median(ds.h_tot))
     np.testing.assert_allclose([grid.h_tot[0], grid.h_tot[2], grid.h_tot[-1]], [1.0e-3, 2.0e-3, 1.0e-3])
     np.testing.assert_allclose(grid.g_tot, grid.x * grid.h_tot)
+
+
+def test_safe_file_stems_disambiguates_sanitized_peak_collisions():
+    stems = _safe_file_stems(["ppm 1", "ppm_1", "ppm:2"])
+
+    assert stems == ["01_ppm_1", "02_ppm_1", "ppm_2"]
+    assert len(stems) == len(set(stems))

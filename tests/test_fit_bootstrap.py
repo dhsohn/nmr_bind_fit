@@ -6,6 +6,7 @@ from scipy.optimize import OptimizeResult
 
 from nmr_bind_fit.fit_bootstrap import (
     MIN_BOOTSTRAP_CI_SAMPLES,
+    _residual_bootstrap,
     accept_bootstrap_fit,
     bootstrap_params,
 )
@@ -171,6 +172,25 @@ def test_accept_bootstrap_fit_rejects_nonfinite_predictions():
     )
 
     assert accepted is False
+
+
+def test_residual_bootstrap_does_not_treat_missing_residuals_as_zero():
+    ds = _make_dataset()
+    ds.y = np.array([[7.0], [np.nan], [7.3]], dtype=float)
+    y_pred = np.zeros_like(ds.y)
+    residuals = np.array([[1.0], [np.nan], [3.0]], dtype=float)
+
+    class FakeRng:
+        def integers(self, low, high=None, size=None):
+            return np.ones(size, dtype=int)
+
+        def choice(self, values, size=None):
+            return np.full(size, values[0], dtype=float)
+
+    out = _residual_bootstrap(FakeRng(), ds, y_pred, residuals)
+
+    assert np.isnan(out.y[1, 0])
+    assert np.all(out.y[[0, 2], 0] != 0.0)
 
 
 def test_bootstrap_supports_bca_ci_method():

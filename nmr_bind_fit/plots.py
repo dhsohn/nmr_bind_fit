@@ -51,6 +51,20 @@ def _safe_file_stem(value: str) -> str:
     return safe or "peak"
 
 
+def _safe_file_stems(values: List[str]) -> List[str]:
+    stems = [_safe_file_stem(value) for value in values]
+    counts = {stem: stems.count(stem) for stem in set(stems)}
+    seen: dict[str, int] = {}
+    unique = []
+    for stem in stems:
+        seen[stem] = seen.get(stem, 0) + 1
+        if counts[stem] > 1:
+            unique.append(f"{seen[stem]:02d}_{stem}")
+        else:
+            unique.append(stem)
+    return unique
+
+
 def _style_axes(ax: plt.Axes) -> None:
     """Remove top/right spines and lighten remaining ones."""
     ax.spines["top"].set_visible(False)
@@ -156,8 +170,9 @@ def plot_isotherms(
     files: List[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
+    peak_stems = _safe_file_stems(list(ds.y_cols))
 
-    for i, peak in enumerate(ds.y_cols):
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
                    label="Observed", edgecolors="white", linewidths=0.4)
@@ -168,7 +183,6 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        peak_stem = _safe_file_stem(peak)
         png_path = out_dir / f"isotherm_{peak_stem}.png"
         pdf_path = out_dir / f"isotherm_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -185,7 +199,8 @@ def plot_residuals(
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
-    for i, peak in enumerate(ds.y_cols):
+    peak_stems = _safe_file_stems(list(ds.y_cols))
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
@@ -194,7 +209,6 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        peak_stem = _safe_file_stem(peak)
         png_path = out_dir / f"residual_{peak_stem}.png"
         pdf_path = out_dir / f"residual_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -217,7 +231,13 @@ def plot_bootstrap_hist(
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
                 edgecolor="white", linewidth=0.5)
-        ax.set_xlabel(f"$K$ ({name})" if name != "K" else "$K$")
+        if name == "K":
+            xlabel = r"$K$ (M$^{-1}$)"
+        elif name.startswith("K") and name[1:].isdigit():
+            xlabel = rf"$K_{name[1:]}$ (M$^{{-1}}$)"
+        else:
+            xlabel = f"{name} (M$^{{-1}}$)"
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Count")
         _style_axes(ax)
         fig.tight_layout()

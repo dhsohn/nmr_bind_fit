@@ -1,8 +1,10 @@
 import argparse
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import nmr_bind_fit.cli as cli
 from nmr_bind_fit.cli import (
     _index_results,
     _resolve_inputs,
@@ -185,3 +187,48 @@ def test_resolve_inputs_rejects_duplicate_glob_and_explicit_path(tmp_path):
                 str(tmp_path / "sample.*"),
             ]
         )
+
+
+def test_resolve_inputs_rejects_mixed_missing_input(tmp_path):
+    csv_path = tmp_path / "sample.csv"
+    csv_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="missing.csv"):
+        _resolve_inputs([str(csv_path), str(tmp_path / "missing.csv")])
+
+
+def test_resolve_inputs_sorts_glob_matches(tmp_path):
+    b_path = tmp_path / "b.csv"
+    a_path = tmp_path / "a.csv"
+    b_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+    a_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+
+    paths = _resolve_inputs([str(tmp_path / "*.csv")])
+
+    assert [path.name for path in paths] == ["a.csv", "b.csv"]
+
+
+def test_run_fit_rejects_replicates_with_one_dataset(monkeypatch):
+    args = SimpleNamespace(
+        bootstrap=0,
+        bootstrap_ci_method="percentile",
+        residual_diagnostics=False,
+        input=["one.csv"],
+        ppm_cols=None,
+        k_starts="10",
+        max_nfev=100,
+        bootstrap_method="residual",
+        seed=None,
+        replicates=True,
+        bootstrap_logk_jitter=0.1,
+        bootstrap_ci_width=None,
+    )
+    monkeypatch.setattr(cli, "_resolve_inputs", lambda patterns: [Path("one.csv")])
+    monkeypatch.setattr(
+        cli,
+        "load_datasets",
+        lambda paths, ppm_cols, missing_policy: [SimpleNamespace(name="one", path=Path("one.csv"))],
+    )
+
+    with pytest.raises(ValueError, match="--replicates requires at least two input datasets."):
+        run_fit(args)

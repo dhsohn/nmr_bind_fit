@@ -70,14 +70,33 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
 
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
-    y0 = dataset.y[0]
-    y1 = dataset.y[-1]
+    y = np.asarray(dataset.y, dtype=float)
+    x = np.asarray(dataset.x, dtype=float)
+    y0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    y1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    x0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    x1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+
+    for peak_idx in range(dataset.n_peaks):
+        mask = np.isfinite(y[:, peak_idx]) & np.isfinite(x)
+        if not np.any(mask):
+            continue
+        indices = np.flatnonzero(mask)
+        first = int(indices[0])
+        last = int(indices[-1])
+        y0[peak_idx] = y[first, peak_idx]
+        y1[peak_idx] = y[last, peak_idx]
+        x0[peak_idx] = x[first]
+        x1[peak_idx] = x[last]
+
+    if not np.all(np.isfinite(y0) & np.isfinite(y1)):
+        raise ValueError("Each ppm column must contain at least one finite value for fitting.")
+
     if model.name == "nb":
-        x0 = dataset.x[0]
-        x1 = dataset.x[-1]
         slope = np.zeros_like(y0)
-        if x1 != x0:
-            slope = (y1 - y0) / (x1 - x0)
+        span = x1 - x0
+        mask = np.isfinite(span) & (span != 0)
+        slope[mask] = (y1[mask] - y0[mask]) / span[mask]
         return np.column_stack([y0, slope])
     if model.n_delta_per_peak == 2:
         return np.column_stack([y0, y1])

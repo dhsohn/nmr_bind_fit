@@ -47,6 +47,36 @@ def test_load_dataset_drops_rows_missing_required_columns(tmp_path):
     assert ds.y.shape == (2, 1)
 
 
+def test_load_dataset_rejects_when_all_required_rows_are_dropped(tmp_path):
+    path = tmp_path / "sample.csv"
+    df = pd.DataFrame(
+        {
+            "[H]t": [np.nan, np.nan],
+            "[G]t": [0.0, 5e-4],
+            "ppm1": [7.1, 7.2],
+        }
+    )
+    df.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="No rows remain after dropping rows"):
+        load_dataset(path, ppm_cols=["ppm1"])
+
+
+def test_load_dataset_rejects_missing_explicit_ppm_column(tmp_path):
+    path = tmp_path / "sample.csv"
+    df = pd.DataFrame(
+        {
+            "[H]t": [1e-3],
+            "[G]t": [0.0],
+            "ppm1": [7.1],
+        }
+    )
+    df.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="Requested ppm columns not found: missing"):
+        load_dataset(path, ppm_cols=["missing"])
+
+
 def test_load_dataset_masks_missing_ppm_values_when_requested(tmp_path):
     path = tmp_path / "sample.csv"
     df = pd.DataFrame(

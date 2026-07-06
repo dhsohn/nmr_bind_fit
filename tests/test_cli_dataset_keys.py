@@ -37,3 +37,12 @@ def test_dataset_key_keeps_replicate_grouping_label():
 
     key = _dataset_key(SimpleNamespace(datasets=[ds1, ds2]), labels)
     assert key == "Simultaneous Fitting"
+
+
+def test_dataset_key_avoids_simultaneous_fitting_sentinel_for_single_dataset():
+    ds = SimpleNamespace(name="Simultaneous Fitting", path=Path("Simultaneous Fitting.csv"))
+    labels = _build_dataset_labels([ds])
+
+    key = _dataset_key(SimpleNamespace(datasets=[ds]), labels)
+
+    assert key == "Simultaneous Fitting (dataset)"

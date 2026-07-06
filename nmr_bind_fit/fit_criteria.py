@@ -20,8 +20,6 @@ def information_criteria(
     bic_p = p + n_sigma
     if n_loglik <= 0:
         return float("nan"), float("nan")
-    if n_loglik <= bic_p:
-        return float("nan"), float("nan")
     if not np.isfinite(loglik):
         return float("nan"), float("nan")
     bic = bic_from_loglik(loglik, n_loglik, bic_p)

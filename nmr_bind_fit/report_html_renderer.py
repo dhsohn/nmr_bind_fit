@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 _NUMERIC_COLS = {
     "Binding constant",
+    "Binding constant (M⁻¹)",
     "95 % CI",
     "R² (mean)",
     "BIC",

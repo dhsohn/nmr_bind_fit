@@ -54,7 +54,7 @@ def _select_with_fake_optimizer(fit_with_initial_fn):
     )
 
 
-def test_select_best_multistart_keeps_lower_rss_failure_visible():
+def test_select_best_multistart_prefers_success_over_lower_rss_failure():
     call_count = {"n": 0}
 
     def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
@@ -67,9 +67,9 @@ def test_select_best_multistart_keeps_lower_rss_failure_visible():
 
     assert params is not None
     assert res is not None
-    assert res.success is False
-    assert res.message == "failed_low_rss"
-    assert params[0] == 1.0
+    assert res.success is True
+    assert res.message == "converged"
+    assert params[0] == 2.05
 
 
 def test_select_best_multistart_all_fail_uses_best_failure():
@@ -220,3 +220,27 @@ def test_fit_model_reports_residual_diagnostics_when_enabled():
 
     assert result.success is True
     assert "residual_n" in result.residual_diagnostics
+
+
+def test_fit_model_initializes_from_finite_masked_endpoints():
+    ds = Dataset(
+        name="masked_endpoint",
+        path=Path("dummy.csv"),
+        h_tot=np.array([1e-3, 1e-3, 1e-3, 1e-3], dtype=float),
+        g_tot=np.array([0.0, 3e-4, 6e-4, 1e-3], dtype=float),
+        x=np.array([0.0, 0.3, 0.6, 1.0], dtype=float),
+        y=np.array([[np.nan], [7.1], [7.2], [7.3]], dtype=float),
+        y_cols=["ppm1"],
+        dropped_peaks=[],
+    )
+
+    result = fit.fit_model(
+        [ds],
+        "nb",
+        logk_starts=[1.0],
+        max_nfev=100,
+        bootstrap=0,
+    )
+
+    assert result.success is True
+    assert np.all(np.isfinite(result.params))
