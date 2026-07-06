@@ -246,6 +246,38 @@ def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
     assert not any("log10(K) bound" in warning for warning in wider)
 
 
+def test_aicc_only_unavailable_is_explained_in_warnings():
+    # An underpowered fit can keep a finite BIC while the AICc small-sample
+    # correction is undefined (NaN). The report must explain the resulting
+    # AICc=N/A instead of showing it silently.
+    res = SimpleNamespace(
+        model=MODEL_SPECS["11"],
+        datasets=[],
+        params=np.array([3.0, 7.0, 7.5], dtype=float),
+        param_names=["logK", "H", "HG"],
+        bootstrap=None,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=float("nan"),
+        penalty_count=0,
+        species=[],
+        residual_diagnostics={},
+        n=5,
+        p=4,
+        logk_bounds=(0.0, 12.0),
+    )
+
+    warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
+    row = _build_summary_row(res, "sample", "11", warnings)
+
+    assert any("AICc unavailable: too few observations" in warning for warning in warnings)
+    assert not any("BIC/AICc unavailable" in warning for warning in warnings)
+    assert "AICc unavailable" in row["Notes"]
+
+
 def test_collect_plot_paths_scopes_single_dataset_outputs_by_dataset_label(tmp_path, monkeypatch):
     ds = SimpleNamespace(
         name="sample",

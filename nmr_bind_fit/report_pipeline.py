@@ -437,6 +437,10 @@ def _build_model_warnings(
             warnings.append("BIC/AICc unavailable: residual variance is zero")
         else:
             warnings.append("BIC/AICc unavailable for this fit")
+    elif not np.isfinite(getattr(res, "aicc", float("nan"))):
+        warnings.append(
+            "AICc unavailable: too few observations for the small-sample correction; BIC is still reported"
+        )
 
     warnings.extend(_logk_bound_warnings(res))
 
