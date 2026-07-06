@@ -142,9 +142,21 @@ def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
         else:
             deduped.append(label)
 
+    # Reserve the simultaneous-fit sentinel: no single-dataset label may equal
+    # it. Re-check uniqueness here so the rename cannot collide with an existing
+    # "... (dataset)" label already produced by the passes above.
+    existing = set(deduped)
     for idx, label in enumerate(deduped):
-        if label == SIMULTANEOUS_FIT_LABEL:
-            deduped[idx] = f"{label} (dataset)"
+        if label != SIMULTANEOUS_FIT_LABEL:
+            continue
+        existing.discard(label)
+        candidate = f"{label} (dataset)"
+        suffix = 2
+        while candidate in existing:
+            candidate = f"{label} (dataset {suffix})"
+            suffix += 1
+        deduped[idx] = candidate
+        existing.add(candidate)
 
     return {id(ds): label for ds, label in zip(datasets, deduped)}
 

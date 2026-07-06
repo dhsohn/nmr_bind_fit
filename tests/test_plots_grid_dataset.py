@@ -46,3 +46,13 @@ def test_safe_file_stems_disambiguates_sanitized_peak_collisions():
 
     assert stems == ["01_ppm_1", "02_ppm_1", "ppm_2"]
     assert len(stems) == len(set(stems))
+
+
+def test_safe_file_stems_avoids_collision_with_existing_prefix():
+    # A distinct peak whose sanitized stem equals the auto-generated prefix of a
+    # duplicated stem must still resolve to a unique filename stem so its plots
+    # are not overwritten.
+    stems = _safe_file_stems(["ppm", "ppm", "01 ppm"])
+
+    assert len(stems) == len(set(stems))
+    assert stems[2] not in {stems[0], stems[1]}
