@@ -41,6 +41,7 @@ class FitResult:
     residual_diagnostics: Dict[str, float]
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
+    logk_bounds: Optional[Tuple[float, float]] = None
 
 
 class ModelFitError(RuntimeError):
@@ -274,6 +275,7 @@ def _failed_fit_result(
     param_names: List[str],
     message: str,
     species: Optional[List] = None,
+    logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     n = _total_observations(datasets)
     p = int(len(params))
@@ -300,6 +302,7 @@ def _failed_fit_result(
         residual_diagnostics={},
         bootstrap=None,
         penalty_count=0,
+        logk_bounds=logk_bounds,
     )
 
 
@@ -347,6 +350,7 @@ def _build_successful_fit_result(
             param_names=param_names,
             message=_nonfinite_prediction_message(datasets, species_list),
             species=species_list,
+            logk_bounds=logk_bounds,
         )
 
     rss = _rss_value(residuals)
@@ -409,6 +413,7 @@ def _build_successful_fit_result(
         residual_diagnostics=diag,
         bootstrap=bootstrap_result,
         penalty_count=int(getattr(best_res, "penalty_count", 0)),
+        logk_bounds=logk_bounds,
     )
 
 
@@ -463,6 +468,7 @@ def fit_model(
             params=best_params,
             param_names=param_names,
             message=str(best_res.message),
+            logk_bounds=logk_bounds,
         )
 
     try:
@@ -522,6 +528,7 @@ def _exception_failure_result(
     model_name: str,
     datasets: List[Dataset],
     exc: Exception,
+    logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
     n_delta = sum(ds.n_peaks * model.n_delta_per_peak for ds in datasets)
@@ -535,6 +542,7 @@ def _exception_failure_result(
         params=params,
         param_names=param_names,
         message=message,
+        logk_bounds=logk_bounds,
     )
 
 
@@ -618,6 +626,6 @@ def fit_models(
                 residual_diagnostics=residual_diagnostics,
             )
         except ModelFitError as exc:
-            result = _exception_failure_result(model_name, fit_datasets, exc)
+            result = _exception_failure_result(model_name, fit_datasets, exc, logk_bounds=logk_bounds)
         results.append(result)
     return results

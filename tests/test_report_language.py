@@ -199,8 +199,8 @@ def test_build_summary_row_labels_sequential_k_values_and_ci():
     assert row["95 % CI"] == f"K1=[{10**0.9:.6g}, {10**1.2:.6g}]; K2=[{10**1.9:.6g}, {10**2.2:.6g}]"
 
 
-def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
-    res = SimpleNamespace(
+def _pinned_k_result(logk_bounds):
+    return SimpleNamespace(
         model=MODEL_SPECS["11"],
         datasets=[],
         params=np.array([12.0, 7.0, 7.5], dtype=float),
@@ -217,13 +217,33 @@ def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
         residual_diagnostics={},
         n=10,
         p=3,
+        logk_bounds=logk_bounds,
     )
+
+
+def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
+    res = _pinned_k_result((0.0, 12.0))
 
     warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
     row = _build_summary_row(res, "sample", "11", warnings)
 
     assert any("upper log10(K) bound" in warning for warning in warnings)
     assert "upper log10(K) bound" in row["Notes"]
+
+
+def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
+    # A logK of 12 is only "pinned" if 12 was the active upper bound. With no
+    # bounds (a programmatic fit) or a wider bound, K=1e12 is a valid estimate
+    # and must not be flagged.
+    unbounded = _build_model_warnings(
+        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result(None), None
+    )
+    wider = _build_model_warnings(
+        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result((0.0, 15.0)), None
+    )
+
+    assert not any("log10(K) bound" in warning for warning in unbounded)
+    assert not any("log10(K) bound" in warning for warning in wider)
 
 
 def test_collect_plot_paths_scopes_single_dataset_outputs_by_dataset_label(tmp_path, monkeypatch):

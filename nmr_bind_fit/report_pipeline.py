@@ -32,8 +32,6 @@ SUMMARY_LABELS = {
     "notes": "Notes",
 }
 
-LOGK_BOUND_MIN = 0.0
-LOGK_BOUND_MAX = 12.0
 LOGK_BOUND_ATOL = 1e-7
 
 
@@ -376,16 +374,23 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
 def _logk_bound_warnings(res: FitResultLike) -> List[str]:
     if res.model.n_logk == 0 or not hasattr(res, "params"):
         return []
+    # Compare against the bounds the fit actually used; when they are unknown
+    # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
+    # valid estimate such as K=1 or K=1e12 would be misleading.
+    bounds = getattr(res, "logk_bounds", None)
+    if bounds is None:
+        return []
+    low, high = float(bounds[0]), float(bounds[1])
     logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
     names = _logk_names(res.model.n_logk)
     warnings: List[str] = []
     for name, value in zip(names, logk_vals):
         if not np.isfinite(value):
             continue
-        if np.isclose(value, LOGK_BOUND_MIN, atol=LOGK_BOUND_ATOL, rtol=0.0):
-            warnings.append(f"{name} is pinned at the lower log10(K) bound ({LOGK_BOUND_MIN:.0f})")
-        elif np.isclose(value, LOGK_BOUND_MAX, atol=LOGK_BOUND_ATOL, rtol=0.0):
-            warnings.append(f"{name} is pinned at the upper log10(K) bound ({LOGK_BOUND_MAX:.0f})")
+        if np.isclose(value, low, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the lower log10(K) bound ({low:g})")
+        elif np.isclose(value, high, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the upper log10(K) bound ({high:g})")
     return warnings
 
 
