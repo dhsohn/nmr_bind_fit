@@ -432,18 +432,25 @@ def fit_model(
     except ValueError as exc:
         raise ModelFitError(str(exc)) from exc
 
-    best_params, best_res = select_best_multistart(
-        model,
-        datasets,
-        logk_grid,
-        max_nfev=max_nfev,
-        logk_bounds=logk_bounds,
-        build_initial_params_fn=_build_initial_params,
-        fit_with_initial_fn=_fit_with_initial,
-        param_bounds_fn=param_bounds,
-        numeric_exceptions=_NUMERIC_EXCEPTIONS,
-        solver_failure_mode=solver_failure_mode,
-    )
+    try:
+        best_params, best_res = select_best_multistart(
+            model,
+            datasets,
+            logk_grid,
+            max_nfev=max_nfev,
+            logk_bounds=logk_bounds,
+            build_initial_params_fn=_build_initial_params,
+            fit_with_initial_fn=_fit_with_initial,
+            param_bounds_fn=param_bounds,
+            numeric_exceptions=_NUMERIC_EXCEPTIONS,
+            solver_failure_mode=solver_failure_mode,
+        )
+    except _NUMERIC_EXCEPTIONS as exc:
+        # Initial-parameter construction (e.g. a ppm column with no finite
+        # observations) runs outside select_best_multistart's per-start numeric
+        # handling. Convert it to ModelFitError so fit_models captures it as an
+        # unsuccessful FitResult instead of aborting the whole run.
+        raise ModelFitError(str(exc)) from exc
 
     if best_params is None or best_res is None:
         raise ModelFitError(f"Fit failed for model {model_name}")
