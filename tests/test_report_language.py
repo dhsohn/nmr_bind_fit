@@ -6,6 +6,7 @@ import numpy as np
 from nmr_bind_fit.models import MODEL_SPECS
 from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs
 from nmr_bind_fit.report_pipeline import (
+    _build_model_warnings,
     _build_summary_row,
     _collect_plot_paths,
     _replicate_dataset_dir_labels,
@@ -163,6 +164,118 @@ def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
 
     assert row["95 % CI"] == f"[{10**1.2:.6g}, {10**2.8:.6g}]"
     assert row["Status"] == "success"
+
+
+def test_build_summary_row_labels_sequential_k_values_and_ci():
+    bootstrap = SimpleNamespace(
+        param_samples=np.array([[1.0, 2.0], [1.1, 2.1]], dtype=float),
+        logk_samples=np.array([[1.0, 2.0], [1.1, 2.1]], dtype=float),
+        ci_low=np.array([0.9, 1.9], dtype=float),
+        ci_high=np.array([1.2, 2.2], dtype=float),
+        ci_low_percentile=np.array([0.9, 1.9], dtype=float),
+        ci_high_percentile=np.array([1.2, 2.2], dtype=float),
+        ci_low_bca=np.array([np.nan, np.nan], dtype=float),
+        ci_high_bca=np.array([np.nan, np.nan], dtype=float),
+        ci_method="percentile",
+        n_success=2,
+        n_boot=2,
+    )
+    res = SimpleNamespace(
+        model=SimpleNamespace(n_logk=2),
+        params=np.array([1.0, 2.0], dtype=float),
+        bootstrap=bootstrap,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=11.0,
+        penalty_count=0,
+    )
+
+    row = _build_summary_row(res, "sample", "12")
+
+    assert row["Binding constant (M⁻¹)"] == "K1=10; K2=100"
+    assert row["95 % CI"] == f"K1=[{10**0.9:.6g}, {10**1.2:.6g}]; K2=[{10**1.9:.6g}, {10**2.2:.6g}]"
+
+
+def _pinned_k_result(logk_bounds):
+    return SimpleNamespace(
+        model=MODEL_SPECS["11"],
+        datasets=[],
+        params=np.array([12.0, 7.0, 7.5], dtype=float),
+        param_names=["logK", "H", "HG"],
+        bootstrap=None,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=11.0,
+        penalty_count=0,
+        species=[],
+        residual_diagnostics={},
+        n=10,
+        p=3,
+        logk_bounds=logk_bounds,
+    )
+
+
+def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
+    res = _pinned_k_result((0.0, 12.0))
+
+    warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
+    row = _build_summary_row(res, "sample", "11", warnings)
+
+    assert any("upper log10(K) bound" in warning for warning in warnings)
+    assert "upper log10(K) bound" in row["Notes"]
+
+
+def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
+    # A logK of 12 is only "pinned" if 12 was the active upper bound. With no
+    # bounds (a programmatic fit) or a wider bound, K=1e12 is a valid estimate
+    # and must not be flagged.
+    unbounded = _build_model_warnings(
+        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result(None), None
+    )
+    wider = _build_model_warnings(
+        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result((0.0, 15.0)), None
+    )
+
+    assert not any("log10(K) bound" in warning for warning in unbounded)
+    assert not any("log10(K) bound" in warning for warning in wider)
+
+
+def test_aicc_only_unavailable_is_explained_in_warnings():
+    # An underpowered fit can keep a finite BIC while the AICc small-sample
+    # correction is undefined (NaN). The report must explain the resulting
+    # AICc=N/A instead of showing it silently.
+    res = SimpleNamespace(
+        model=MODEL_SPECS["11"],
+        datasets=[],
+        params=np.array([3.0, 7.0, 7.5], dtype=float),
+        param_names=["logK", "H", "HG"],
+        bootstrap=None,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=float("nan"),
+        penalty_count=0,
+        species=[],
+        residual_diagnostics={},
+        n=5,
+        p=4,
+        logk_bounds=(0.0, 12.0),
+    )
+
+    warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
+    row = _build_summary_row(res, "sample", "11", warnings)
+
+    assert any("AICc unavailable: too few observations" in warning for warning in warnings)
+    assert not any("BIC/AICc unavailable" in warning for warning in warnings)
+    assert "AICc unavailable" in row["Notes"]
 
 
 def test_collect_plot_paths_scopes_single_dataset_outputs_by_dataset_label(tmp_path, monkeypatch):

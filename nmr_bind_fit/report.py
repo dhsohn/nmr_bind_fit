@@ -72,7 +72,7 @@ def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
     if not rows:
         return
     fieldnames = list(rows[0].keys())
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
@@ -80,7 +80,7 @@ def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
 
 
 def write_decision_txt(decisions: Sequence[str], path: Path) -> None:
-    with path.open("w") as f:
+    with path.open("w", encoding="utf-8") as f:
         for line in decisions:
             f.write(line.rstrip() + "\n")
 

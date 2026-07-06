@@ -24,13 +24,15 @@ SUMMARY_LABELS = {
     "dataset": "Dataset",
     "model": "Model",
     "status": "Status",
-    "K": "Binding constant",
+    "K": "Binding constant (M⁻¹)",
     "bootstrap_K_CI": "95 % CI",
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
     "notes": "Notes",
 }
+
+LOGK_BOUND_ATOL = 1e-7
 
 
 STATS_LABELS = {
@@ -338,9 +340,65 @@ def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
     return _safe_pow10(low_log), _safe_pow10(high_log)
 
 
+def _logk_names(n_logk: int) -> List[str]:
+    if n_logk == 1:
+        return ["K"]
+    return [f"K{i + 1}" for i in range(n_logk)]
+
+
+def _format_k_values(k_vals: np.ndarray, n_logk: int) -> str:
+    if n_logk == 0:
+        return "N/A"
+    names = _logk_names(n_logk)
+    values = [f"{value:.6g}" if np.isfinite(value) else "N/A" for value in k_vals]
+    if n_logk == 1:
+        return values[0]
+    return "; ".join(f"{name}={value}" for name, value in zip(names, values))
+
+
+def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> str:
+    finite = np.isfinite(k_ci_low) & np.isfinite(k_ci_high)
+    if k_ci_low.size == 0 or not np.any(finite):
+        return "N/A"
+    names = _logk_names(n_logk)
+    intervals = []
+    for idx, (low, high) in enumerate(zip(k_ci_low, k_ci_high)):
+        interval = f"[{low:.6g}, {high:.6g}]" if np.isfinite(low) and np.isfinite(high) else "N/A"
+        if n_logk == 1:
+            intervals.append(interval)
+        else:
+            intervals.append(f"{names[idx]}={interval}")
+    return "; ".join(intervals)
+
+
+def _logk_bound_warnings(res: FitResultLike) -> List[str]:
+    if res.model.n_logk == 0 or not hasattr(res, "params"):
+        return []
+    # Compare against the bounds the fit actually used; when they are unknown
+    # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
+    # valid estimate such as K=1 or K=1e12 would be misleading.
+    bounds = getattr(res, "logk_bounds", None)
+    if bounds is None:
+        return []
+    low, high = float(bounds[0]), float(bounds[1])
+    logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
+    names = _logk_names(res.model.n_logk)
+    warnings: List[str] = []
+    for name, value in zip(names, logk_vals):
+        if not np.isfinite(value):
+            continue
+        if np.isclose(value, low, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the lower log10(K) bound ({low:g})")
+        elif np.isclose(value, high, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the upper log10(K) bound ({high:g})")
+    return warnings
+
+
 def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
+        return None
+    if not hasattr(res, "species"):
         return None
     solver_stats = _accumulate_solver_stats(res.species)
     if solver_stats is None:
@@ -360,12 +418,13 @@ def _build_model_warnings(
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
+    datasets = getattr(res, "datasets", [])
 
-    dropped_peaks = _format_dropped_peaks(res.datasets)
+    dropped_peaks = _format_dropped_peaks(datasets)
     if dropped_peaks != "None":
         warnings.append(f"Dropped chemical shift columns with missing or non-finite values: {dropped_peaks}")
 
-    dropped_rows = _format_dropped_rows(res.datasets)
+    dropped_rows = _format_dropped_rows(datasets)
     if dropped_rows != "None":
         warnings.append(f"Dropped rows with missing required concentrations: {dropped_rows}")
 
@@ -378,22 +437,30 @@ def _build_model_warnings(
             warnings.append("BIC/AICc unavailable: residual variance is zero")
         else:
             warnings.append("BIC/AICc unavailable for this fit")
+    elif not np.isfinite(getattr(res, "aicc", float("nan"))):
+        warnings.append(
+            "AICc unavailable: too few observations for the small-sample correction; BIC is still reported"
+        )
+
+    warnings.extend(_logk_bound_warnings(res))
 
     k_ci_low, k_ci_high = _bootstrap_k_ci(res)
     if args.bootstrap_ci_width is not None and k_ci_low.size > 0:
         if np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)):
             warnings.append("bootstrap CI too wide")
 
-    if res.bootstrap is not None and res.bootstrap.n_boot > 0:
-        n_fail = res.bootstrap.n_boot - res.bootstrap.n_success
+    bootstrap = getattr(res, "bootstrap", None)
+    if bootstrap is not None and bootstrap.n_boot > 0:
+        n_fail = bootstrap.n_boot - bootstrap.n_success
         if n_fail > 0:
-            warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
-        ci_warning = str(getattr(res.bootstrap, "ci_warning", "")).strip()
+            warnings.append(f"bootstrap failures: {n_fail} of {bootstrap.n_boot} iterations")
+        ci_warning = str(getattr(bootstrap, "ci_warning", "")).strip()
         if ci_warning:
             warnings.append(ci_warning)
 
-    if res.penalty_count > 0:
-        warnings.append(f"optimization penalty residual events: {res.penalty_count}")
+    penalty_count = int(getattr(res, "penalty_count", 0))
+    if penalty_count > 0:
+        warnings.append(f"optimization penalty residual events: {penalty_count}")
 
     if solver_stats is not None and solver_stats.get("solver_fail", 0) not in {"N/A", None}:
         n_fail = _as_int(solver_stats.get("solver_fail", 0))
@@ -401,7 +468,7 @@ def _build_model_warnings(
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
-    for ds, species in zip(res.datasets, res.species):
+    for ds, species in zip(datasets, getattr(res, "species", [])):
         stats = species.solver_stats
         if stats is None:
             continue
@@ -456,17 +523,19 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
     return {_label_stats_key(k): v for k, v in stats_base.items()}
 
 
-def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> Dict[str, str]:
+def _build_summary_row(
+    res: FitResultLike,
+    ds_label: str,
+    display_name: str,
+    warnings: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
     # Build one row for summary.csv.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
-    k_str = ";".join(f"{v:.6g}" for v in k_vals) if res.model.n_logk else "N/A"
+    k_str = _format_k_values(k_vals, res.model.n_logk)
 
     k_ci_low, k_ci_high = _bootstrap_k_ci(res)
-    if k_ci_low.size == 0 or not np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high)):
-        boot_k_ci = "N/A"
-    else:
-        boot_k_ci = ";".join(f"[{low:.6g}, {high:.6g}]" for low, high in zip(k_ci_low, k_ci_high))
+    boot_k_ci = _format_k_ci(k_ci_low, k_ci_high, res.model.n_logk)
 
     summary_base = {
         "dataset": ds_label,
@@ -477,7 +546,7 @@ def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> 
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
-        "notes": "",
+        "notes": "; ".join(str(warning) for warning in (warnings or [])),
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
@@ -522,7 +591,7 @@ def _build_model_entry(
         plots=plot_paths,
         warnings=warnings,
     )
-    summary_row = _build_summary_row(res, key, display_name)
+    summary_row = _build_summary_row(res, key, display_name, warnings)
     return model_entry, summary_row
 
 
@@ -731,12 +800,18 @@ def build_decisions(
         failures = failures_by_key.get(key, [])
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")
-        if failures:
+        model_warning_lines: List[str] = []
+        for model_name, res in model_map.items():
+            model_warnings = _build_model_warnings(args, res, _solver_stats_for_result(res))
+            for warning in model_warnings:
+                model_warning_lines.append(f"- {display_model_name(model_name)}: {warning}")
+        if failures or model_warning_lines:
             decisions.append("Warnings:")
             for model_name, message in failures:
                 decisions.append(
                     f"- excluded {display_model_name(model_name)} (fit failed: {message})"
                 )
+            decisions.extend(model_warning_lines)
         if not bic_sorted:
             if model_map:
                 decisions.append("No model had a finite BIC for ranking; see warnings.")

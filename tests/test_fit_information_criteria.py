@@ -59,13 +59,14 @@ def test_information_criteria_uses_one_shared_variance_including_sigma_multiple_
     np.testing.assert_allclose(aicc, expected_aicc)
 
 
-def test_information_criteria_returns_nan_when_underpowered():
+def test_information_criteria_keeps_bic_when_aicc_is_underpowered():
     ds = _dataset("small", n_points=3, n_peaks=1)
     residuals = [np.array([[0.1], [-0.1], [0.2]], dtype=float)]
 
     bic, aicc = information_criteria([ds], residuals, p=2)
+    loglik, n_obs, n_sigma = gaussian_loglik(residuals[0].ravel())
 
-    assert np.isnan(bic)
+    np.testing.assert_allclose(bic, bic_from_loglik(loglik, n_obs, 2 + n_sigma))
     assert np.isnan(aicc)
 
 

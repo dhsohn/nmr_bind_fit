@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 from typing import List, Tuple
 
@@ -49,6 +50,31 @@ _CLR_HIST = "#334155"
 def _safe_file_stem(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("_")
     return safe or "peak"
+
+
+def _safe_file_stems(values: List[str]) -> List[str]:
+    # Sanitize peak labels into unique filename stems. Suffix collisions until
+    # unique so a generated prefix cannot clash with another (already unique)
+    # stem and silently overwrite its plot files.
+    stems = [_safe_file_stem(value) for value in values]
+    counts = Counter(stems)
+    used: set[str] = set()
+    unique: List[str] = []
+    for idx, stem in enumerate(stems, start=1):
+        candidates = []
+        if counts[stem] == 1:
+            candidates.append(stem)
+        candidates.append(f"{idx:02d}_{stem}")
+        chosen = next((candidate for candidate in candidates if candidate not in used), "")
+        if not chosen:
+            suffix = 1
+            chosen = f"{idx:02d}_{stem}_{suffix}"
+            while chosen in used:
+                suffix += 1
+                chosen = f"{idx:02d}_{stem}_{suffix}"
+        used.add(chosen)
+        unique.append(chosen)
+    return unique
 
 
 def _style_axes(ax: plt.Axes) -> None:
@@ -156,8 +182,9 @@ def plot_isotherms(
     files: List[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
+    peak_stems = _safe_file_stems(list(ds.y_cols))
 
-    for i, peak in enumerate(ds.y_cols):
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
                    label="Observed", edgecolors="white", linewidths=0.4)
@@ -168,7 +195,6 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        peak_stem = _safe_file_stem(peak)
         png_path = out_dir / f"isotherm_{peak_stem}.png"
         pdf_path = out_dir / f"isotherm_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -185,7 +211,8 @@ def plot_residuals(
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
-    for i, peak in enumerate(ds.y_cols):
+    peak_stems = _safe_file_stems(list(ds.y_cols))
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
@@ -194,7 +221,6 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        peak_stem = _safe_file_stem(peak)
         png_path = out_dir / f"residual_{peak_stem}.png"
         pdf_path = out_dir / f"residual_{peak_stem}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -217,7 +243,13 @@ def plot_bootstrap_hist(
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
                 edgecolor="white", linewidth=0.5)
-        ax.set_xlabel(f"$K$ ({name})" if name != "K" else "$K$")
+        if name == "K":
+            xlabel = r"$K$ (M$^{-1}$)"
+        elif name.startswith("K") and name[1:].isdigit():
+            xlabel = rf"$K_{name[1:]}$ (M$^{{-1}}$)"
+        else:
+            xlabel = f"{name} (M$^{{-1}}$)"
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Count")
         _style_axes(ax)
         fig.tight_layout()

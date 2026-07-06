@@ -94,8 +94,16 @@ def _residual_bootstrap(
     col_means = np.nanmean(residuals, axis=0, keepdims=True)
     col_means = np.where(np.isfinite(col_means), col_means, 0.0)
     centered = residuals - col_means
-    centered[~np.isfinite(centered)] = 0.0
     resampled = centered[idx, :]
+    for col_idx in range(centered.shape[1]):
+        finite_residuals = centered[:, col_idx][np.isfinite(centered[:, col_idx])]
+        missing = ~np.isfinite(resampled[:, col_idx])
+        if not np.any(missing):
+            continue
+        if finite_residuals.size == 0:
+            resampled[missing, col_idx] = 0.0
+        else:
+            resampled[missing, col_idx] = rng.choice(finite_residuals, size=int(np.count_nonzero(missing)))
     y_boot = y_pred + resampled
     y_boot[~np.isfinite(ds.y)] = np.nan
     return Dataset(

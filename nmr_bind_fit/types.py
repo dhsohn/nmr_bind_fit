@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Protocol
+from typing import List, Optional, Protocol, Tuple
 
 import numpy as np
 
@@ -82,3 +82,4 @@ class FitResultLike(Protocol):
     residuals: List[np.ndarray]
     bootstrap: Optional[BootstrapLike]
     penalty_count: int
+    logk_bounds: Optional[Tuple[float, float]]

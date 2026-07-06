@@ -41,6 +41,7 @@ class FitResult:
     residual_diagnostics: Dict[str, float]
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
+    logk_bounds: Optional[Tuple[float, float]] = None
 
 
 class ModelFitError(RuntimeError):
@@ -70,14 +71,33 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
 
 
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
-    y0 = dataset.y[0]
-    y1 = dataset.y[-1]
+    y = np.asarray(dataset.y, dtype=float)
+    x = np.asarray(dataset.x, dtype=float)
+    y0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    y1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    x0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+    x1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
+
+    for peak_idx in range(dataset.n_peaks):
+        mask = np.isfinite(y[:, peak_idx]) & np.isfinite(x)
+        if not np.any(mask):
+            continue
+        indices = np.flatnonzero(mask)
+        first = int(indices[0])
+        last = int(indices[-1])
+        y0[peak_idx] = y[first, peak_idx]
+        y1[peak_idx] = y[last, peak_idx]
+        x0[peak_idx] = x[first]
+        x1[peak_idx] = x[last]
+
+    if not np.all(np.isfinite(y0) & np.isfinite(y1)):
+        raise ValueError("Each ppm column must contain at least one finite value for fitting.")
+
     if model.name == "nb":
-        x0 = dataset.x[0]
-        x1 = dataset.x[-1]
         slope = np.zeros_like(y0)
-        if x1 != x0:
-            slope = (y1 - y0) / (x1 - x0)
+        span = x1 - x0
+        mask = np.isfinite(span) & (span != 0)
+        slope[mask] = (y1[mask] - y0[mask]) / span[mask]
         return np.column_stack([y0, slope])
     if model.n_delta_per_peak == 2:
         return np.column_stack([y0, y1])
@@ -255,6 +275,7 @@ def _failed_fit_result(
     param_names: List[str],
     message: str,
     species: Optional[List] = None,
+    logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     n = _total_observations(datasets)
     p = int(len(params))
@@ -281,6 +302,7 @@ def _failed_fit_result(
         residual_diagnostics={},
         bootstrap=None,
         penalty_count=0,
+        logk_bounds=logk_bounds,
     )
 
 
@@ -328,6 +350,7 @@ def _build_successful_fit_result(
             param_names=param_names,
             message=_nonfinite_prediction_message(datasets, species_list),
             species=species_list,
+            logk_bounds=logk_bounds,
         )
 
     rss = _rss_value(residuals)
@@ -390,6 +413,7 @@ def _build_successful_fit_result(
         residual_diagnostics=diag,
         bootstrap=bootstrap_result,
         penalty_count=int(getattr(best_res, "penalty_count", 0)),
+        logk_bounds=logk_bounds,
     )
 
 
@@ -413,18 +437,25 @@ def fit_model(
     except ValueError as exc:
         raise ModelFitError(str(exc)) from exc
 
-    best_params, best_res = select_best_multistart(
-        model,
-        datasets,
-        logk_grid,
-        max_nfev=max_nfev,
-        logk_bounds=logk_bounds,
-        build_initial_params_fn=_build_initial_params,
-        fit_with_initial_fn=_fit_with_initial,
-        param_bounds_fn=param_bounds,
-        numeric_exceptions=_NUMERIC_EXCEPTIONS,
-        solver_failure_mode=solver_failure_mode,
-    )
+    try:
+        best_params, best_res = select_best_multistart(
+            model,
+            datasets,
+            logk_grid,
+            max_nfev=max_nfev,
+            logk_bounds=logk_bounds,
+            build_initial_params_fn=_build_initial_params,
+            fit_with_initial_fn=_fit_with_initial,
+            param_bounds_fn=param_bounds,
+            numeric_exceptions=_NUMERIC_EXCEPTIONS,
+            solver_failure_mode=solver_failure_mode,
+        )
+    except _NUMERIC_EXCEPTIONS as exc:
+        # Initial-parameter construction (e.g. a ppm column with no finite
+        # observations) runs outside select_best_multistart's per-start numeric
+        # handling. Convert it to ModelFitError so fit_models captures it as an
+        # unsuccessful FitResult instead of aborting the whole run.
+        raise ModelFitError(str(exc)) from exc
 
     if best_params is None or best_res is None:
         raise ModelFitError(f"Fit failed for model {model_name}")
@@ -437,6 +468,7 @@ def fit_model(
             params=best_params,
             param_names=param_names,
             message=str(best_res.message),
+            logk_bounds=logk_bounds,
         )
 
     try:
@@ -496,6 +528,7 @@ def _exception_failure_result(
     model_name: str,
     datasets: List[Dataset],
     exc: Exception,
+    logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
     n_delta = sum(ds.n_peaks * model.n_delta_per_peak for ds in datasets)
@@ -509,6 +542,7 @@ def _exception_failure_result(
         params=params,
         param_names=param_names,
         message=message,
+        logk_bounds=logk_bounds,
     )
 
 
@@ -592,6 +626,6 @@ def fit_models(
                 residual_diagnostics=residual_diagnostics,
             )
         except ModelFitError as exc:
-            result = _exception_failure_result(model_name, fit_datasets, exc)
+            result = _exception_failure_result(model_name, fit_datasets, exc, logk_bounds=logk_bounds)
         results.append(result)
     return results

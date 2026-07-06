@@ -77,6 +77,14 @@ def _resolve_ppm_cols(columns: Sequence[str], ppm_cols: Optional[Sequence[str]])
         cols = _find_ppm_columns(columns)
     else:
         cols = list(ppm_cols)
+        missing = [col for col in cols if col not in columns]
+        if missing:
+            available = ", ".join(str(col) for col in columns)
+            raise ValueError(
+                "Requested ppm columns not found: "
+                + ", ".join(missing)
+                + f". Available columns: {available}"
+            )
     if not cols:
         raise ValueError("No ppm columns detected. Use --ppm-cols to specify.")
     return cols
@@ -171,6 +179,8 @@ def load_dataset(
 
     data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
     data, dropped_required_rows = _drop_missing_required(data, host_col, guest_col)
+    if data.empty:
+        raise ValueError("No rows remain after dropping rows with missing required concentrations.")
 
     ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)
     use_cols = [host_col, guest_col] + ppm_cols
