@@ -79,6 +79,12 @@ def _safe_std(values: np.ndarray) -> float:
     return float(np.std(scaled, ddof=1) * scale)
 
 
+def _append_png_plot_paths(plot_paths: List[str], paths: Sequence[Path], out_dir: Path) -> None:
+    for path in paths:
+        if path.suffix.lower() == ".png":
+            plot_paths.append(path.relative_to(out_dir).as_posix())
+
+
 def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
     # Drop rows with any non-finite values.
     if values.ndim == 1:
@@ -266,9 +272,7 @@ def _collect_plot_paths(
         isotherm_files = plot_isotherms(model_spec, ds, logk, delta, ds_dir)
         residual_files = plot_residuals(model_spec, ds, residual, ds_dir)
         frac_files = plot_fraction_bound(model_spec, ds, logk, delta, ds_dir)
-        for path in isotherm_files + residual_files + frac_files:
-            if path.suffix.lower() == ".png":
-                plot_paths.append(path.relative_to(out_dir).as_posix())
+        _append_png_plot_paths(plot_paths, isotherm_files + residual_files + frac_files, out_dir)
 
     if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
         samples = res.bootstrap.param_samples.copy()
@@ -289,9 +293,7 @@ def _collect_plot_paths(
         k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
         k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
         boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
-        for path in boot_files:
-            if path.suffix.lower() == ".png":
-                plot_paths.append(path.relative_to(out_dir).as_posix())
+        _append_png_plot_paths(plot_paths, boot_files, out_dir)
 
     return plot_paths
 
