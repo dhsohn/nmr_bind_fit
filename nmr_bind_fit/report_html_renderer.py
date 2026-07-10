@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
@@ -371,17 +373,39 @@ tr.best-model td { background: var(--success-bg) !important; font-weight: 500; }
 
 
 def _slug(text: str) -> str:
-    return text.lower().replace(" ", "-").replace(":", "").replace("(", "").replace(")", "")
+    safe = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-_")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+    prefix = safe[:60].rstrip("-_") or "section"
+    return f"{prefix}-{digest}"
 
 
-def _fig_caption(fig_counter: _FigCounter, plot_path: str) -> str:
+def _plot_alt_text(plot_path: str, plot_label: Optional[str] = None) -> str:
+    stem = Path(plot_path).stem
+    if stem.startswith("isotherm_"):
+        peak = plot_label or stem.removeprefix("isotherm_")
+        return f"Binding isotherm – {peak}"
+    if stem.startswith("residual_"):
+        peak = plot_label or stem.removeprefix("residual_")
+        return f"Fit residuals – {peak}"
+    if stem == "fraction_bound":
+        return "Fraction bound"
+    if stem.startswith("bootstrap_"):
+        return f"Bootstrap distribution – {stem.removeprefix('bootstrap_')}"
+    return stem
+
+
+def _fig_caption(
+    fig_counter: _FigCounter,
+    plot_path: str,
+    plot_label: Optional[str] = None,
+) -> str:
     stem = Path(plot_path).stem
     n = fig_counter.next()
     if stem.startswith("isotherm_"):
-        peak = stem.replace("isotherm_", "")
+        peak = plot_label or stem.removeprefix("isotherm_")
         return f"<strong>Figure {n}.</strong> Binding isotherm – {html.escape(peak)}"
     if stem.startswith("residual_"):
-        peak = stem.replace("residual_", "")
+        peak = plot_label or stem.removeprefix("residual_")
         return f"<strong>Figure {n}.</strong> Fit residuals – {html.escape(peak)}"
     if stem == "fraction_bound":
         return f"<strong>Figure {n}.</strong> Fraction bound"
@@ -458,7 +482,7 @@ def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
 def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: Dict[str, str]) -> str:
     if not summary_rows:
         return ""
-    headers = [h for h in summary_rows[0].keys() if h != "Dataset"]
+    headers = list(summary_rows[0].keys())
     thead = "".join(
         f'<th{_cell_class(h)}>{html.escape(h)}</th>' for h in headers
     )
@@ -521,15 +545,21 @@ def _render_model_warning_block(warnings: Sequence[str]) -> str:
     return '<p class="no-warnings">No warnings.</p>'
 
 
-def _render_plot_grid(plot_paths: Sequence[str], fig_counter: _FigCounter) -> str:
+def _render_plot_grid(
+    plot_paths: Sequence[str],
+    fig_counter: _FigCounter,
+    plot_labels: Optional[Dict[str, str]] = None,
+) -> str:
     if not plot_paths:
         return ""
     fig_items = []
     for p in plot_paths:
-        caption = _fig_caption(fig_counter, p)
+        plot_label = (plot_labels or {}).get(p)
+        caption = _fig_caption(fig_counter, p, plot_label)
+        alt_text = _plot_alt_text(p, plot_label)
         fig_items.append(
             f'<figure class="figure-card">'
-            f'<img src="{html.escape(p)}" alt="{html.escape(Path(p).stem)}" loading="lazy">'
+            f'<img src="{html.escape(p)}" alt="{html.escape(alt_text)}" loading="lazy">'
             f"<figcaption>{caption}</figcaption>"
             f"</figure>"
         )
@@ -544,7 +574,11 @@ def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: 
     stats_grid = _render_stats_grid(entry.stats)
     param_table = _render_param_table(entry.params)
     warn_block = _render_model_warning_block(entry.warnings)
-    plots_html = _render_plot_grid(entry.plots, fig_counter)
+    plots_html = _render_plot_grid(
+        entry.plots,
+        fig_counter,
+        getattr(entry, "plot_labels", None),
+    )
 
     display_title = f"{html.escape(entry.model)}"
     if entry.dataset != "Simultaneous Fitting":

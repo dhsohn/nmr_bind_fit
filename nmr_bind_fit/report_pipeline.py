@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
+from .fit_bootstrap import MIN_BOOTSTRAP_CI_SUCCESS_RATE, MIN_BOOTSTRAP_CI_SUCCESSES
 from .models import ModelSpec, split_params_multi
 from .plots import (
     plot_bootstrap_hist,
@@ -31,6 +33,11 @@ SUMMARY_LABELS = {
 
 
 STATS_LABELS = {
+    "n": "Observations (n)",
+    "p": "Fitted parameters (p)",
+    "dof": "Residual degrees of freedom",
+    "jacobian_rank": "Jacobian rank",
+    "jacobian_condition": "Jacobian condition number",
     "R2": "Coefficient of determination (mean per-peak)",
     "R2_per_peak": "R² per peak",
     "RSS": "Residual sum of squares",
@@ -39,6 +46,8 @@ STATS_LABELS = {
     "AICc": "Corrected Akaike Information Criterion",
     "penalty_events": "Optimization penalty events",
     "bootstrap_logK_SE": "Bootstrap SE (log10 K)",
+    "bootstrap_success": "Successful bootstrap refits",
+    "bootstrap_ci_method": "Bootstrap CI method used",
     "residual_n": "Residual count",
     "shapiro_stat": "Shapiro-Wilk statistic",
     "shapiro_p": "Shapiro-Wilk p-value",
@@ -94,9 +103,14 @@ def _as_int(value: object) -> int:
 
 
 def _safe_path_token(value: str) -> str:
-    # Sanitize free-form labels before using them as directory names.
+    # Sanitize and bound free-form labels before using them as path components.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
-    return safe or "dataset"
+    safe = safe or "dataset"
+    if len(safe) <= 80:
+        return safe
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    prefix = safe[:67].rstrip("._-") or "dataset"
+    return f"{prefix}-{digest}"
 
 
 def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
@@ -111,6 +125,14 @@ def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
                 base = f"{base}_{filename}"
         labels.append(f"{idx:02d}_{_safe_path_token(base)}")
     return labels
+
+
+def _dataset_artifact_dir_labels(dataset_labels: Sequence[str]) -> List[str]:
+    # Prefix display labels with their stable input order so sanitization cannot collide.
+    return [
+        f"{idx:02d}_{_safe_path_token(label)}"
+        for idx, label in enumerate(dataset_labels, start=1)
+    ]
 
 
 def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
@@ -160,7 +182,11 @@ def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[s
 def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     # Convert fitted parameters into report entries and optional bootstrap SE.
     bootstrap_samples = None
-    if res.bootstrap is not None and res.bootstrap.param_samples.size > 0:
+    if (
+        res.bootstrap is not None
+        and getattr(res.bootstrap, "ci_valid", True)
+        and res.bootstrap.param_samples.size > 0
+    ):
         bootstrap_samples = res.bootstrap.param_samples
 
     params = []
@@ -191,14 +217,22 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     return params
 
 
-def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_dir: Path) -> List[str]:
+def _collect_plot_paths(
+    res: FitResultLike,
+    model_name: str,
+    dataset_dir_label: str,
+    out_dir: Path,
+) -> Tuple[List[str], Dict[str, str]]:
     # Write model plots and return PNG paths relative to output root.
-    model_dir = out_dir / f"model_{model_name}"
-    if len(res.datasets) > 1:
-        model_dir = model_dir / f"dataset_{ds_label}"
+    model_dir = (
+        out_dir
+        / f"dataset_{dataset_dir_label}"
+        / f"model_{_safe_path_token(model_name)}"
+    )
     model_dir.mkdir(parents=True, exist_ok=True)
 
     plot_paths: List[str] = []
+    plot_labels: Dict[str, str] = {}
     replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
     model_spec = cast(ModelSpec, res.model)
     logk, deltas = split_params_multi(res.params, model_spec, res.datasets)
@@ -212,6 +246,16 @@ def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_
         for path in isotherm_files + residual_files + frac_files:
             if path.suffix.lower() == ".png":
                 plot_paths.append(str(path.relative_to(out_dir)))
+        for peak, path in zip(
+            ds.y_cols,
+            [path for path in isotherm_files if path.suffix.lower() == ".png"],
+        ):
+            plot_labels[str(path.relative_to(out_dir))] = str(peak)
+        for peak, path in zip(
+            ds.y_cols,
+            [path for path in residual_files if path.suffix.lower() == ".png"],
+        ):
+            plot_labels[str(path.relative_to(out_dir))] = str(peak)
 
     if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
         samples = res.bootstrap.param_samples.copy()
@@ -236,7 +280,7 @@ def _collect_plot_paths(res: FitResultLike, model_name: str, ds_label: str, out_
             if path.suffix.lower() == ".png":
                 plot_paths.append(str(path.relative_to(out_dir)))
 
-    return plot_paths
+    return plot_paths, plot_labels
 
 
 def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
@@ -249,7 +293,11 @@ def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
 
 def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
     # Return finite bootstrap logK samples for SE reporting.
-    if res.bootstrap is None or res.model.n_logk == 0:
+    if (
+        res.bootstrap is None
+        or res.model.n_logk == 0
+        or not getattr(res.bootstrap, "ci_valid", True)
+    ):
         return np.full((0, res.model.n_logk), np.nan)
     samples = getattr(res.bootstrap, "logk_samples", np.full((0, res.model.n_logk), np.nan))
     if samples.size == 0:
@@ -268,7 +316,11 @@ def _bootstrap_logk_se_text(res: FitResultLike) -> str:
 
 def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
     # Return selected bootstrap CI in linear K space.
-    if res.bootstrap is None or res.model.n_logk == 0:
+    if (
+        res.bootstrap is None
+        or res.model.n_logk == 0
+        or not getattr(res.bootstrap, "ci_valid", True)
+    ):
         return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
     low_log = np.asarray(
         getattr(res.bootstrap, "ci_low", np.full((res.model.n_logk,), np.nan)),
@@ -315,10 +367,14 @@ def _build_model_warnings(
         if np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)):
             warnings.append("bootstrap CI too wide")
 
-    if res.bootstrap is not None and res.bootstrap.n_boot > 0:
-        n_fail = res.bootstrap.n_boot - res.bootstrap.n_success
-        if n_fail > 0:
-            warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
+    if res.bootstrap is not None:
+        if res.bootstrap.n_boot > 0:
+            n_fail = res.bootstrap.n_boot - res.bootstrap.n_success
+            if n_fail > 0:
+                warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
+        if not getattr(res.bootstrap, "ci_valid", True):
+            ci_message = str(getattr(res.bootstrap, "ci_message", "")).strip()
+            warnings.append(ci_message or "bootstrap confidence interval is unavailable")
 
     if res.penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {res.penalty_count}")
@@ -362,6 +418,21 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
         "penalty_events": str(res.penalty_count),
     }
+    for attr in ("n", "p", "dof", "jacobian_rank"):
+        value = getattr(res, attr, None)
+        if value is not None:
+            stats_base[attr] = str(value)
+    jacobian_condition = getattr(res, "jacobian_condition", None)
+    if jacobian_condition is not None:
+        stats_base["jacobian_condition"] = f"{float(jacobian_condition):.6g}"
+    if res.bootstrap is not None:
+        n_success = getattr(res.bootstrap, "n_success", None)
+        n_boot = getattr(res.bootstrap, "n_boot", None)
+        if n_success is not None and n_boot is not None:
+            stats_base["bootstrap_success"] = f"{n_success} / {n_boot}"
+        ci_method_used = getattr(res.bootstrap, "ci_method_used", None)
+        if ci_method_used:
+            stats_base["bootstrap_ci_method"] = str(ci_method_used)
     if solver_stats is not None:
         stats_base.update(
             {
@@ -413,13 +484,19 @@ def _build_model_entry(
     key: str,
     model_name: str,
     res: FitResultLike,
+    dataset_dir_label: str,
     out_dir: Path,
     display_model_name: Callable[[str], str],
 ) -> Tuple[ModelEntry, Dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
-    plot_paths = _collect_plot_paths(res, model_name, key, out_dir)
+    plot_paths, plot_labels = _collect_plot_paths(
+        res,
+        model_name,
+        dataset_dir_label,
+        out_dir,
+    )
     solver_stats = _solver_stats_for_result(res)
     warnings = _build_model_warnings(args, res, solver_stats)
     stats_dict = _build_stats_dict(res, solver_stats)
@@ -430,6 +507,7 @@ def _build_model_entry(
         params=params,
         plots=plot_paths,
         warnings=warnings,
+        plot_labels=plot_labels,
     )
     summary_row = _build_summary_row(res, key, display_name)
     return model_entry, summary_row
@@ -448,7 +526,8 @@ def build_report_artifacts(
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
 
-    for key in ordered_keys:
+    dataset_dir_labels = _dataset_artifact_dir_labels(ordered_keys)
+    for key, dataset_dir_label in zip(ordered_keys, dataset_dir_labels):
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
@@ -463,6 +542,7 @@ def build_report_artifacts(
                 key,
                 model_name,
                 res,
+                dataset_dir_label,
                 out_dir,
                 display_model_name,
             )
@@ -522,9 +602,13 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
                 "scipy.optimize.least_squares (Trust Region Reflective algorithm). "
                 "The 1:1 equilibrium was solved analytically via the closed-form quadratic solution. "
                 "The 1:2 and 2:1 equilibria were solved numerically point-by-point using Brent's method "
-                "(scipy.optimize.brentq; xtol=1e-50, rtol=1e-15). "
+                "over the physical free-guest bracket [0, [G]ₜ] (scipy.optimize.brentq; "
+                "scale-adaptive xtol = 10⁻¹³ times the estimated free-guest scale, "
+                "rtol = 8 machine epsilons, maxiter = 200). "
                 "Binding constants were parameterized as log₁₀(K) and constrained to [0, 12] "
                 f"(K ∈ [1, 10¹²] {k_unit}) during optimization to ensure stable, physically meaningful estimation. "
+                "Fits were excluded from model comparison unless they had positive residual degrees of freedom, "
+                "a full-column-rank Jacobian with condition number at most 10⁶, and no active log₁₀(K) bound. "
                 "ppm columns containing missing values were dropped before fitting. "
                 "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
             ),
@@ -579,8 +663,10 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
     if bootstrap_ci_method == "bca":
         ci_desc = (
-            "The 95% confidence interval was derived from BCa-adjusted bootstrap quantiles, "
-            "with the acceleration term approximated from bootstrap samples for computational efficiency."
+            "The 95% confidence interval was derived from BCa-style adjusted bootstrap quantiles for the "
+            "local warm-start refit estimator, with the acceleration term estimated from leave-one-out "
+            "jackknife fits initialized at the full-data optimum. This avoids claiming a full multistart "
+            "BCa estimator for potentially multimodal objectives."
         )
     else:
         ci_desc = (
@@ -593,6 +679,9 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
         f"{method_desc.get(args.bootstrap_method, '')} "
         f"Bootstrap refits used a small log₁₀(K) start perturbation "
         f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
+        f"A confidence interval was reported only when at least max({MIN_BOOTSTRAP_CI_SUCCESSES}, "
+        f"{MIN_BOOTSTRAP_CI_SUCCESS_RATE:.0%} of requested refits) fits succeeded; otherwise the interval "
+        "and bootstrap-derived standard errors were reported as unavailable. "
         f"{ci_desc}"
         if args.bootstrap > 0
         else "Bootstrap uncertainty was not evaluated in this analysis."
@@ -663,6 +752,11 @@ def build_decisions(
             if np.isfinite(delta_bic) and delta_bic < 2.0:
                 decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
+        if best.bootstrap is not None and not getattr(best.bootstrap, "ci_valid", True):
+            ci_message = str(getattr(best.bootstrap, "ci_message", "")).strip()
+            warning = ci_message or "Bootstrap uncertainty is unavailable for the selected model."
+            decisions.append(f"- {warning}")
+            reasons.append(warning)
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
             k_ci_low, k_ci_high = _bootstrap_k_ci(best)
             if k_ci_low.size > 0 and np.any(

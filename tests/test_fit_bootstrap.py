@@ -109,6 +109,11 @@ def test_bootstrap_excludes_nonfinite_params():
     assert out.n_boot == 2
     assert out.param_samples.shape == (1, 3)
     np.testing.assert_allclose(out.param_samples[0], params + 0.2)
+    assert out.ci_valid is False
+    assert out.ci_method_used == "unavailable"
+    assert "1/2 refits succeeded" in out.ci_message
+    assert np.isnan(out.ci_low).all()
+    assert np.isnan(out.ci_high).all()
 
 
 def test_bootstrap_all_nonconverged_yields_no_samples():
@@ -180,7 +185,7 @@ def test_bootstrap_supports_bca_ci_method():
         params=params,
         model=model,
         datasets=[ds],
-        n_boot=5,
+        n_boot=20,
         method="residual",
         ci_method="bca",
         seed=0,
@@ -193,9 +198,81 @@ def test_bootstrap_supports_bca_ci_method():
     )
 
     assert out.ci_method == "bca"
+    assert out.ci_method_used == "bca-local"
+    assert out.ci_valid is True
+    assert out.ci_message == ""
     assert out.ci_low.shape == (1,)
     assert out.ci_high.shape == (1,)
     assert out.ci_low_percentile.shape == (1,)
     assert out.ci_high_percentile.shape == (1,)
     assert out.ci_low_bca.shape == (1,)
     assert out.ci_high_bca.shape == (1,)
+    assert np.isfinite(out.ci_low_bca).all()
+    assert np.isfinite(out.ci_high_bca).all()
+
+
+def test_bca_does_not_silently_fallback_when_jackknife_refit_fails():
+    ds = _make_dataset()
+    model = MODEL_SPECS["11"]
+    params = np.array([4.0, 7.0, 7.5], dtype=float)
+    call_count = {"n": 0}
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        call_count["n"] += 1
+        if call_count["n"] > 20:
+            return params0, _DummyResult(success=False)
+        return params0 + np.array([0.05, 0.0, 0.0]), _DummyResult(success=True)
+
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
+        n_boot=20,
+        method="residual",
+        ci_method="bca",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+    )
+
+    assert out.n_success == 20
+    assert out.ci_valid is False
+    assert out.ci_method_used == "unavailable"
+    assert "jackknife refits" in out.ci_message
+    assert np.isnan(out.ci_low).all()
+    assert np.isnan(out.ci_high).all()
+    assert np.isfinite(out.ci_low_percentile).all()
+    assert np.isfinite(out.ci_high_percentile).all()
+
+
+def test_nonbinding_bootstrap_se_uses_same_minimum_success_contract():
+    ds = _make_dataset()
+    model = MODEL_SPECS["nb"]
+    params = np.array([7.0, 0.5], dtype=float)
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        return params0, _DummyResult(success=True)
+
+    out = bootstrap_params(
+        params=params,
+        model=model,
+        datasets=[ds],
+        n_boot=2,
+        method="residual",
+        seed=0,
+        logk_bounds=None,
+        logk_jitter=0.0,
+        predict_all_fn=_finite_predict_all,
+        fit_with_initial_fn=fake_fit_with_initial,
+        param_bounds_fn=param_bounds,
+        numeric_exceptions=_NUMERIC_EXCEPTIONS,
+    )
+
+    assert out.n_success == 2
+    assert out.ci_valid is False
+    assert out.ci_method_used == "unavailable"
+    assert "Bootstrap uncertainty unavailable" in out.ci_message

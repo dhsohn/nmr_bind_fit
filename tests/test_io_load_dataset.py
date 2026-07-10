@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nmr_bind_fit.io import _compute_equivalents, load_dataset
+from nmr_bind_fit.io import _compute_equivalents, load_dataset, load_datasets
 
 
 def test_load_dataset_drops_incomplete_ppm_column(tmp_path):
@@ -119,6 +119,110 @@ def test_load_dataset_rejects_legacy_host_guest_columns(tmp_path):
     df.to_csv(path, index=False)
 
     with pytest.raises(ValueError, match=r"Expected columns: \[H\]t, \[G\]t"):
+        load_dataset(path)
+
+
+def test_load_dataset_rejects_header_only_input(tmp_path):
+    path = tmp_path / "header_only.csv"
+    path.write_text("[H]t,[G]t,ppm1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contains no data rows"):
+        load_dataset(path)
+
+
+def test_load_dataset_rejects_when_all_rows_have_missing_concentrations(tmp_path):
+    path = tmp_path / "missing_concentrations.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [np.nan, np.nan],
+            "[G]t": [0.0, np.nan],
+            "ppm1": [7.1, 7.2],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="No observations remain after dropping rows"):
+        load_dataset(path)
+
+
+def test_load_dataset_drops_missing_concentration_row_before_ppm_numeric_validation(tmp_path):
+    path = tmp_path / "droppable_placeholder.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [1e-3, np.nan, 1e-3],
+            "[G]t": [0.0, 5e-4, 1e-3],
+            "ppm1": [7.1, "not measured", 7.3],
+        }
+    ).to_csv(path, index=False)
+
+    ds = load_dataset(path)
+
+    assert ds.n_points == 2
+    np.testing.assert_allclose(ds.y[:, 0], [7.1, 7.3])
+
+
+def test_load_dataset_rejects_ppm_columns_without_finite_observations(tmp_path):
+    path = tmp_path / "no_finite_ppm.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [1e-3, 1e-3],
+            "[G]t": [0.0, 1e-3],
+            "ppm1": [np.nan, np.nan],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="No finite ppm observations remain"):
+        load_dataset(path, missing_policy="mask")
+
+
+def test_load_dataset_reports_missing_explicit_ppm_columns(tmp_path):
+    path = tmp_path / "sample.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [1e-3],
+            "[G]t": [0.0],
+            "ppm1": [7.1],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="Specified ppm columns not found: ppm_missing"):
+        load_dataset(path, ppm_cols=["ppm1", "ppm_missing"])
+
+
+def test_load_datasets_rejects_an_explicit_empty_ppm_column_list(tmp_path):
+    path = tmp_path / "sample.csv"
+    pd.DataFrame(
+        {
+            "[H]t": [1e-3],
+            "[G]t": [0.0],
+            "ppm1": [7.1],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="No ppm columns detected"):
+        load_datasets([path], ppm_cols=",")
+
+
+def test_load_dataset_requires_a_regular_existing_file(tmp_path):
+    missing = tmp_path / "missing.csv"
+    with pytest.raises(FileNotFoundError, match="Input file not found"):
+        load_dataset(missing)
+
+    directory = tmp_path / "input_dir"
+    directory.mkdir()
+    with pytest.raises(ValueError, match="not a regular file"):
+        load_dataset(directory)
+
+
+def test_load_dataset_reports_missing_xls_dependency_cleanly(tmp_path, monkeypatch):
+    path = tmp_path / "legacy.xls"
+    path.write_bytes(b"placeholder")
+
+    def fail_read_excel(_path):
+        raise ImportError("xlrd is unavailable")
+
+    monkeypatch.setattr(pd, "read_excel", fail_read_excel)
+
+    with pytest.raises(ValueError, match=r"Reading \.xls files requires.*xlrd"):
         load_dataset(path)
 
 

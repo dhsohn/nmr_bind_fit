@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import brentq
+
+_ROOT_XTOL_REL = 1e-13
+_ROOT_RTOL = 8.0 * np.finfo(float).eps
+_ROOT_MAXITER = 200
 
 
 @dataclass
@@ -33,6 +37,99 @@ def _normalize_failure_mode(failure_mode: str) -> str:
     if failure_mode not in {"fail-fast", "continue"}:
         raise ValueError("failure_mode must be one of: fail-fast, continue")
     return failure_mode
+
+
+def _record_solver_success(stats: Optional[SolverStats]) -> None:
+    if stats is not None:
+        stats.success += 1
+
+
+def _raise_solver_failure(
+    stats: Optional[SolverStats], cause: Optional[BaseException] = None
+) -> None:
+    if stats is not None:
+        stats.fail += 1
+    error = RuntimeError("Equilibrium solver failed.")
+    if cause is None:
+        raise error
+    raise error from cause
+
+
+def _validate_point_inputs(
+    h_tot: float,
+    g_tot: float,
+    k1: float,
+    k2: float,
+    stats: Optional[SolverStats],
+) -> Tuple[float, float, float, float]:
+    try:
+        values = tuple(float(value) for value in (h_tot, g_tot, k1, k2))
+    except (TypeError, ValueError) as exc:
+        _raise_solver_failure(stats, exc)
+
+    h_value, g_value, k1_value, k2_value = values
+    if (
+        not all(math.isfinite(value) for value in values)
+        or h_value < 0.0
+        or g_value < 0.0
+        or k1_value <= 0.0
+        or k2_value <= 0.0
+    ):
+        _raise_solver_failure(stats, ValueError("Invalid equilibrium inputs."))
+    return h_value, g_value, k1_value, k2_value
+
+
+def _solve_free_guest_root(
+    residual: Callable[[float], float],
+    g_tot: float,
+    stats: Optional[SolverStats],
+    tolerance_scale: Optional[float] = None,
+) -> float:
+    """Solve within the physical free-guest interval, including endpoint roots."""
+    lower = 0.0
+    upper = float(g_tot)
+    smallest = float(np.nextafter(0.0, 1.0))
+    scale = upper if tolerance_scale is None else min(upper, tolerance_scale)
+    xtol = max(smallest, _ROOT_XTOL_REL * max(smallest, scale))
+
+    try:
+        f_lower = float(residual(lower))
+        f_upper = float(residual(upper))
+        if not math.isfinite(f_lower) or not math.isfinite(f_upper):
+            raise ValueError("Non-finite equilibrium residual at bracket endpoint.")
+        if f_lower == 0.0:
+            root = lower
+        elif f_upper == 0.0:
+            root = upper
+        else:
+            if f_lower > 0.0 or f_upper < 0.0:
+                raise ValueError("Equilibrium root is not bracketed physically.")
+            root = float(
+                brentq(
+                    residual,
+                    lower,
+                    upper,
+                    xtol=xtol,
+                    rtol=_ROOT_RTOL,
+                    maxiter=_ROOT_MAXITER,
+                )
+            )
+        if not math.isfinite(root) or root < lower or root > upper:
+            raise RuntimeError("Equilibrium root lies outside the physical bracket.")
+    except (FloatingPointError, OverflowError, RuntimeError, ValueError) as exc:
+        _raise_solver_failure(stats, exc)
+
+    _record_solver_success(stats)
+    return root
+
+
+def _free_guest_tolerance_scale(g_tot: float, log_binding_capacity: float) -> float:
+    """Estimate the free-guest scale without moving the physical lower bound."""
+    if log_binding_capacity <= 0.0:
+        return g_tot
+    smallest = float(np.nextafter(0.0, 1.0))
+    log_scale = math.log(g_tot) - log_binding_capacity
+    return math.exp(max(math.log(smallest), log_scale))
 
 
 def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
@@ -97,62 +194,36 @@ def solve_12_point(
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 1:2 binding for a single point via free-guest root finding."""
-    if h_tot <= 0 and g_tot <= 0:
+    h_tot, g_tot, k1, k2 = _validate_point_inputs(h_tot, g_tot, k1, k2, stats)
+    if h_tot == 0.0 and g_tot == 0.0:
+        _record_solver_success(stats)
         return 0.0, 0.0, 0.0, 0.0
-    if g_tot <= 0:
+    if g_tot == 0.0:
+        _record_solver_success(stats)
         return float(h_tot), 0.0, 0.0, 0.0
-
-    with np.errstate(over="ignore", invalid="ignore"):
-        A = k1 * k2
-        prod = A * (2.0 * h_tot - g_tot)
-    # Switch to a rescaled polynomial when k1*k2 overflows.
-    use_scaled = not np.isfinite(A) or not np.isfinite(prod)
-
-    if use_scaled:
-        k2_inv = 1.0 / k2 if k2 != 0 else float("inf")
-        k1k2_inv = k2_inv / k1 if k1 != 0 else float("inf")
-        b = k2_inv + (2.0 * h_tot - g_tot)
-        c = k1k2_inv + (h_tot - g_tot) * k2_inv
-        d = -g_tot * k1k2_inv
-
-        def f(g: float) -> float:
-            if not np.isfinite(b) or not np.isfinite(c) or not np.isfinite(d):
-                return float("nan")
-            return ((g + b) * g + c) * g + d
-    else:
-        B = k1 + prod
-        C = 1.0 + k1 * (h_tot - g_tot)
-        D = -g_tot
-
-        def f(g: float) -> float:
-            return ((A * g + B) * g + C) * g + D
-
-    # Adaptive lower bound: estimate minimum free guest under full saturation.
-    with np.errstate(over="ignore"):
-        binding_capacity = k1 * h_tot * (1.0 + 2.0 * k2 * h_tot)
-    if np.isfinite(binding_capacity) and binding_capacity > 0:
-        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
-    else:
-        lower = 1e-300
-    upper = max(g_tot, lower * 10.0)
-
-    try:
-        g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
-        if stats is not None:
-            stats.success += 1
-    except ValueError:
-        if stats is not None:
-            stats.fail += 1
-        raise RuntimeError("Equilibrium solver failed.")
 
     logk1 = _log_or_neg_inf(k1)
     logk2 = _log_or_neg_inf(k2)
-    logg = _log_or_neg_inf(g)
-    log_species = np.array(
-        [0.0, logk1 + logg, logk1 + logk2 + 2.0 * logg],
-        dtype=float,
+    log_h_tot = _log_or_neg_inf(h_tot)
+
+    def species_from_g(g: float) -> Tuple[float, float, float]:
+        logg = _log_or_neg_inf(g)
+        log_species = np.array(
+            [0.0, logk1 + logg, logk1 + logk2 + 2.0 * logg],
+            dtype=float,
+        )
+        return _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 1.0))
+
+    def residual(g: float) -> float:
+        _, hg, hg2 = species_from_g(g)
+        return (g - g_tot) + hg + 2.0 * hg2
+
+    log_capacity = logk1 + log_h_tot + float(
+        np.logaddexp(0.0, math.log(2.0) + logk2 + log_h_tot)
     )
-    h, hg, hg2 = _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 1.0))
+    tolerance_scale = _free_guest_tolerance_scale(g_tot, log_capacity)
+    g = _solve_free_guest_root(residual, g_tot, stats, tolerance_scale)
+    h, hg, hg2 = species_from_g(g)
 
     return h, g, hg, hg2
 
@@ -165,68 +236,50 @@ def solve_21_point(
     stats: Optional[SolverStats] = None,
 ) -> Tuple[float, float, float, float]:
     """Solve 2:1 binding for a single point via free-guest root finding."""
-    if h_tot <= 0 and g_tot <= 0:
+    h_tot, g_tot, k1, k2 = _validate_point_inputs(h_tot, g_tot, k1, k2, stats)
+    if h_tot == 0.0 and g_tot == 0.0:
+        _record_solver_success(stats)
         return 0.0, 0.0, 0.0, 0.0
-    if g_tot <= 0:
+    if g_tot == 0.0:
+        _record_solver_success(stats)
         return float(h_tot), 0.0, 0.0, 0.0
 
-    def _h_and_bh_from_g(g: float) -> Tuple[float, float]:
+    logk1 = math.log(k1)
+    logk2 = math.log(k2)
+    log_h_tot = _log_or_neg_inf(h_tot)
+
+    def _log_h_from_g(g: float) -> float:
         # Solve for free host using a log-space quadratic to avoid overflow.
-        if g <= 0 or h_tot <= 0:
-            return float(h_tot), float(h_tot)
-        b = 1.0 + k1 * g
-        if not np.isfinite(b) or b <= 0:
-            return 0.0, 0.0
-        c = 8.0 * k1 * k2 * h_tot * g
-        # Log-space evaluation stabilizes the quadratic formula at large K.
-        log_b = np.log(b)
-        log_c = np.log(c) if c > 0 else -np.inf
-        log_discr = np.logaddexp(2.0 * log_b, log_c)
-        log_sqrt = 0.5 * log_discr
-        log_denom = np.logaddexp(log_b, log_sqrt)
-        if not np.isfinite(log_denom):
-            return 0.0, 0.0
-        h = np.exp(np.log(2.0 * h_tot) - log_denom)
-        log_r = log_sqrt - log_b
-        if not np.isfinite(log_r):
-            r = 1.0
-        else:
-            r = np.exp(log_r)
-        b_h = (2.0 * h_tot) / (1.0 + r)
-        return h, b_h
+        if g <= 0.0 or h_tot == 0.0:
+            return log_h_tot
+        logg = math.log(g)
+        log_b = float(np.logaddexp(0.0, logk1 + logg))
+        log_c = math.log(8.0) + logk1 + logk2 + log_h_tot + logg
+        log_sqrt = 0.5 * float(np.logaddexp(2.0 * log_b, log_c))
+        log_two_h = math.log(2.0) + log_h_tot
+        log_denom = float(np.logaddexp(log_b, log_sqrt))
+        return log_two_h - log_denom
 
-    def f(g: float) -> float:
-        h, b_h = _h_and_bh_from_g(g)
-        if not np.isfinite(h) or not np.isfinite(b_h):
-            return float("nan")
-        term1 = b_h - h
-        term2 = 0.5 * (h_tot - b_h)
-        return g + term1 + term2 - g_tot
+    def species_from_g(g: float) -> Tuple[float, float, float]:
+        logg = _log_or_neg_inf(g)
+        logh = _log_h_from_g(g)
+        log_species = np.array(
+            [logh, logk1 + logh + logg, logk1 + logk2 + 2.0 * logh + logg],
+            dtype=float,
+        )
+        return _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 2.0))
 
-    # Adaptive lower bound: estimate minimum free guest under full saturation.
-    with np.errstate(over="ignore"):
-        binding_capacity = k1 * h_tot * (1.0 + k2 * h_tot)
-    if np.isfinite(binding_capacity) and binding_capacity > 0:
-        lower = max(1e-300, g_tot / binding_capacity * 1e-6)
-    else:
-        lower = 1e-300
-    upper = max(g_tot, lower * 10.0)
+    def residual(g: float) -> float:
+        _, hg, h2g = species_from_g(g)
+        return (g - g_tot) + hg + h2g
 
-    try:
-        g = brentq(f, lower, upper, xtol=1e-50, rtol=1e-15)
-        if stats is not None:
-            stats.success += 1
-    except ValueError:
-        if stats is not None:
-            stats.fail += 1
-        raise RuntimeError("Equilibrium solver failed.")
+    log_capacity = logk1 + log_h_tot + float(
+        np.logaddexp(0.0, logk2 + log_h_tot)
+    )
+    tolerance_scale = _free_guest_tolerance_scale(g_tot, log_capacity)
+    g = _solve_free_guest_root(residual, g_tot, stats, tolerance_scale)
 
-    # Derive species directly from the root decomposition so both
-    # host and guest mass balances hold by construction of f(g)=0.
-    h_raw, b_h = _h_and_bh_from_g(g)
-    h = max(0.0, h_raw)
-    hg = max(0.0, b_h - h_raw)
-    h2g = max(0.0, 0.5 * (h_tot - b_h))
+    h, hg, h2g = species_from_g(g)
 
     return h, g, hg, h2g
 
@@ -250,9 +303,12 @@ def solve_12(
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
         stats.points += 1
+        fail_before = stats.fail
         try:
             h_i, g_i, hg_i, hg2_i = solve_12_point(h0, g0, k1, k2, stats=stats)
         except RuntimeError:
+            if stats.fail == fail_before:
+                stats.fail += 1
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue
@@ -284,9 +340,12 @@ def solve_21(
     stats = SolverStats()
     for i, (h0, g0) in enumerate(zip(h_tot, g_tot)):
         stats.points += 1
+        fail_before = stats.fail
         try:
             h_i, g_i, hg_i, h2g_i = solve_21_point(h0, g0, k1, k2, stats=stats)
         except RuntimeError:
+            if stats.fail == fail_before:
+                stats.fail += 1
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue

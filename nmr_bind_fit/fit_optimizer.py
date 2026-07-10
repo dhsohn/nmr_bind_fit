@@ -11,6 +11,43 @@ from scipy.optimize import OptimizeResult, least_squares
 from .io import Dataset
 from .models import ModelSpec
 
+MAX_JACOBIAN_CONDITION = 1e6
+
+
+def jacobian_rank_and_condition(result: OptimizeResult, parameter_count: int) -> Tuple[int, float]:
+    """Return raw-Jacobian rank and condition number for fit diagnostics."""
+    jacobian = getattr(result, "jac", None)
+    if jacobian is None:
+        return 0, float("inf")
+    if hasattr(jacobian, "toarray"):
+        jacobian = jacobian.toarray()
+    values = np.asarray(jacobian, dtype=float)
+    if values.ndim != 2 or values.shape[1] != parameter_count or not np.all(np.isfinite(values)):
+        return 0, float("inf")
+    try:
+        singular_values = np.linalg.svd(values, compute_uv=False)
+        rank = int(np.linalg.matrix_rank(values))
+    except np.linalg.LinAlgError:
+        return 0, float("inf")
+    if singular_values.size == 0 or singular_values[-1] <= 0:
+        return rank, float("inf")
+    return rank, float(singular_values[0] / singular_values[-1])
+
+
+def optimizer_result_is_identifiable(
+    result: OptimizeResult,
+    parameter_count: int,
+    n_logk: int,
+) -> bool:
+    """Require a full-rank, well-conditioned fit away from logK bounds."""
+    if getattr(result, "jac", None) is None:
+        return True
+    rank, condition = jacobian_rank_and_condition(result, parameter_count)
+    if rank < parameter_count or not np.isfinite(condition) or condition > MAX_JACOBIAN_CONDITION:
+        return False
+    active_mask = np.asarray(getattr(result, "active_mask", np.zeros(parameter_count)), dtype=int)
+    return bool(active_mask.size >= n_logk and not np.any(active_mask[:n_logk]))
+
 
 def param_bounds(
     params0: np.ndarray,
@@ -108,7 +145,11 @@ def select_best_multistart(
         except numeric_exceptions:
             continue
         rss = float(np.sum(res.fun**2))
-        if bool(getattr(res, "success", False)):
+        if bool(getattr(res, "success", False)) and optimizer_result_is_identifiable(
+            res,
+            params.size,
+            model.n_logk,
+        ):
             if best_success_rss is None or rss < best_success_rss:
                 best_success_rss = rss
                 best_success_params = params

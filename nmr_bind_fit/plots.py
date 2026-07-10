@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import List, Tuple
 
@@ -43,6 +44,12 @@ _CLR_DATA = "#2b2d42"
 _CLR_FIT = "#d90429"
 _CLR_ZERO = "#94a3b8"
 _CLR_HIST = "#334155"
+
+
+def _peak_file_token(peak: str, index: int) -> str:
+    """Return a bounded, collision-resistant filesystem token for a peak label."""
+    digest = hashlib.sha256(str(peak).encode("utf-8")).hexdigest()[:16]
+    return f"peak-{index:04d}-{digest}"
 
 
 def _style_axes(ax: plt.Axes) -> None:
@@ -162,8 +169,9 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"isotherm_{peak}.png"
-        pdf_path = out_dir / f"isotherm_{peak}.pdf"
+        peak_token = _peak_file_token(peak, i + 1)
+        png_path = out_dir / f"isotherm_{peak_token}.png"
+        pdf_path = out_dir / f"isotherm_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
@@ -187,8 +195,9 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"residual_{peak}.png"
-        pdf_path = out_dir / f"residual_{peak}.pdf"
+        peak_token = _peak_file_token(peak, i + 1)
+        png_path = out_dir / f"residual_{peak_token}.png"
+        pdf_path = out_dir / f"residual_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files

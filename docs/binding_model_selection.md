@@ -95,8 +95,9 @@ data that do not in fact support binding — the kind of false positive examined
 
 - **Method**: nonlinear least squares (`scipy.optimize.least_squares`, Trust Region Reflective).
 - **1:1**: equilibrium solved analytically (closed-form quadratic).
-- **1:2 / 2:1**: solved point-by-point with Brent's method
-  (`scipy.optimize.brentq`, `xtol=1e-50`, `rtol=1e-15`). The full mass-balance polynomial is
+- **1:2 / 2:1**: solved point-by-point with Brent's method over the physical free-guest
+  interval `[0, G_tot]` (`scipy.optimize.brentq`, scale-adaptive absolute tolerance,
+  `rtol=8·eps`, `maxiter=200`). The full mass-balance relation is
   solved at every point — the simplifying approximation that free guest equals total guest is
   *not* used — in line with the rigorous equilibrium treatment of Hargrove et al. (2010).
 - **K parameterization**: estimated as $\log_{10}(K)$ and **constrained to [0, 12]**
@@ -106,6 +107,9 @@ data that do not in fact support binding — the kind of false positive examined
 - **Multistart**: fits are launched from a grid of $\log_{10}K$ starting values to avoid
   local minima; among successful fits, the solution with the lowest RSS is retained
   (`select_best_multistart` in `nmr_bind_fit/fit_optimizer.py`).
+- **Identifiability gate**: a fit is excluded from model comparison unless it has positive
+  residual degrees of freedom, a full-column-rank optimizer Jacobian with condition number
+  at most $10^6$, and no fitted $\log_{10}K$ value on an active optimization bound.
 - **Missing data**: rows with missing host/guest concentrations are dropped; any ppm column
   containing missing values is excluded entirely (remaining peaks retained).
 - **Solver failures**: per-point solver failures in 1:2/2:1 use fail-fast behavior; penalty
@@ -212,9 +216,12 @@ estimation methods advocated by Hibbert and Thordarson (2016).
 
 - Iterations via `--bootstrap` (default 1000); resampling via `--bootstrap-method`
   (`residual` default / `parametric` / `points`).
-- CI method: percentile (2.5th/97.5th, default) or BCa (`--bootstrap-ci-method bca`). The
-  current BCa implementation approximates the acceleration term from bootstrap samples for
-  computational efficiency.
+- CI method: percentile (2.5th/97.5th, default) or BCa-style local refitting
+  (`--bootstrap-ci-method bca`). The acceleration term is estimated from delete-one jackknife
+  refits initialized at the full-data optimum. Because the complete multistart estimator is not
+  rerun for every bootstrap and jackknife sample, reports identify the method as `bca-local`.
+- CI validity: at least 20 successful refits and at least 80% of the requested bootstrap
+  iterations must succeed; otherwise the interval is reported as unavailable.
 - Each bootstrap refit applies a small jitter to the $\log_{10}K$ start to explore the
   objective surface near the optimum.
 
@@ -303,7 +310,7 @@ the lowest BIC, and the model itself should be reconsidered.
 | Model-comparison table (BIC, AICc, RMSE, R², …) | `summary.csv` | Per-model values of the §4 indices |
 | Selection decision and reasons | `decision.txt` | Provisional working model, ΔBIC, warnings (§5) |
 | Combined report | `report.html` | Methods + plots + decision paragraphs |
-| Per-model diagnostics | `model_*/` | Plots, bootstrap histograms, correlation matrix |
+| Per-model diagnostics | `dataset_*/model_*/` | Dataset-scoped plots, bootstrap histograms, correlation matrix |
 
 ---
 

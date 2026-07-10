@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import html
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -26,6 +26,7 @@ class ModelEntry:
     params: List[ParamEntry]
     plots: List[str]
     warnings: List[str]
+    plot_labels: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -70,7 +71,7 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
 
 def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
     if not rows:
-        return
+        raise ValueError("Cannot write summary.csv without at least one successful fit result.")
     fieldnames = list(rows[0].keys())
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

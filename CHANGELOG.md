@@ -25,6 +25,14 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - The CLI now reports expected input and validation errors as a concise message with a nonzero exit status instead of an uncaught traceback.
 - `fit_models` now documents its parameters and defaults the optional ones, so it can be used as a library entry point with only datasets, model names, and log10(K) starts.
 
+### Fixed
+
+- Isolated independent multi-dataset report artifacts so plots and bootstrap files cannot overwrite one another.
+- Rejected underdetermined, rank-deficient, severely ill-conditioned, or bound-limited fits instead of reporting non-identifiable binding constants.
+- Required sufficient successful bootstrap refits before reporting confidence intervals and replaced bootstrap-sample acceleration with explicitly labeled local-refit BCa jackknife estimates.
+- Hardened 1:2 and 2:1 equilibrium bracketing and convergence behavior across extreme valid inputs.
+- Added early input/configuration validation and nonzero CLI failures when no candidate model succeeds.
+
 ### Removed
 
 - Removed the `--concentration-unit` flag, which only relabeled report text while the fit and `K` bounds used raw numeric values. Supply concentrations in molar (M) instead.

@@ -106,6 +106,32 @@ def test_select_best_multistart_skips_numeric_exception_and_keeps_success():
     assert res.message == "converged"
 
 
+def test_select_best_multistart_prefers_identifiable_success():
+    call_count = {"n": 0}
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return params0, OptimizeResult(
+                success=True,
+                fun=np.array([1.0]),
+                jac=np.zeros((3, params0.size)),
+                message="rank deficient",
+            )
+        return params0, OptimizeResult(
+            success=True,
+            fun=np.array([2.0]),
+            jac=np.eye(params0.size),
+            message="identifiable",
+        )
+
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
+
+    assert params is not None
+    assert res is not None
+    assert res.message == "identifiable"
+
+
 def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
     ds = _make_dataset()
     real_fit_model = fit.fit_model
