@@ -208,6 +208,17 @@ def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
     assert results[1].model.name == "nb"
 
 
+@pytest.mark.parametrize("start", [309.0, -400.0])
+def test_fit_models_rejects_nonrepresentable_logk_starts_early(start):
+    with pytest.raises(ValueError, match="positive finite binding constants"):
+        fit.fit_models(
+            [_make_dataset()],
+            ["11"],
+            logk_starts=[start],
+            logk_bounds=None,
+        )
+
+
 def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
     ds1 = _make_dataset()
     ds2 = _make_dataset()

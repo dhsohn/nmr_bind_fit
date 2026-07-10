@@ -83,6 +83,7 @@ class FitResultLike(Protocol):
     dof: int
     jacobian_rank: int
     jacobian_condition: float
+    jacobian_logk_sensitivity: float
     residual_diagnostics: dict
     species: List[SpeciesLike]
     residuals: List[np.ndarray]

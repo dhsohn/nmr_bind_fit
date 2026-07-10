@@ -22,6 +22,66 @@ def test_solve_11_mass_balance():
     np.testing.assert_allclose(species.g + species.hg, g0, rtol=1e-6, atol=1e-12)
 
 
+def test_solve_11_preserves_dilute_weak_binding_complex():
+    species = solve_11(
+        np.array([1e-3], dtype=float),
+        np.array([1e-14], dtype=float),
+        1.0,
+    )
+
+    assert species.hg[0] > 0.0
+    np.testing.assert_allclose(species.hg[0], 9.99000999000989e-18, rtol=1e-12, atol=0.0)
+
+
+def test_solve_11_handles_extremely_small_positive_k_without_overflow():
+    species = solve_11(
+        np.array([1e-3], dtype=float),
+        np.array([1e-3], dtype=float),
+        1e-200,
+    )
+
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    assert np.all(np.isfinite(species.hg))
+    np.testing.assert_allclose(species.hg[0], 1e-206, rtol=1e-12, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    "h_tot,g_tot,k,expected_hg",
+    [
+        (1e297, 1e-27, 1e292, 1e-27),
+        (1e200, 1e-200, 1e200, 1e-200),
+        (1e297, 1e-27, 1e-292, 1e-27),
+        (1e-27, 1e297, 1e-292, 1e-27),
+    ],
+)
+def test_solve_11_preserves_limiting_species_across_disparate_scales(
+    h_tot,
+    g_tot,
+    k,
+    expected_hg,
+):
+    species = solve_11(np.array([h_tot]), np.array([g_tot]), k)
+
+    np.testing.assert_allclose(species.hg[0], expected_hg, rtol=1e-5, atol=0.0)
+    assert 0.0 <= species.hg[0] <= min(h_tot, g_tot)
+
+
+@pytest.mark.parametrize("k", [0.0, -1.0, np.nan, np.inf])
+def test_solve_11_rejects_invalid_k_domain(k):
+    with pytest.raises(ValueError, match="positive and finite"):
+        solve_11(np.array([1e-3]), np.array([1e-3]), k)
+
+
+def test_solve_11_rejects_invalid_total_arrays():
+    with pytest.raises(ValueError, match="matching shape"):
+        solve_11(np.array([1e-3, 2e-3]), np.array([1e-3]), 1e4)
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        solve_11(np.array([np.nan]), np.array([1e-3]), 1e4)
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        solve_11(np.array([1e-3]), np.array([-1e-3]), 1e4)
+
+
 def test_solve_12_mass_balance():
     # Mass balance should hold for the 1:2 solver across points.
     h0 = np.array([1e-3, 1e-3])
@@ -273,6 +333,38 @@ def test_solve_21_converges_for_small_guest_case_that_exceeded_default_maxiter()
     assert 0.0 <= g <= g_tot
     np.testing.assert_allclose(h + hg + 2.0 * h2g, h_tot, rtol=1e-10, atol=1e-15)
     np.testing.assert_allclose(g + hg + h2g, g_tot, rtol=1e-10, atol=1e-18)
+
+
+@pytest.mark.parametrize("solver", [solve_12_point, solve_21_point])
+@pytest.mark.parametrize("k", [1e100, 1e200, 1e300])
+def test_point_solvers_adapt_iteration_budget_for_extreme_finite_constants(solver, k):
+    h, g, hg, complex_2 = solver(1.0, 1.0, k, k)
+
+    assert np.all(np.isfinite([h, g, hg, complex_2]))
+    if solver is solve_12_point:
+        host_balance = h + hg + complex_2
+        guest_balance = g + hg + 2.0 * complex_2
+    else:
+        host_balance = h + hg + 2.0 * complex_2
+        guest_balance = g + hg + complex_2
+    np.testing.assert_allclose(host_balance, 1.0, rtol=1e-12, atol=1e-15)
+    np.testing.assert_allclose(guest_balance, 1.0, rtol=1e-12, atol=1e-15)
+
+
+def test_solve_21_handles_free_guest_below_smallest_representable_float():
+    h_tot = 0.0034637557380160595
+    g_tot = 4.669019767985327e-08
+    h, g, hg, h2g = solve_21_point(
+        h_tot,
+        g_tot,
+        4.267560963643155e263,
+        6.641208289680381e212,
+    )
+
+    assert g == 0.0
+    assert np.all(np.isfinite([h, g, hg, h2g]))
+    np.testing.assert_allclose(h + hg + 2.0 * h2g, h_tot, rtol=1e-12, atol=1e-18)
+    np.testing.assert_allclose(g + hg + h2g, g_tot, rtol=1e-12, atol=1e-20)
 
 
 @pytest.mark.parametrize("solver", [solve_12_point, solve_21_point])

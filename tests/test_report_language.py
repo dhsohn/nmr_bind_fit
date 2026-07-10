@@ -147,7 +147,8 @@ def test_build_methods_sections_uses_brent_and_molar_k_units():
     assert "scipy.optimize.brentq" in content
     assert "physical free-guest bracket [0, [G]ₜ]" in content
     assert "scale-adaptive xtol = 10⁻¹³" in content
-    assert "rtol = 8 machine epsilons, maxiter = 200" in content
+    assert "rtol = 8 machine epsilons" in content
+    assert "bracket-scale-adaptive iteration budget with a minimum of 200" in content
     assert "condition number at most 10⁶" in content
     assert "no active log₁₀(K) bound" in content
     assert "M⁻¹" in content
@@ -169,7 +170,9 @@ def test_build_methods_sections_mentions_bca_when_selected():
     assert "BCa-style adjusted bootstrap quantiles" in uq_section["content"]
     assert "local warm-start refit estimator" in uq_section["content"]
     assert "leave-one-out jackknife fits" in uq_section["content"]
-    assert "max(20, 80% of requested refits)" in uq_section["content"]
+    assert "95% profile-likelihood RSS window" in uq_section["content"]
+    assert "at least 20 refits were requested" in uq_section["content"]
+    assert "every requested pseudo-dataset yielded an uncensored acceptable refit" in uq_section["content"]
 
 
 def test_build_summary_row_uses_selected_ci_and_reports_logk_se():

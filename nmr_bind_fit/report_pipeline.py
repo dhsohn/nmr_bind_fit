@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
-from collections import Counter
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
-from .fit_bootstrap import MIN_BOOTSTRAP_CI_SUCCESS_RATE, MIN_BOOTSTRAP_CI_SUCCESSES
+from .fit_bootstrap import (
+    BOOTSTRAP_COMPETITIVE_CONFIDENCE,
+    MIN_BOOTSTRAP_CI_SUCCESSES,
+)
 from .models import ModelSpec, split_params_multi
 from .plots import (
     plot_bootstrap_hist,
@@ -43,6 +45,7 @@ STATS_LABELS = {
     "dof": "Residual degrees of freedom",
     "jacobian_rank": "Jacobian rank",
     "jacobian_condition": "Jacobian condition number",
+    "jacobian_logk_sensitivity": "Minimum dimensionless logK RMS sensitivity",
     "R2": "Coefficient of determination (mean per-peak)",
     "R2_per_peak": "R² per peak",
     "RSS": "Residual sum of squares",
@@ -125,30 +128,12 @@ def _safe_path_token(value: str) -> str:
 
 
 def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
-    # Preserve distinct dataset directories even when labels sanitize to the same token.
-    safe_labels = [_safe_path_token(label) for label in labels]
-    counts = Counter(safe_labels)
-    used: set[str] = set()
-    tokens: Dict[str, str] = {}
-
-    for idx, (label, safe) in enumerate(zip(labels, safe_labels), start=1):
-        candidates = []
-        if counts[safe] == 1:
-            candidates.append(safe)
-        candidates.append(f"{idx:02d}_{safe}")
-
-        token = next((candidate for candidate in candidates if candidate not in used), "")
-        if not token:
-            suffix = 1
-            token = f"{idx:02d}_{safe}_{suffix}"
-            while token in used:
-                suffix += 1
-                token = f"{idx:02d}_{safe}_{suffix}"
-
-        used.add(token)
-        tokens[label] = token
-
-    return tokens
+    # Always include the ordinal so labels that differ only by case remain
+    # distinct on the case-insensitive filesystems common on macOS and Windows.
+    return {
+        label: f"{idx:02d}_{_safe_path_token(label)}"
+        for idx, label in enumerate(labels, start=1)
+    }
 
 
 def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
@@ -569,6 +554,9 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
     jacobian_condition = getattr(res, "jacobian_condition", None)
     if jacobian_condition is not None:
         stats_base["jacobian_condition"] = f"{float(jacobian_condition):.6g}"
+    jacobian_logk_sensitivity = getattr(res, "jacobian_logk_sensitivity", None)
+    if jacobian_logk_sensitivity is not None and np.isfinite(jacobian_logk_sensitivity):
+        stats_base["jacobian_logk_sensitivity"] = f"{float(jacobian_logk_sensitivity):.6g}"
     if res.bootstrap is not None:
         n_success = getattr(res.bootstrap, "n_success", None)
         n_boot = getattr(res.bootstrap, "n_boot", None)
@@ -770,11 +758,15 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
                 "The 1:2 and 2:1 equilibria were solved numerically point-by-point using Brent's method "
                 "over the physical free-guest bracket [0, [G]ₜ] (scipy.optimize.brentq; "
                 "scale-adaptive xtol = 10⁻¹³ times the estimated free-guest scale, "
-                "rtol = 8 machine epsilons, maxiter = 200). "
+                "rtol = 8 machine epsilons, and a bracket-scale-adaptive iteration budget with a minimum of 200). "
                 "Binding constants were parameterized as log₁₀(K) and constrained to [0, 12] "
                 f"(K ∈ [1, 10¹²] {k_unit}) during optimization to ensure stable, physically meaningful estimation. "
+                "Residuals were divided by one global observed-response scale during optimization, which leaves "
+                "the least-squares minimum and relative residual weights unchanged while making termination "
+                "behavior invariant to the response unit. "
                 "Fits were excluded from model comparison unless they had positive residual degrees of freedom, "
-                "a full-column-rank Jacobian with condition number at most 10⁶, and no active log₁₀(K) bound. "
+                "a full-column-rank dimensionless Jacobian with condition number at most 10⁶, minimum dimensionless "
+                "log₁₀(K) RMS sensitivity of at least 10⁻⁴, and no active log₁₀(K) bound. "
                 "ppm columns containing missing or non-finite values were dropped before fitting. "
                 "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
             ),
@@ -845,9 +837,12 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
         f"{method_desc.get(args.bootstrap_method, '')} "
         f"Bootstrap refits used a small log₁₀(K) start perturbation "
         f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
-        f"A confidence interval was reported only when at least max({MIN_BOOTSTRAP_CI_SUCCESSES}, "
-        f"{MIN_BOOTSTRAP_CI_SUCCESS_RATE:.0%} of requested refits) fits succeeded; otherwise the interval "
-        "and bootstrap-derived standard errors were reported as unavailable. "
+        f"Each pseudo-dataset was fitted from the perturbed and full-data-optimum starts; a draw was "
+        f"treated as censored if a non-identifiable solution was competitive within the "
+        f"{BOOTSTRAP_COMPETITIVE_CONFIDENCE:.0%} profile-likelihood RSS window. "
+        f"A confidence interval was reported only when at least {MIN_BOOTSTRAP_CI_SUCCESSES} refits were "
+        "requested and every requested pseudo-dataset yielded an uncensored acceptable refit; otherwise "
+        "the interval and bootstrap-derived standard errors were reported as unavailable. "
         f"{ci_desc}"
         if args.bootstrap > 0
         else "Bootstrap uncertainty was not evaluated in this analysis."

@@ -13,7 +13,9 @@ from .fit_bootstrap import bootstrap_params as _bootstrap_params_impl
 from .fit_criteria import information_criteria
 from .fit_optimizer import (
     MAX_JACOBIAN_CONDITION,
+    MIN_LOGK_RMS_SENSITIVITY,
     build_logk_grid,
+    jacobian_logk_rms_sensitivity,
     jacobian_rank_and_condition,
     param_bounds,
     select_best_multistart,
@@ -41,8 +43,6 @@ class FitResult:
     n: int
     p: int
     dof: int
-    jacobian_rank: int
-    jacobian_condition: float
     y_pred: List[np.ndarray]
     species: List
     residuals: List[np.ndarray]
@@ -50,6 +50,9 @@ class FitResult:
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
     logk_bounds: Optional[Tuple[float, float]] = None
+    jacobian_rank: int = 0
+    jacobian_condition: float = float("inf")
+    jacobian_logk_sensitivity: float = float("nan")
 
 
 class ModelFitError(RuntimeError):
@@ -370,6 +373,16 @@ def _validate_fit_options(
         raise ValueError("logk_starts must include at least one value for binding models")
     if starts.size > 0 and (starts.ndim != 1 or not np.all(np.isfinite(starts))):
         raise ValueError("logk_starts must contain only finite values")
+    if binding_requested:
+        for value in starts:
+            try:
+                converted = 10.0 ** float(value)
+            except OverflowError as exc:
+                raise ValueError(
+                    "logk_starts must convert to positive finite binding constants"
+                ) from exc
+            if not np.isfinite(converted) or converted <= 0.0:
+                raise ValueError("logk_starts must convert to positive finite binding constants")
 
     if logk_bounds is not None:
         if len(logk_bounds) != 2:
@@ -377,6 +390,15 @@ def _validate_fit_options(
         low, high = float(logk_bounds[0]), float(logk_bounds[1])
         if not np.isfinite(low) or not np.isfinite(high) or low >= high:
             raise ValueError("logk_bounds must be finite and strictly increasing")
+        if binding_requested:
+            try:
+                converted_bounds = (10.0 ** low, 10.0 ** high)
+            except OverflowError as exc:
+                raise ValueError(
+                    "logk_bounds must convert to positive finite binding constants"
+                ) from exc
+            if any(not np.isfinite(value) or value <= 0.0 for value in converted_bounds):
+                raise ValueError("logk_bounds must convert to positive finite binding constants")
 
 
 def _failed_fit_result(
@@ -388,6 +410,7 @@ def _failed_fit_result(
     species: Optional[List] = None,
     jacobian_rank: int = 0,
     jacobian_condition: float = float("inf"),
+    jacobian_logk_sensitivity: float = float("nan"),
     logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     n = _total_observations(datasets)
@@ -411,6 +434,7 @@ def _failed_fit_result(
         dof=dof,
         jacobian_rank=jacobian_rank,
         jacobian_condition=jacobian_condition,
+        jacobian_logk_sensitivity=jacobian_logk_sensitivity,
         y_pred=[],
         species=species if species is not None else [],
         residuals=[],
@@ -472,19 +496,45 @@ def _build_successful_fit_result(
     n = _total_observations(datasets)
     p = int(len(best_params))
     dof = int(n - p)
-    jacobian_rank, jacobian_condition = jacobian_rank_and_condition(best_res, p)
+    jacobian_rank, jacobian_condition = jacobian_rank_and_condition(
+        best_res,
+        p,
+        model,
+        datasets,
+    )
+    jacobian_logk_sensitivity = jacobian_logk_rms_sensitivity(
+        best_res,
+        p,
+        model.n_logk,
+        model,
+        datasets,
+    )
     active_mask = np.asarray(getattr(best_res, "active_mask", np.zeros(p)), dtype=int)
     logk_at_bound = bool(active_mask.size >= model.n_logk and np.any(active_mask[: model.n_logk]))
+    logk_insensitive = bool(
+        model.n_logk > 0
+        and (
+            not np.isfinite(jacobian_logk_sensitivity)
+            or jacobian_logk_sensitivity < MIN_LOGK_RMS_SENSITIVITY
+        )
+    )
     if (
         jacobian_rank < p
         or not np.isfinite(jacobian_condition)
         or jacobian_condition > MAX_JACOBIAN_CONDITION
         or logk_at_bound
+        or logk_insensitive
     ):
         if jacobian_rank < p:
             detail = f"Jacobian rank {jacobian_rank} < {p} fitted parameters"
         elif logk_at_bound:
             detail = "one or more fitted logK values are on an optimization bound"
+        elif logk_insensitive:
+            detail = (
+                f"minimum dimensionless logK RMS sensitivity "
+                f"{jacobian_logk_sensitivity:.6g} is below "
+                f"{MIN_LOGK_RMS_SENSITIVITY:.6g}"
+            )
         else:
             detail = (
                 f"Jacobian condition number {jacobian_condition:.6g} exceeds "
@@ -499,6 +549,7 @@ def _build_successful_fit_result(
             species=species_list,
             jacobian_rank=jacobian_rank,
             jacobian_condition=jacobian_condition,
+            jacobian_logk_sensitivity=jacobian_logk_sensitivity,
             logk_bounds=logk_bounds,
         )
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
@@ -553,6 +604,7 @@ def _build_successful_fit_result(
         dof=dof,
         jacobian_rank=jacobian_rank,
         jacobian_condition=jacobian_condition,
+        jacobian_logk_sensitivity=jacobian_logk_sensitivity,
         y_pred=y_pred_list,
         species=species_list,
         residuals=residuals,
@@ -645,7 +697,7 @@ def fit_model(
             solver_failure_mode=solver_failure_mode,
             compute_residual_diagnostics=residual_diagnostics,
         )
-    except RuntimeError as exc:
+    except _NUMERIC_EXCEPTIONS as exc:
         raise ModelFitError(str(exc)) from exc
 
 
@@ -769,6 +821,8 @@ def fit_models(
     Raises:
         ValueError: If model names or fitting options are invalid.
     """
+    if not datasets:
+        raise ValueError("At least one dataset is required.")
     _validate_fit_options(
         model_names,
         logk_starts,

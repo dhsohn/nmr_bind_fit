@@ -7,14 +7,15 @@ from typing import Callable, List, Optional, Tuple, Type
 
 import numpy as np
 from scipy.optimize import OptimizeResult
-from scipy.stats import norm
+from scipy.stats import chi2, norm
 
 from .fit_optimizer import optimizer_result_is_identifiable
 from .io import Dataset
 from .models import ModelSpec
 
 MIN_BOOTSTRAP_CI_SUCCESSES = 20
-MIN_BOOTSTRAP_CI_SUCCESS_RATE = 0.80
+MIN_BOOTSTRAP_CI_SUCCESS_RATE = 1.0
+BOOTSTRAP_COMPETITIVE_CONFIDENCE = 0.95
 # Backward-compatible name retained for callers introduced on main.  The
 # effective requirement is stricter than this floor for n_boot > 25.
 MIN_BOOTSTRAP_CI_SAMPLES = MIN_BOOTSTRAP_CI_SUCCESSES
@@ -31,12 +32,12 @@ class BootstrapResult:
     ci_low_bca: np.ndarray
     ci_high_bca: np.ndarray
     ci_method: str
-    ci_method_used: str
-    ci_valid: bool
-    ci_message: str
     n_success: int
     n_boot: int
     ci_warning: str = ""
+    ci_method_used: str = ""
+    ci_valid: bool = True
+    ci_message: str = ""
 
 
 def _bca_ci(
@@ -99,12 +100,31 @@ def _bootstrap_ci_requirement(n_boot: int) -> int:
 def _bootstrap_ci_status(n_success: int, n_boot: int) -> Tuple[bool, str]:
     required = _bootstrap_ci_requirement(n_boot)
     if n_success < required:
+        if n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES and n_success < n_boot:
+            requirement = (
+                f"all {n_boot} requested refits must succeed so the interval is not "
+                "conditional on optimizer convergence"
+            )
+        else:
+            requirement = f"at least {required} successful refits are required"
         return (
             False,
             f"Bootstrap uncertainty unavailable: {n_success}/{n_boot} refits succeeded; "
-            f"at least {required} successful refits are required.",
+            f"{requirement}.",
         )
     return True, ""
+
+
+def _competitive_objective_tolerance(best_rss: float, dof: int, n_logk: int) -> float:
+    """Return a conservative RSS window for statistically competitive fits."""
+    numerical_tolerance = max(1e-12, abs(best_rss) * 1e-10)
+    if best_rss <= 0.0 or dof <= 0:
+        return numerical_tolerance
+    cutoff = float(chi2.ppf(BOOTSTRAP_COMPETITIVE_CONFIDENCE, max(1, n_logk)))
+    profile_tolerance = cutoff * best_rss / dof
+    if not np.isfinite(profile_tolerance) or profile_tolerance <= 0.0:
+        return numerical_tolerance
+    return max(numerical_tolerance, profile_tolerance)
 
 
 def _residual_bootstrap(
@@ -245,7 +265,13 @@ def accept_bootstrap_fit(
         return False
     if not bool(np.all(np.isfinite(params_fit))):
         return False
-    if not optimizer_result_is_identifiable(res, params_fit.size, model.n_logk):
+    if not optimizer_result_is_identifiable(
+        res,
+        params_fit.size,
+        model.n_logk,
+        model,
+        datasets,
+    ):
         return False
     try:
         y_pred_list, _, _ = predict_all_fn(
@@ -369,31 +395,75 @@ def bootstrap_params(
             )
             boot_datasets.append(boot)
 
-        params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
-        bounds = param_bounds_fn(params0, model, logk_bounds)
-        fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
-        if solver_failure_mode != "fail-fast":
-            fit_kwargs["solver_failure_mode"] = solver_failure_mode
-        try:
-            params_fit, res = fit_with_initial_fn(
+        jittered_start = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
+        starts = [jittered_start]
+        if not np.array_equal(jittered_start, params):
+            # Retry the same pseudo-dataset from the full-data optimum. This
+            # recovers start-induced failures without replacing a failed tail
+            # draw with a newly sampled pseudo-dataset.
+            starts.append(params.copy())
+
+        converged_candidates = []
+        for params0 in starts:
+            bounds = param_bounds_fn(params0, model, logk_bounds)
+            fit_kwargs = {"max_nfev": max_nfev, "bounds": bounds}
+            if solver_failure_mode != "fail-fast":
+                fit_kwargs["solver_failure_mode"] = solver_failure_mode
+            try:
+                params_fit, res = fit_with_initial_fn(
+                    model,
+                    boot_datasets,
+                    params0,
+                    **fit_kwargs,
+                )
+            except numeric_exceptions:
+                continue
+            if not bool(getattr(res, "success", False)) or not np.all(np.isfinite(params_fit)):
+                continue
+            try:
+                candidate_rss = float(np.sum(np.asarray(res.fun, dtype=float) ** 2))
+            except (TypeError, ValueError, FloatingPointError):
+                continue
+            if not np.isfinite(candidate_rss):
+                continue
+            accepted = accept_bootstrap_fit(
+                params_fit,
+                res,
                 model,
                 boot_datasets,
-                params0,
-                **fit_kwargs,
+                predict_all_fn=predict_all_fn,
+                numeric_exceptions=numeric_exceptions,
+                solver_failure_mode=solver_failure_mode,
             )
-        except numeric_exceptions:
+            converged_candidates.append((candidate_rss, accepted, params_fit))
+
+        if not converged_candidates:
             continue
-        if not accept_bootstrap_fit(
-            params_fit,
-            res,
-            model,
-            boot_datasets,
-            predict_all_fn=predict_all_fn,
-            numeric_exceptions=numeric_exceptions,
-            solver_failure_mode=solver_failure_mode,
-        ):
+        best_rss = min(candidate[0] for candidate in converged_candidates)
+        boot_valid = int(
+            sum(np.count_nonzero(np.isfinite(ds.y)) for ds in boot_datasets)
+        )
+        objective_tolerance = _competitive_objective_tolerance(
+            best_rss,
+            boot_valid - len(params),
+            model.n_logk,
+        )
+        competitive = [
+            candidate
+            for candidate in converged_candidates
+            if candidate[0] <= best_rss + objective_tolerance
+        ]
+        # A statistically competitive converged solution that is bound-limited,
+        # ill-conditioned, or otherwise invalid is evidence of a censored
+        # pseudo-dataset tail. Do not replace it with an interior basin whose
+        # objective is indistinguishable at the 95% profile-likelihood scale.
+        if any(not candidate[1] for candidate in competitive):
             continue
-        param_samples.append(params_fit)
+        accepted_candidates = [candidate for candidate in competitive if candidate[1]]
+        if not accepted_candidates:
+            continue
+        accepted_params = min(accepted_candidates, key=lambda candidate: candidate[0])[2]
+        param_samples.append(accepted_params)
         n_success += 1
 
     if not param_samples:
@@ -413,11 +483,11 @@ def bootstrap_params(
     else:
         ci_method_used = "unavailable"
 
-    if ci_valid and logk_samples.size > 0:
+    if logk_samples.shape[0] >= MIN_BOOTSTRAP_CI_SUCCESSES and logk_samples.size > 0:
         ci_low_percentile = np.percentile(logk_samples, 2.5, axis=0)
         ci_high_percentile = np.percentile(logk_samples, 97.5, axis=0)
 
-        if ci_method == "bca":
+        if ci_valid and ci_method == "bca":
             jackknife_samples, jackknife_expected = _jackknife_param_samples(
                 params=params,
                 model=model,

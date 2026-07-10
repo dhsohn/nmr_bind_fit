@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from nmr_bind_fit.fit import _param_names_multi, fit_models
-from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.io import Dataset, load_dataset
 from nmr_bind_fit.models import MODEL_SPECS
 
 
@@ -107,9 +107,66 @@ def test_fit_rejects_practically_flat_high_affinity_solution(start):
     )[0]
 
     assert result.success is False
-    assert "Jacobian condition number" in result.message
-    assert result.jacobian_condition > 1e6
+    assert "dimensionless logK RMS sensitivity" in result.message
+    assert result.jacobian_logk_sensitivity < 1e-4
     assert result.logk_bounds == (0.0, 12.0)
+
+
+@pytest.mark.parametrize(
+    "model_name,filename,starts",
+    [
+        ("11", "synthetic_11.csv", [4.0]),
+        ("12", "synthetic_12.csv", [4.1, 3.2]),
+        ("21", "synthetic_21.csv", [4.0, 3.4]),
+    ],
+)
+def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
+    model_name,
+    filename,
+    starts,
+):
+    source = load_dataset(Path(__file__).parents[1] / "examples" / filename)
+    results = []
+    for scale in (1e-9, 1.0, 1e9):
+        dataset = Dataset(
+            name=source.name,
+            path=source.path,
+            h_tot=source.h_tot,
+            g_tot=source.g_tot,
+            x=source.x,
+            y=source.y * scale,
+            y_cols=source.y_cols,
+            dropped_peaks=source.dropped_peaks,
+        )
+        result = fit_models(
+            [dataset],
+            [model_name],
+            logk_starts=starts,
+            logk_bounds=(0.0, 12.0),
+            max_nfev=2000,
+            bootstrap=0,
+        )[0]
+        assert result.success is True
+        results.append(result)
+
+    reference = results[1]
+    for result in results:
+        np.testing.assert_allclose(
+            result.params[: result.model.n_logk],
+            reference.params[: reference.model.n_logk],
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            result.jacobian_condition,
+            reference.jacobian_condition,
+            rtol=5e-5,
+        )
+        np.testing.assert_allclose(
+            result.jacobian_logk_sensitivity,
+            reference.jacobian_logk_sensitivity,
+            rtol=5e-5,
+        )
 
 
 def test_masked_endpoint_uses_finite_peak_endpoints_for_initialization():

@@ -144,6 +144,13 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert set(entries[0].plot_labels.values()) == {"ppm_H1"}
 
 
+def test_dataset_directory_tokens_are_case_insensitive_safe():
+    tokens = report_pipeline._dataset_dir_tokens(["Sample", "sample"])
+
+    assert tokens == {"Sample": "01_Sample", "sample": "02_sample"}
+    assert len({token.casefold() for token in tokens.values()}) == 2
+
+
 def test_slash_containing_peak_labels_use_safe_unique_files_and_original_captions(tmp_path):
     peak_names = ["ppm/H1", "ppm?H1"]
     ds = _dataset("sample", peak_names)

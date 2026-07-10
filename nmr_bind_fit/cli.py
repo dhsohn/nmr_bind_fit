@@ -121,6 +121,21 @@ def _auto_output_dir(paths: List[Path]) -> Path:
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
 
+def _reserve_output_dir(paths: List[Path]) -> Path:
+    """Atomically reserve a unique output directory for one analysis run."""
+    base = _auto_output_dir(paths)
+    candidate = base
+    suffix = 2
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            candidate = base.with_name(f"{base.name}_{suffix:02d}")
+            suffix += 1
+        else:
+            return candidate
+
+
 def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
     # Build collision-free labels so same-stem files do not overwrite each other.
     labels = [str(getattr(ds, "name", "dataset")) for ds in datasets]
@@ -134,18 +149,10 @@ def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
             labels[idx] = f"{labels[idx]} ({filename})"
 
     counts = Counter(labels)
-    # Second pass: append full path if file names still collide.
-    for idx, ds in enumerate(datasets):
-        if counts[labels[idx]] > 1:
-            path = getattr(ds, "path", None)
-            path_text = str(path) if path is not None else labels[idx]
-            base_name = str(getattr(ds, "name", labels[idx]))
-            labels[idx] = f"{base_name} ({path_text})"
-
-    counts = Counter(labels)
     seen: Dict[str, int] = {}
     deduped: List[str] = []
-    # Final pass: force uniqueness even if the exact same path is repeated.
+    # Second pass: force uniqueness without exposing full input paths in
+    # shareable report labels.
     for label in labels:
         seen[label] = seen.get(label, 0) + 1
         if counts[label] > 1:
@@ -297,8 +304,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
     # Prepare output directory for reports and plots only after at least one
     # model has produced a reportable result.
-    out_dir = _auto_output_dir(paths)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _reserve_output_dir(paths)
 
     summary_rows, model_entries, report_warnings = build_report_artifacts(
         args,
