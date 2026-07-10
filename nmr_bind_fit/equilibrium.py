@@ -293,8 +293,8 @@ def solve_12(
 ) -> SpeciesResult:
     """Solve 1:2 binding across all points; aborts on the first failure."""
     mode = _normalize_failure_mode(failure_mode)
-    h_tot = np.asarray(h_tot, dtype=float)
-    g_tot = np.asarray(g_tot, dtype=float)
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
+    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)
@@ -312,7 +312,7 @@ def solve_12(
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue
-            break
+            raise
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i
@@ -330,8 +330,8 @@ def solve_21(
 ) -> SpeciesResult:
     """Solve 2:1 binding across all points; aborts on the first failure."""
     mode = _normalize_failure_mode(failure_mode)
-    h_tot = np.asarray(h_tot, dtype=float)
-    g_tot = np.asarray(g_tot, dtype=float)
+    k1, k2 = _validate_positive_finite_constants(k1, k2)
+    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)
@@ -349,7 +349,7 @@ def solve_21(
             stats.failed_indices.append(i)
             if mode == "continue":
                 continue
-            break
+            raise
         h[i] = h_i
         g[i] = g_i
         hg[i] = hg_i

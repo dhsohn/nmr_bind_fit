@@ -92,6 +92,48 @@ def test_solve_12_rejects_unknown_failure_mode():
         solve_12(h0, g0, 1e4, 1e3, failure_mode="unknown")
 
 
+@pytest.mark.parametrize("solver", [solve_12, solve_21])
+@pytest.mark.parametrize("k1,k2", [(0.0, 1e3), (1e3, 0.0), (-1.0, 1e3), (np.nan, 1e3)])
+def test_multivalent_solvers_reject_invalid_k_domains(solver, k1, k2):
+    h0 = np.array([1e-3, 1e-3], dtype=float)
+    g0 = np.array([0.0, 5e-4], dtype=float)
+
+    with pytest.raises(ValueError, match="positive and finite"):
+        solver(h0, g0, k1, k2)
+
+
+@pytest.mark.parametrize("solver", [solve_12, solve_21])
+def test_multivalent_solvers_reject_mismatched_array_shapes(solver):
+    h0 = np.array([1e-3, 1e-3], dtype=float)
+    g0 = np.array([0.0], dtype=float)
+
+    with pytest.raises(ValueError, match="matching shape"):
+        solver(h0, g0, 1e4, 1e3)
+
+
+def test_solve_12_fail_fast_raises_on_point_failure(monkeypatch):
+    def fake_solve_12_point(h_tot, g_tot, k1, k2, stats=None):
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(equilibrium, "solve_12_point", fake_solve_12_point)
+
+    h0 = np.array([1e-3], dtype=float)
+    g0 = np.array([5e-4], dtype=float)
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        solve_12(h0, g0, 1e4, 1e3, failure_mode="fail-fast")
+
+
+@pytest.mark.parametrize("solver", [solve_12, solve_21])
+def test_multivalent_solvers_keep_weak_binding_root_bracket(solver):
+    h0 = np.array([1e-9], dtype=float)
+    g0 = np.array([1e-3], dtype=float)
+
+    species = solver(h0, g0, 1.0, 1.0)
+
+    assert np.all(np.isfinite(species.g))
+
+
 HIGH_K_PARAMS = [
     (1e8, 1e6),
     (1e10, 1e8),

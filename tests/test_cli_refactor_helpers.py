@@ -41,6 +41,26 @@ def test_resolve_logk_config_rejects_negative_jitter():
         _resolve_logk_config(args)
 
 
+def test_resolve_logk_config_rejects_nan_k_starts():
+    args = SimpleNamespace(
+        k_starts="nan",
+        bootstrap_logk_jitter=0.1,
+    )
+
+    with pytest.raises(ValueError, match="All K starts must be finite."):
+        _resolve_logk_config(args)
+
+
+def test_resolve_logk_config_rejects_nan_jitter():
+    args = SimpleNamespace(
+        k_starts="10",
+        bootstrap_logk_jitter=float("nan"),
+    )
+
+    with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be finite."):
+        _resolve_logk_config(args)
+
+
 def test_resolve_logk_config_rejects_empty_k_starts_list():
     args = argparse.Namespace(
         k_starts=",",

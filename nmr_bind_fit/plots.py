@@ -157,8 +157,9 @@ def plot_isotherms(
     files: List[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
+    peak_stems = _safe_file_stems(list(ds.y_cols))
 
-    for i, peak in enumerate(ds.y_cols):
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
                    label="Observed", edgecolors="white", linewidths=0.4)
@@ -186,7 +187,8 @@ def plot_residuals(
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
-    for i, peak in enumerate(ds.y_cols):
+    peak_stems = _safe_file_stems(list(ds.y_cols))
+    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
@@ -218,7 +220,13 @@ def plot_bootstrap_hist(
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
                 edgecolor="white", linewidth=0.5)
-        ax.set_xlabel(f"$K$ ({name})" if name != "K" else "$K$")
+        if name == "K":
+            xlabel = r"$K$ (M$^{-1}$)"
+        elif name.startswith("K") and name[1:].isdigit():
+            xlabel = rf"$K_{name[1:]}$ (M$^{{-1}}$)"
+        else:
+            xlabel = f"{name} (M$^{{-1}}$)"
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Count")
         _style_axes(ax)
         fig.tight_layout()
@@ -245,7 +253,7 @@ def plot_fraction_bound(
     ax.scatter(ds.x, f, color=_CLR_DATA, s=28, zorder=3,
                edgecolors="white", linewidths=0.4)
     ax.set_xlabel(r"$[\mathrm{G}]_{\mathrm{t}}$ / $[\mathrm{H}]_{\mathrm{t}}$")
-    ax.set_ylabel("Fraction Bound")
+    ax.set_ylabel("Host Fraction Bound")
     ax.set_ylim(-0.02, 1.05)
     _style_axes(ax)
     fig.tight_layout()

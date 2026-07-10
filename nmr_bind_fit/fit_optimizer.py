@@ -126,7 +126,7 @@ def select_best_multistart(
     numeric_exceptions: Tuple[Type[BaseException], ...],
     solver_failure_mode: str = "fail-fast",
 ) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
-    """Fit from every grid start and return the lowest-RSS successful result."""
+    """Fit from every grid start, preferring converged fits over failed starts."""
     best_success_params = None
     best_success_res = None
     best_success_rss = None

@@ -18,3 +18,11 @@ def test_residual_diagnostics_returns_shapiro_and_dw():
 def test_residual_diagnostics_handles_empty_input():
     out = residual_diagnostics(np.array([np.nan, np.inf, -np.inf], dtype=float))
     assert out == {}
+
+
+def test_residual_diagnostics_can_suppress_durbin_watson_for_pooled_input():
+    residuals = np.array([0.1, -0.1, 0.05, -0.05], dtype=float)
+
+    out = residual_diagnostics(residuals, include_durbin_watson=False)
+
+    assert "durbin_watson" not in out

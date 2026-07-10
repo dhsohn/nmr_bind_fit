@@ -33,6 +33,7 @@ class BootstrapResult:
     ci_message: str
     n_success: int
     n_boot: int
+    ci_warning: str = ""
 
 
 def _bca_ci(
@@ -113,8 +114,16 @@ def _residual_bootstrap(
     col_means = np.nanmean(residuals, axis=0, keepdims=True)
     col_means = np.where(np.isfinite(col_means), col_means, 0.0)
     centered = residuals - col_means
-    centered[~np.isfinite(centered)] = 0.0
     resampled = centered[idx, :]
+    for col_idx in range(centered.shape[1]):
+        finite_residuals = centered[:, col_idx][np.isfinite(centered[:, col_idx])]
+        missing = ~np.isfinite(resampled[:, col_idx])
+        if not np.any(missing):
+            continue
+        if finite_residuals.size == 0:
+            resampled[missing, col_idx] = 0.0
+        else:
+            resampled[missing, col_idx] = rng.choice(finite_residuals, size=int(np.count_nonzero(missing)))
     y_boot = y_pred + resampled
     y_boot[~np.isfinite(ds.y)] = np.nan
     return Dataset(
@@ -126,6 +135,7 @@ def _residual_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -134,9 +144,12 @@ def _parametric_bootstrap(
     ds: Dataset,
     y_pred: np.ndarray,
     residuals: np.ndarray,
+    scale_factor: float = 1.0,
 ) -> Dataset:
     scale = np.nanstd(residuals, axis=0, ddof=1)
     scale = np.where(np.isfinite(scale), scale, 0.0)
+    if np.isfinite(scale_factor) and scale_factor > 0:
+        scale = scale * float(scale_factor)
     noise = rng.normal(0.0, 1.0, size=y_pred.shape) * scale.reshape(1, -1)
     y_boot = y_pred + noise
     y_boot[~np.isfinite(ds.y)] = np.nan
@@ -149,6 +162,7 @@ def _parametric_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -166,6 +180,7 @@ def _points_bootstrap(
         y=ds.y[idx],
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -175,11 +190,12 @@ def _resample_bootstrap_dataset(
     ds: Dataset,
     y_pred: np.ndarray,
     residuals: np.ndarray,
+    parametric_scale_factor: float = 1.0,
 ) -> Dataset:
     if method == "points":
         return _points_bootstrap(rng, ds)
     if method == "parametric":
-        return _parametric_bootstrap(rng, ds, y_pred, residuals)
+        return _parametric_bootstrap(rng, ds, y_pred, residuals, scale_factor=parametric_scale_factor)
     return _residual_bootstrap(rng, ds, y_pred, residuals)
 
 
@@ -332,11 +348,21 @@ def bootstrap_params(
         datasets,
         solver_failure_mode=solver_failure_mode,
     )
+    total_valid = int(sum(np.count_nonzero(np.isfinite(ds.y)) for ds in datasets))
+    dof = int(total_valid - len(params))
+    parametric_scale_factor = float(np.sqrt(total_valid / dof)) if dof > 0 else 1.0
 
     for _ in range(n_boot):
         boot_datasets: List[Dataset] = []
         for ds, y_pred, res in zip(datasets, y_pred_list, residuals):
-            boot = _resample_bootstrap_dataset(method, rng, ds, y_pred, res)
+            boot = _resample_bootstrap_dataset(
+                method,
+                rng,
+                ds,
+                y_pred,
+                res,
+                parametric_scale_factor=parametric_scale_factor,
+            )
             boot_datasets.append(boot)
 
         params0 = _jitter_bootstrap_start(params, model, rng, logk_jitter, logk_bounds)
@@ -447,4 +473,5 @@ def bootstrap_params(
         ci_message=ci_message,
         n_success=n_success,
         n_boot=n_boot,
+        ci_warning=ci_warning,
     )

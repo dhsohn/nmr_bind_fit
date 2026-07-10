@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Protocol
+from typing import List, Optional, Protocol, Tuple
 
 import numpy as np
 
@@ -19,6 +19,7 @@ class DatasetLike(Protocol):
     y: np.ndarray
     y_cols: List[str]
     dropped_peaks: List[str]
+    dropped_rows: int
 
     @property
     def n_points(self) -> int:
@@ -56,6 +57,7 @@ class BootstrapLike(Protocol):
     ci_message: str
     n_success: int
     n_boot: int
+    ci_warning: str
 
 
 class ModelLike(Protocol):
@@ -86,3 +88,4 @@ class FitResultLike(Protocol):
     residuals: List[np.ndarray]
     bootstrap: Optional[BootstrapLike]
     penalty_count: int
+    logk_bounds: Optional[Tuple[float, float]]

@@ -111,7 +111,7 @@ data that do not in fact support binding — the kind of false positive examined
   residual degrees of freedom, a full-column-rank optimizer Jacobian with condition number
   at most $10^6$, and no fitted $\log_{10}K$ value on an active optimization bound.
 - **Missing data**: rows with missing host/guest concentrations are dropped; any ppm column
-  containing missing values is excluded entirely (remaining peaks retained).
+  containing missing or non-finite values is excluded entirely (remaining peaks retained).
 - **Solver failures**: per-point solver failures in 1:2/2:1 use fail-fast behavior; penalty
   residual events are recorded in the report.
 - **Replicates**: fit simultaneously with shared binding constants $K$ and replicate-specific
@@ -173,6 +173,10 @@ between candidates.
 - **Inter-peak residual correlation is not modeled** (diagonal covariance assumed). Multiple
   peaks from the same molecule may in reality be correlated, but the tool treats them as
   independent for simplicity — see the limitations in §8.
+- **Information criteria are withheld when unsupported.** If the number of finite residual
+  scalars is not greater than the fitted model parameters plus the shared variance term, or
+  if residual variance is zero, BIC/AICc are reported as unavailable rather than used for
+  ranking.
 
 > Note: model comparison (BIC/AICc) uses a **single pooled variance**, whereas uncertainty
 > quantification (parametric bootstrap) may use per-peak variances. The two procedures serve
@@ -185,10 +189,11 @@ between candidates.
 
 (Implementation: `build_decisions` in `nmr_bind_fit/report_pipeline.py`.)
 
-1. **Select the lowest-BIC model as the provisional working model.**
-   The candidate with the lowest BIC is adopted as the "tentative working model among the
-   tested candidates." The report flags it as the *recommended model* while always stating it
-   is provisional.
+1. **Select the lowest finite-BIC model as the provisional working model.**
+   The candidate with the lowest finite BIC is adopted as the "tentative working model among
+   the tested candidates." Candidates with unavailable BIC are shown in the report but are
+   not used for ranking. The report flags the selected model as the *recommended model* while
+   always stating it is provisional.
 
 2. **ΔBIC check (discriminating power).**
    Compute the BIC gap to the next-best candidate, $\Delta\text{BIC} = \text{BIC}\text{(2nd)} - \text{BIC}\text{(best)}$:
@@ -274,9 +279,11 @@ selection; they are informational.**
 - **Shapiro–Wilk test** — residual normality. A small p-value casts doubt on the Gaussian
   residual assumption underlying BIC/AICc. For large samples, the computation is capped at a
   maximum sample size.
-- **Durbin–Watson statistic** — first-order residual autocorrelation. ≈2 indicates no
-  correlation; near 0 indicates positive autocorrelation (the model fails to capture curve
-  structure — possible model misspecification); near 4 indicates negative autocorrelation.
+- **Durbin–Watson statistic** — first-order residual autocorrelation. It is reported only
+  when a single residual series is being diagnosed; pooled multi-peak or multi-dataset
+  residuals do not have meaningful lag-1 boundaries. ≈2 indicates no correlation; near 0
+  indicates positive autocorrelation (the model fails to capture curve structure — possible
+  model misspecification); near 4 indicates negative autocorrelation.
 
 If autocorrelation is pronounced (e.g., residuals show a systematic pattern along the
 titration order), the model fails to explain the structure of the data regardless of having
@@ -297,9 +304,9 @@ the lowest BIC, and the model itself should be reconsidered.
 - **Statistics give relative support within the candidate set only.** Untested stoichiometries
   (e.g., 2:2 or higher order) are not in the comparison. "Lowest BIC" means "best of the four
   tested," not "the absolute truth."
-- **Small samples.** With few titration points, AICc may be undefined (NaN) and BIC's
-  discriminating power degrades sharply. Adequate titration points and a saturation region take
-  precedence over statistics.
+- **Small samples.** With few titration points, AICc and BIC may be unavailable (NaN), and
+  discriminating power degrades sharply even when criteria are finite. Adequate titration
+  points and a saturation region take precedence over statistics.
 
 ---
 
@@ -307,7 +314,7 @@ the lowest BIC, and the model itself should be reconsidered.
 
 | Item | File | Content |
 |------|------|---------|
-| Model-comparison table (BIC, AICc, RMSE, R², …) | `summary.csv` | Per-model values of the §4 indices |
+| Model-comparison table (BIC, AICc, RMSE, R², …) | `summary.csv` | Per-model values of the §4 indices, including failed-candidate audit rows |
 | Selection decision and reasons | `decision.txt` | Provisional working model, ΔBIC, warnings (§5) |
 | Combined report | `report.html` | Methods + plots + decision paragraphs |
 | Per-model diagnostics | `dataset_*/model_*/` | Dataset-scoped plots, bootstrap histograms, correlation matrix |
@@ -324,7 +331,7 @@ Gaussian likelihood → BIC (primary), AICc (supporting)
    (shared variance, k = p+1, n = # finite residuals)
         │
         ▼
-Lowest-BIC model = provisional working model
+Lowest finite-BIC model = provisional working model
         │
         ├─ ΔBIC < 2 ?               → yes: flag "weak discrimination"
         ├─ K bootstrap CI too wide? → yes: warn "CI too wide"

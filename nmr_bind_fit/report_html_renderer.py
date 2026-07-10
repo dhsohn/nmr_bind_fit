@@ -12,6 +12,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 _NUMERIC_COLS = {
     "Binding constant",
+    "Binding constant (M⁻¹)",
     "95 % CI",
     "R² (mean)",
     "BIC",
@@ -702,4 +703,4 @@ def write_report_html(
 </html>
 """
 
-    output_path.write_text(html_doc)
+    output_path.write_text(html_doc, encoding="utf-8")

@@ -37,3 +37,29 @@ def test_dataset_key_keeps_replicate_grouping_label():
 
     key = _dataset_key(SimpleNamespace(datasets=[ds1, ds2]), labels)
     assert key == "Simultaneous Fitting"
+
+
+def test_dataset_key_avoids_simultaneous_fitting_sentinel_for_single_dataset():
+    ds = SimpleNamespace(name="Simultaneous Fitting", path=Path("Simultaneous Fitting.csv"))
+    labels = _build_dataset_labels([ds])
+
+    key = _dataset_key(SimpleNamespace(datasets=[ds]), labels)
+
+    assert key == "Simultaneous Fitting (dataset)"
+
+
+def test_dataset_key_sentinel_rename_stays_unique_against_existing_label():
+    # ds1's label equals the reserved sentinel and is renamed to "... (dataset)";
+    # ds2 already carries that exact label. The rename must further disambiguate
+    # instead of colliding, otherwise both datasets share a key and one
+    # overwrites the other in the report.
+    ds1 = SimpleNamespace(name="Simultaneous Fitting", path=Path("Simultaneous Fitting.csv"))
+    ds2 = SimpleNamespace(name="Simultaneous Fitting (dataset)", path=Path("other.csv"))
+    labels = _build_dataset_labels([ds1, ds2])
+
+    key1 = _dataset_key(SimpleNamespace(datasets=[ds1]), labels)
+    key2 = _dataset_key(SimpleNamespace(datasets=[ds2]), labels)
+
+    assert key1 != key2
+    assert key1 != "Simultaneous Fitting"
+    assert key2 != "Simultaneous Fitting"

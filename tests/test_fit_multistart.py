@@ -69,7 +69,7 @@ def test_select_best_multistart_prefers_success_over_lower_rss_failure():
     assert res is not None
     assert res.success is True
     assert res.message == "converged"
-    assert params[0] > 2.0
+    assert params[0] == 2.05
 
 
 def test_select_best_multistart_all_fail_uses_best_failure():
@@ -246,3 +246,64 @@ def test_fit_model_reports_residual_diagnostics_when_enabled():
 
     assert result.success is True
     assert "residual_n" in result.residual_diagnostics
+
+
+def test_fit_model_initializes_from_finite_masked_endpoints():
+    ds = Dataset(
+        name="masked_endpoint",
+        path=Path("dummy.csv"),
+        h_tot=np.array([1e-3, 1e-3, 1e-3, 1e-3], dtype=float),
+        g_tot=np.array([0.0, 3e-4, 6e-4, 1e-3], dtype=float),
+        x=np.array([0.0, 0.3, 0.6, 1.0], dtype=float),
+        y=np.array([[np.nan], [7.1], [7.2], [7.3]], dtype=float),
+        y_cols=["ppm1"],
+        dropped_peaks=[],
+    )
+
+    result = fit.fit_model(
+        [ds],
+        "nb",
+        logk_starts=[1.0],
+        max_nfev=100,
+        bootstrap=0,
+    )
+
+    assert result.success is True
+    assert np.all(np.isfinite(result.params))
+
+
+def test_fit_models_captures_all_masked_peak_column():
+    # A ppm column with no finite observations cannot seed the initial
+    # parameter vector. fit_models must capture this as an unsuccessful
+    # FitResult (one result per job) instead of raising and aborting the run.
+    ds = Dataset(
+        name="masked_peak",
+        path=Path("dummy.csv"),
+        h_tot=np.array([1e-3, 1e-3, 1e-3, 1e-3], dtype=float),
+        g_tot=np.array([0.0, 3e-4, 6e-4, 1e-3], dtype=float),
+        x=np.array([0.0, 0.3, 0.6, 1.0], dtype=float),
+        y=np.column_stack(
+            [
+                np.array([7.0, 7.1, 7.2, 7.3], dtype=float),
+                np.array([np.nan, np.nan, np.nan, np.nan], dtype=float),
+            ]
+        ),
+        y_cols=["ppm1", "ppm2"],
+        dropped_peaks=[],
+    )
+
+    results = fit.fit_models(
+        datasets=[ds],
+        model_names=["11"],
+        logk_starts=[1.0],
+        replicates=False,
+        max_nfev=100,
+        bootstrap=0,
+        logk_bounds=(0.0, 12.0),
+        logk_jitter=0.0,
+    )
+
+    assert len(results) == 1
+    assert results[0].success is False
+    assert results[0].model.name == "11"
+    assert "at least one finite value" in results[0].message

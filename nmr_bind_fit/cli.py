@@ -37,6 +37,7 @@ STRICT_MISSING_POLICY = "drop-column"
 STRICT_SOLVER_FAILURE_MODE = "fail-fast"
 STRICT_K_MIN = 1e0
 STRICT_K_MAX = 1e12
+SIMULTANEOUS_FIT_LABEL = "Simultaneous Fitting"
 
 
 def _non_negative_int(value: str) -> int:
@@ -60,12 +61,20 @@ def _parse_k_starts(value: Optional[str]) -> List[float]:
         raise ValueError("--k-starts must be a comma-separated list of numeric values.") from exc
 
 
+def _validate_finite_number(value: float, message: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(message)
+    return parsed
+
+
 def _resolve_inputs(patterns: List[str]) -> List[Path]:
     # Expand glob patterns and validate file existence.
     paths: List[Path] = []
     resolved_paths: List[Path] = []
+    unmatched: List[str] = []
     for pattern in patterns:
-        matches = glob.glob(pattern)
+        matches = sorted(glob.glob(pattern))
         if not matches:
             path = Path(pattern)
             if not path.exists():
@@ -79,6 +88,8 @@ def _resolve_inputs(patterns: List[str]) -> List[Path]:
                 raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
             resolved_paths.append(path.resolve())
+    if unmatched:
+        raise FileNotFoundError("Input file or pattern not found: " + ", ".join(unmatched))
     if not paths:
         raise FileNotFoundError("No input files found.")
     counts = Counter(resolved_paths)
@@ -142,6 +153,22 @@ def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
         else:
             deduped.append(label)
 
+    # Reserve the simultaneous-fit sentinel: no single-dataset label may equal
+    # it. Re-check uniqueness here so the rename cannot collide with an existing
+    # "... (dataset)" label already produced by the passes above.
+    existing = set(deduped)
+    for idx, label in enumerate(deduped):
+        if label != SIMULTANEOUS_FIT_LABEL:
+            continue
+        existing.discard(label)
+        candidate = f"{label} (dataset)"
+        suffix = 2
+        while candidate in existing:
+            candidate = f"{label} (dataset {suffix})"
+            suffix += 1
+        deduped[idx] = candidate
+        existing.add(candidate)
+
     return {id(ds): label for ds, label in zip(datasets, deduped)}
 
 
@@ -150,7 +177,7 @@ def _dataset_key(result: FitResultLike, dataset_labels: Dict[int, str]) -> str:
     if len(result.datasets) == 1:
         ds = result.datasets[0]
         return dataset_labels.get(id(ds), ds.name) or ds.name
-    return "Simultaneous Fitting"
+    return SIMULTANEOUS_FIT_LABEL
 
 
 def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optional[Tuple[float, float]]]:
@@ -232,6 +259,8 @@ def run_fit(args: argparse.Namespace) -> None:
         ppm_cols=args.ppm_cols,
         missing_policy=STRICT_MISSING_POLICY,
     )
+    if args.replicates and len(datasets) < 2:
+        raise ValueError("--replicates requires at least two input datasets.")
     dataset_labels = _build_dataset_labels(datasets)
 
     model_names = DEFAULT_MODEL_NAMES

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -24,12 +25,16 @@ from .types import DatasetLike, FitResultLike, SpeciesLike
 SUMMARY_LABELS = {
     "dataset": "Dataset",
     "model": "Model",
-    "K": "Binding constant",
+    "status": "Status",
+    "K": "Binding constant (M⁻¹)",
     "bootstrap_K_CI": "95 % CI",
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
+    "notes": "Notes",
 }
+
+LOGK_BOUND_ATOL = 1e-7
 
 
 STATS_LABELS = {
@@ -83,6 +88,12 @@ def _safe_std(values: np.ndarray) -> float:
     return float(np.std(scaled, ddof=1) * scale)
 
 
+def _append_png_plot_paths(plot_paths: List[str], paths: Sequence[Path], out_dir: Path) -> None:
+    for path in paths:
+        if path.suffix.lower() == ".png":
+            plot_paths.append(path.relative_to(out_dir).as_posix())
+
+
 def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
     # Drop rows with any non-finite values.
     if values.ndim == 1:
@@ -111,6 +122,33 @@ def _safe_path_token(value: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
     prefix = safe[:67].rstrip("._-") or "dataset"
     return f"{prefix}-{digest}"
+
+
+def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
+    # Preserve distinct dataset directories even when labels sanitize to the same token.
+    safe_labels = [_safe_path_token(label) for label in labels]
+    counts = Counter(safe_labels)
+    used: set[str] = set()
+    tokens: Dict[str, str] = {}
+
+    for idx, (label, safe) in enumerate(zip(labels, safe_labels), start=1):
+        candidates = []
+        if counts[safe] == 1:
+            candidates.append(safe)
+        candidates.append(f"{idx:02d}_{safe}")
+
+        token = next((candidate for candidate in candidates if candidate not in used), "")
+        if not token:
+            suffix = 1
+            token = f"{idx:02d}_{safe}_{suffix}"
+            while token in used:
+                suffix += 1
+                token = f"{idx:02d}_{safe}_{suffix}"
+
+        used.add(token)
+        tokens[label] = token
+
+    return tokens
 
 
 def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
@@ -147,6 +185,22 @@ def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
                 items.append(f"{ds.name}: {cols}")
             else:
                 items.append(cols)
+    if not items:
+        return "None"
+    return "; ".join(items)
+
+
+def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
+    # Format concentration rows dropped before fitting for report warnings.
+    items: List[str] = []
+    multi = len(datasets) > 1
+    for ds in datasets:
+        dropped_rows = int(getattr(ds, "dropped_rows", 0))
+        if dropped_rows > 0:
+            if multi:
+                items.append(f"{ds.name}: {dropped_rows}")
+            else:
+                items.append(str(dropped_rows))
     if not items:
         return "None"
     return "; ".join(items)
@@ -276,9 +330,7 @@ def _collect_plot_paths(
         k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
         k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
         boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
-        for path in boot_files:
-            if path.suffix.lower() == ".png":
-                plot_paths.append(str(path.relative_to(out_dir)))
+        _append_png_plot_paths(plot_paths, boot_files, out_dir)
 
     return plot_paths, plot_labels
 
@@ -335,9 +387,65 @@ def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
     return _safe_pow10(low_log), _safe_pow10(high_log)
 
 
+def _logk_names(n_logk: int) -> List[str]:
+    if n_logk == 1:
+        return ["K"]
+    return [f"K{i + 1}" for i in range(n_logk)]
+
+
+def _format_k_values(k_vals: np.ndarray, n_logk: int) -> str:
+    if n_logk == 0:
+        return "N/A"
+    names = _logk_names(n_logk)
+    values = [f"{value:.6g}" if np.isfinite(value) else "N/A" for value in k_vals]
+    if n_logk == 1:
+        return values[0]
+    return "; ".join(f"{name}={value}" for name, value in zip(names, values))
+
+
+def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> str:
+    finite = np.isfinite(k_ci_low) & np.isfinite(k_ci_high)
+    if k_ci_low.size == 0 or not np.any(finite):
+        return "N/A"
+    names = _logk_names(n_logk)
+    intervals = []
+    for idx, (low, high) in enumerate(zip(k_ci_low, k_ci_high)):
+        interval = f"[{low:.6g}, {high:.6g}]" if np.isfinite(low) and np.isfinite(high) else "N/A"
+        if n_logk == 1:
+            intervals.append(interval)
+        else:
+            intervals.append(f"{names[idx]}={interval}")
+    return "; ".join(intervals)
+
+
+def _logk_bound_warnings(res: FitResultLike) -> List[str]:
+    if res.model.n_logk == 0 or not hasattr(res, "params"):
+        return []
+    # Compare against the bounds the fit actually used; when they are unknown
+    # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
+    # valid estimate such as K=1 or K=1e12 would be misleading.
+    bounds = getattr(res, "logk_bounds", None)
+    if bounds is None:
+        return []
+    low, high = float(bounds[0]), float(bounds[1])
+    logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
+    names = _logk_names(res.model.n_logk)
+    warnings: List[str] = []
+    for name, value in zip(names, logk_vals):
+        if not np.isfinite(value):
+            continue
+        if np.isclose(value, low, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the lower log10(K) bound ({low:g})")
+        elif np.isclose(value, high, atol=LOGK_BOUND_ATOL, rtol=0.0):
+            warnings.append(f"{name} is pinned at the upper log10(K) bound ({high:g})")
+    return warnings
+
+
 def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
+        return None
+    if not hasattr(res, "species"):
         return None
     solver_stats = _accumulate_solver_stats(res.species)
     if solver_stats is None:
@@ -357,10 +465,31 @@ def _build_model_warnings(
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
+    datasets = getattr(res, "datasets", [])
 
-    dropped_peaks = _format_dropped_peaks(res.datasets)
+    dropped_peaks = _format_dropped_peaks(datasets)
     if dropped_peaks != "None":
-        warnings.append(f"Dropped chemical shift columns with missing values: {dropped_peaks}")
+        warnings.append(f"Dropped chemical shift columns with missing or non-finite values: {dropped_peaks}")
+
+    dropped_rows = _format_dropped_rows(datasets)
+    if dropped_rows != "None":
+        warnings.append(f"Dropped rows with missing required concentrations: {dropped_rows}")
+
+    if not np.isfinite(res.bic):
+        if getattr(res, "n", 0) <= getattr(res, "p", 0) + 1:
+            warnings.append(
+                "BIC/AICc unavailable: finite observations are not greater than fitted parameters plus variance"
+            )
+        elif np.isfinite(getattr(res, "rss", np.nan)) and res.rss <= 0:
+            warnings.append("BIC/AICc unavailable: residual variance is zero")
+        else:
+            warnings.append("BIC/AICc unavailable for this fit")
+    elif not np.isfinite(getattr(res, "aicc", float("nan"))):
+        warnings.append(
+            "AICc unavailable: too few observations for the small-sample correction; BIC is still reported"
+        )
+
+    warnings.extend(_logk_bound_warnings(res))
 
     k_ci_low, k_ci_high = _bootstrap_k_ci(res)
     if args.bootstrap_ci_width is not None and k_ci_low.size > 0:
@@ -376,8 +505,9 @@ def _build_model_warnings(
             ci_message = str(getattr(res.bootstrap, "ci_message", "")).strip()
             warnings.append(ci_message or "bootstrap confidence interval is unavailable")
 
-    if res.penalty_count > 0:
-        warnings.append(f"optimization penalty residual events: {res.penalty_count}")
+    penalty_count = int(getattr(res, "penalty_count", 0))
+    if penalty_count > 0:
+        warnings.append(f"optimization penalty residual events: {penalty_count}")
 
     if solver_stats is not None and solver_stats.get("solver_fail", 0) not in {"N/A", None}:
         n_fail = _as_int(solver_stats.get("solver_fail", 0))
@@ -385,7 +515,7 @@ def _build_model_warnings(
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
-    for ds, species in zip(res.datasets, res.species):
+    for ds, species in zip(datasets, getattr(res, "species", [])):
         stats = species.solver_stats
         if stats is None:
             continue
@@ -414,7 +544,7 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
         "bootstrap_logK_SE": _bootstrap_logk_se_text(res),
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
-        "BIC": f"{res.bic:.6g}",
+        "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
         "penalty_events": str(res.penalty_count),
     }
@@ -455,26 +585,46 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
     return {_label_stats_key(k): v for k, v in stats_base.items()}
 
 
-def _build_summary_row(res: FitResultLike, ds_label: str, display_name: str) -> Dict[str, str]:
+def _build_summary_row(
+    res: FitResultLike,
+    ds_label: str,
+    display_name: str,
+    warnings: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
     # Build one row for summary.csv.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
-    k_str = ";".join(f"{v:.6g}" for v in k_vals) if res.model.n_logk else "N/A"
+    k_str = _format_k_values(k_vals, res.model.n_logk)
 
     k_ci_low, k_ci_high = _bootstrap_k_ci(res)
-    if k_ci_low.size == 0 or not np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high)):
-        boot_k_ci = "N/A"
-    else:
-        boot_k_ci = ";".join(f"[{low:.6g}, {high:.6g}]" for low, high in zip(k_ci_low, k_ci_high))
+    boot_k_ci = _format_k_ci(k_ci_low, k_ci_high, res.model.n_logk)
 
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
+        "status": "success",
         "K": k_str,
         "bootstrap_K_CI": boot_k_ci,
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
-        "BIC": f"{res.bic:.6g}",
+        "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
+        "notes": "; ".join(str(warning) for warning in (warnings or [])),
+    }
+    return {_label_summary_key(k): v for k, v in summary_base.items()}
+
+
+def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -> Dict[str, str]:
+    # Keep failed candidates visible in summary.csv for auditability.
+    summary_base = {
+        "dataset": ds_label,
+        "model": display_name,
+        "status": "failed",
+        "K": "N/A",
+        "bootstrap_K_CI": "N/A",
+        "R2": "N/A",
+        "BIC": "N/A",
+        "AICc": "N/A",
+        "notes": f"fit failed: {message}",
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
@@ -487,6 +637,7 @@ def _build_model_entry(
     dataset_dir_label: str,
     out_dir: Path,
     display_model_name: Callable[[str], str],
+    dataset_dir_token: Optional[str] = None,
 ) -> Tuple[ModelEntry, Dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
@@ -509,7 +660,7 @@ def _build_model_entry(
         warnings=warnings,
         plot_labels=plot_labels,
     )
-    summary_row = _build_summary_row(res, key, display_name)
+    summary_row = _build_summary_row(res, key, display_name, warnings)
     return model_entry, summary_row
 
 
@@ -525,6 +676,7 @@ def build_report_artifacts(
     summary_rows: List[Dict[str, str]] = []
     model_entries: List[ModelEntry] = []
     report_warnings: List[str] = []
+    dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     dataset_dir_labels = _dataset_artifact_dir_labels(ordered_keys)
     for key, dataset_dir_label in zip(ordered_keys, dataset_dir_labels):
@@ -534,6 +686,7 @@ def build_report_artifacts(
             report_warnings.append(
                 f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
             )
+            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name), message))
         if not model_map:
             continue
         for model_name, res in model_map.items():
@@ -545,6 +698,7 @@ def build_report_artifacts(
                 dataset_dir_label,
                 out_dir,
                 display_model_name,
+                dataset_dir_tokens.get(key),
             )
             model_entries.append(model_entry)
             summary_rows.append(summary_row)
@@ -723,16 +877,25 @@ def build_decisions(
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
-        bic_sorted = sorted(model_map.values(), key=lambda r: r.bic)
+        bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")
-        if failures:
+        model_warning_lines: List[str] = []
+        for model_name, res in model_map.items():
+            model_warnings = _build_model_warnings(args, res, _solver_stats_for_result(res))
+            for warning in model_warnings:
+                model_warning_lines.append(f"- {display_model_name(model_name)}: {warning}")
+        if failures or model_warning_lines:
             decisions.append("Warnings:")
             for model_name, message in failures:
                 decisions.append(
                     f"- excluded {display_model_name(model_name)} (fit failed: {message})"
                 )
+            decisions.extend(model_warning_lines)
         if not bic_sorted:
-            decisions.append("No successful model fits; see warnings.")
+            if model_map:
+                decisions.append("No model had a finite BIC for ranking; see warnings.")
+            else:
+                decisions.append("No successful model fits; see warnings.")
             decisions.append("")
             continue
 
