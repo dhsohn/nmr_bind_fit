@@ -239,13 +239,12 @@ def run_fit(args: argparse.Namespace) -> None:
         raise ValueError("--max-nfev must be a positive integer.")
     ci_width = getattr(args, "bootstrap_ci_width", None)
     if ci_width is not None:
-        try:
-            ci_width = float(ci_width)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("--bootstrap-ci-width must be a finite non-negative number.") from exc
-        if not np.isfinite(ci_width) or ci_width < 0:
-            raise ValueError("--bootstrap-ci-width must be a finite non-negative number.")
-        args.bootstrap_ci_width = ci_width
+        args.bootstrap_ci_width = _validate_finite_number(
+            ci_width,
+            "--bootstrap-ci-width must be finite.",
+        )
+        if args.bootstrap_ci_width <= 0:
+            raise ValueError("--bootstrap-ci-width must be positive.")
     args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
     if args.bootstrap_ci_method not in {"percentile", "bca"}:
         raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")

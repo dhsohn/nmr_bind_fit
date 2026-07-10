@@ -165,14 +165,6 @@ def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
     return labels
 
 
-def _dataset_artifact_dir_labels(dataset_labels: Sequence[str]) -> List[str]:
-    # Prefix display labels with their stable input order so sanitization cannot collide.
-    return [
-        f"{idx:02d}_{_safe_path_token(label)}"
-        for idx, label in enumerate(dataset_labels, start=1)
-    ]
-
-
 def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
     # Format dropped ppm columns for report warnings.
     items: List[str] = []
@@ -271,18 +263,20 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     return params
 
 
-def _collect_plot_paths(
+def _collect_plot_artifacts(
     res: FitResultLike,
     model_name: str,
-    dataset_dir_label: str,
+    ds_label: str,
     out_dir: Path,
+    dataset_dir_token: Optional[str] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
-    # Write model plots and return PNG paths relative to output root.
-    model_dir = (
-        out_dir
-        / f"dataset_{dataset_dir_label}"
-        / f"model_{_safe_path_token(model_name)}"
-    )
+    # Write model plots and return relative PNG paths plus display labels.
+    model_dir = out_dir / f"model_{_safe_path_token(model_name)}"
+    if ds_label != "Simultaneous Fitting":
+        token = dataset_dir_token or _safe_path_token(ds_label)
+        model_dir = model_dir / f"dataset_{token}"
+    elif len(res.datasets) > 1:
+        model_dir = model_dir / f"dataset_{_safe_path_token(ds_label)}"
     model_dir.mkdir(parents=True, exist_ok=True)
 
     plot_paths: List[str] = []
@@ -299,17 +293,17 @@ def _collect_plot_paths(
         frac_files = plot_fraction_bound(model_spec, ds, logk, delta, ds_dir)
         for path in isotherm_files + residual_files + frac_files:
             if path.suffix.lower() == ".png":
-                plot_paths.append(str(path.relative_to(out_dir)))
+                plot_paths.append(path.relative_to(out_dir).as_posix())
         for peak, path in zip(
             ds.y_cols,
             [path for path in isotherm_files if path.suffix.lower() == ".png"],
         ):
-            plot_labels[str(path.relative_to(out_dir))] = str(peak)
+            plot_labels[path.relative_to(out_dir).as_posix()] = str(peak)
         for peak, path in zip(
             ds.y_cols,
             [path for path in residual_files if path.suffix.lower() == ".png"],
         ):
-            plot_labels[str(path.relative_to(out_dir))] = str(peak)
+            plot_labels[path.relative_to(out_dir).as_posix()] = str(peak)
 
     if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
         samples = res.bootstrap.param_samples.copy()
@@ -333,6 +327,24 @@ def _collect_plot_paths(
         _append_png_plot_paths(plot_paths, boot_files, out_dir)
 
     return plot_paths, plot_labels
+
+
+def _collect_plot_paths(
+    res: FitResultLike,
+    model_name: str,
+    ds_label: str,
+    out_dir: Path,
+    dataset_dir_token: Optional[str] = None,
+) -> List[str]:
+    """Compatibility wrapper returning only relative PNG paths."""
+    plot_paths, _ = _collect_plot_artifacts(
+        res,
+        model_name,
+        ds_label,
+        out_dir,
+        dataset_dir_token,
+    )
+    return plot_paths
 
 
 def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
@@ -497,10 +509,12 @@ def _build_model_warnings(
             warnings.append("bootstrap CI too wide")
 
     if res.bootstrap is not None:
-        if res.bootstrap.n_boot > 0:
-            n_fail = res.bootstrap.n_boot - res.bootstrap.n_success
+        n_boot = int(getattr(res.bootstrap, "n_boot", 0))
+        n_success = int(getattr(res.bootstrap, "n_success", 0))
+        if n_boot > 0:
+            n_fail = n_boot - n_success
             if n_fail > 0:
-                warnings.append(f"bootstrap failures: {n_fail} of {res.bootstrap.n_boot} iterations")
+                warnings.append(f"bootstrap failures: {n_fail} of {n_boot} iterations")
         if not getattr(res.bootstrap, "ci_valid", True):
             ci_message = str(getattr(res.bootstrap, "ci_message", "")).strip()
             warnings.append(ci_message or "bootstrap confidence interval is unavailable")
@@ -634,7 +648,6 @@ def _build_model_entry(
     key: str,
     model_name: str,
     res: FitResultLike,
-    dataset_dir_label: str,
     out_dir: Path,
     display_model_name: Callable[[str], str],
     dataset_dir_token: Optional[str] = None,
@@ -642,11 +655,12 @@ def _build_model_entry(
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
-    plot_paths, plot_labels = _collect_plot_paths(
+    plot_paths, plot_labels = _collect_plot_artifacts(
         res,
         model_name,
-        dataset_dir_label,
+        key,
         out_dir,
+        dataset_dir_token,
     )
     solver_stats = _solver_stats_for_result(res)
     warnings = _build_model_warnings(args, res, solver_stats)
@@ -678,8 +692,7 @@ def build_report_artifacts(
     report_warnings: List[str] = []
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
-    dataset_dir_labels = _dataset_artifact_dir_labels(ordered_keys)
-    for key, dataset_dir_label in zip(ordered_keys, dataset_dir_labels):
+    for key in ordered_keys:
         model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
@@ -695,7 +708,6 @@ def build_report_artifacts(
                 key,
                 model_name,
                 res,
-                dataset_dir_label,
                 out_dir,
                 display_model_name,
                 dataset_dir_tokens.get(key),
@@ -763,7 +775,7 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
                 f"(K ∈ [1, 10¹²] {k_unit}) during optimization to ensure stable, physically meaningful estimation. "
                 "Fits were excluded from model comparison unless they had positive residual degrees of freedom, "
                 "a full-column-rank Jacobian with condition number at most 10⁶, and no active log₁₀(K) bound. "
-                "ppm columns containing missing values were dropped before fitting. "
+                "ppm columns containing missing or non-finite values were dropped before fitting. "
                 "For 1:2 and 2:1 models, per-point solver failures used fail-fast behavior."
             ),
         }

@@ -50,6 +50,7 @@ def test_binding_fit_rejects_dataset_without_positive_guest():
     assert result.success is False
     assert "without positive guest concentrations" in result.message
     assert result.bootstrap is None
+    assert result.logk_bounds == (0.0, 12.0)
 
 
 def test_fit_rejects_nonpositive_residual_degrees_of_freedom():
@@ -108,6 +109,7 @@ def test_fit_rejects_practically_flat_high_affinity_solution(start):
     assert result.success is False
     assert "Jacobian condition number" in result.message
     assert result.jacobian_condition > 1e6
+    assert result.logk_bounds == (0.0, 12.0)
 
 
 def test_masked_endpoint_uses_finite_peak_endpoints_for_initialization():

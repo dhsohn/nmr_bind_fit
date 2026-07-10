@@ -39,6 +39,25 @@ def _normalize_failure_mode(failure_mode: str) -> str:
     return failure_mode
 
 
+def _validate_positive_finite_constants(*values: float) -> Tuple[float, ...]:
+    constants = tuple(float(value) for value in values)
+    if any((not math.isfinite(value)) or value <= 0.0 for value in constants):
+        raise ValueError("Binding constants must be positive and finite.")
+    return constants
+
+
+def _validate_total_arrays(
+    h_tot: np.ndarray, g_tot: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    h_arr = np.asarray(h_tot, dtype=float)
+    g_arr = np.asarray(g_tot, dtype=float)
+    if h_arr.shape != g_arr.shape:
+        raise ValueError("Host and guest total arrays must have matching shape.")
+    if h_arr.ndim != 1:
+        raise ValueError("Host and guest total arrays must be one-dimensional.")
+    return h_arr, g_arr
+
+
 def _record_solver_success(stats: Optional[SolverStats]) -> None:
     if stats is not None:
         stats.success += 1

@@ -123,8 +123,10 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert bootstraps[0] != bootstraps[1]
     assert isotherms[0].read_text(encoding="utf-8") == "first"
     assert isotherms[1].read_text(encoding="utf-8") == "second"
-    assert isotherms[0].relative_to(tmp_path).parts[0].startswith("dataset_01_")
-    assert isotherms[1].relative_to(tmp_path).parts[0].startswith("dataset_02_")
+    assert isotherms[0].relative_to(tmp_path).parts[0] == "model_11"
+    assert isotherms[1].relative_to(tmp_path).parts[0] == "model_11"
+    assert isotherms[0].relative_to(tmp_path).parts[1].startswith("dataset_01_")
+    assert isotherms[1].relative_to(tmp_path).parts[1].startswith("dataset_02_")
     assert all((path.parent / "correlation.csv").is_file() for path in isotherms)
     assert [row["Dataset"] for row in summary_rows] == keys
     assert entries[0].stats["Observations (n)"] == "3"

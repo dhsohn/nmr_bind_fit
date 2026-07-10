@@ -227,7 +227,24 @@ def test_run_fit_rejects_nonfinite_bootstrap_ci_width():
         seed=None,
         bootstrap_ci_width=float("nan"),
     )
-    with pytest.raises(ValueError, match="--bootstrap-ci-width must be a finite non-negative number."):
+    with pytest.raises(ValueError, match="--bootstrap-ci-width must be finite."):
+        run_fit(args)
+
+
+def test_run_fit_rejects_nonpositive_bootstrap_ci_width():
+    args = argparse.Namespace(
+        input=["missing.csv"],
+        ppm_cols=None,
+        bootstrap=0,
+        bootstrap_method="residual",
+        bootstrap_logk_jitter=0.1,
+        k_starts=None,
+        replicates=False,
+        max_nfev=100,
+        seed=None,
+        bootstrap_ci_width=0,
+    )
+    with pytest.raises(ValueError, match="--bootstrap-ci-width must be positive."):
         run_fit(args)
 
 

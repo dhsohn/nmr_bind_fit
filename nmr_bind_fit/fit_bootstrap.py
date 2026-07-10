@@ -15,6 +15,9 @@ from .models import ModelSpec
 
 MIN_BOOTSTRAP_CI_SUCCESSES = 20
 MIN_BOOTSTRAP_CI_SUCCESS_RATE = 0.80
+# Backward-compatible name retained for callers introduced on main.  The
+# effective requirement is stricter than this floor for n_boot > 25.
+MIN_BOOTSTRAP_CI_SAMPLES = MIN_BOOTSTRAP_CI_SUCCESSES
 
 
 @dataclass
@@ -209,6 +212,7 @@ def _delete_dataset_row(ds: Dataset, row: int) -> Dataset:
         y=np.delete(ds.y, row, axis=0),
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
+        dropped_rows=getattr(ds, "dropped_rows", 0),
     )
 
 
@@ -457,6 +461,15 @@ def bootstrap_params(
     else:
         ci_low = np.full((model.n_logk,), np.nan)
         ci_high = np.full((model.n_logk,), np.nan)
+
+    # Preserve the legacy warning field while ci_valid/ci_message provide the
+    # structured contract used by current reporting code.
+    if ci_valid:
+        ci_warning = ""
+    elif model.n_logk > 0:
+        ci_warning = f"Bootstrap CI omitted: {ci_message}"
+    else:
+        ci_warning = ci_message
 
     return BootstrapResult(
         param_samples=samples,

@@ -145,6 +145,8 @@ def select_best_multistart(
         except numeric_exceptions:
             continue
         rss = float(np.sum(res.fun**2))
+        if not np.isfinite(rss):
+            continue
         if bool(getattr(res, "success", False)) and optimizer_result_is_identifiable(
             res,
             params.size,

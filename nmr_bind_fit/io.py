@@ -243,9 +243,9 @@ def load_dataset(
     ppm_cols = _resolve_ppm_cols(columns, ppm_cols)
 
     data = _subset_input_columns(df, host_col, guest_col, ppm_cols)
-    data = _drop_missing_required(data, host_col, guest_col)
+    data, dropped_required_rows = _drop_missing_required(data, host_col, guest_col)
     if data.empty:
-        raise ValueError("No observations remain after dropping rows with missing concentration values.")
+        raise ValueError("No rows remain after dropping rows with missing required concentrations.")
     data = _coerce_numeric_columns(data, [host_col, guest_col, *ppm_cols])
 
     ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)

@@ -106,6 +106,22 @@ def test_select_best_multistart_skips_numeric_exception_and_keeps_success():
     assert res.message == "converged"
 
 
+def test_select_best_multistart_skips_nonfinite_rss():
+    call_count = {"n": 0}
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return params0, _DummyResult(success=True, rss=float("nan"), message="nonfinite")
+        return params0, _DummyResult(success=True, rss=2.0, message="converged")
+
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
+
+    assert params is not None
+    assert res is not None
+    assert res.message == "converged"
+
+
 def test_select_best_multistart_prefers_identifiable_success():
     call_count = {"n": 0}
 
@@ -130,6 +146,34 @@ def test_select_best_multistart_prefers_identifiable_success():
     assert params is not None
     assert res is not None
     assert res.message == "identifiable"
+
+
+def test_select_best_multistart_rejects_logk_at_active_bound():
+    call_count = {"n": 0}
+
+    def fake_fit_with_initial(model, datasets, params0, max_nfev, bounds):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return params0, OptimizeResult(
+                success=True,
+                fun=np.array([1.0]),
+                jac=np.eye(params0.size),
+                active_mask=np.array([1, 0, 0]),
+                message="bound limited",
+            )
+        return params0, OptimizeResult(
+            success=True,
+            fun=np.array([2.0]),
+            jac=np.eye(params0.size),
+            active_mask=np.zeros(params0.size, dtype=int),
+            message="interior",
+        )
+
+    params, res = _select_with_fake_optimizer(fake_fit_with_initial)
+
+    assert params is not None
+    assert res is not None
+    assert res.message == "interior"
 
 
 def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):

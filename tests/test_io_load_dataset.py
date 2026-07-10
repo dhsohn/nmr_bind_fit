@@ -192,7 +192,7 @@ def test_load_dataset_rejects_when_all_rows_have_missing_concentrations(tmp_path
         }
     ).to_csv(path, index=False)
 
-    with pytest.raises(ValueError, match="No observations remain after dropping rows"):
+    with pytest.raises(ValueError, match="No rows remain after dropping rows"):
         load_dataset(path)
 
 
@@ -236,7 +236,7 @@ def test_load_dataset_reports_missing_explicit_ppm_columns(tmp_path):
         }
     ).to_csv(path, index=False)
 
-    with pytest.raises(ValueError, match="Specified ppm columns not found: ppm_missing"):
+    with pytest.raises(ValueError, match="Requested ppm columns not found: ppm_missing"):
         load_dataset(path, ppm_cols=["ppm1", "ppm_missing"])
 
 

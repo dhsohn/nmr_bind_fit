@@ -309,6 +309,8 @@ def _validate_fit_design(model: ModelSpec, datasets: List[Dataset]) -> None:
         any_positive_guest = any_positive_guest or bool(np.any(g_tot > 0))
         for peak_idx, peak_name in enumerate(ds.y_cols):
             finite_count = int(np.count_nonzero(np.isfinite(y[:, peak_idx])))
+            if finite_count == 0:
+                raise ModelFitError("Each ppm column must contain at least one finite value for fitting.")
             if finite_count < model.n_delta_per_peak:
                 raise ModelFitError(
                     f"Peak {peak_name!r} in dataset {ds.name!r} has {finite_count} finite observations; "
@@ -386,6 +388,7 @@ def _failed_fit_result(
     species: Optional[List] = None,
     jacobian_rank: int = 0,
     jacobian_condition: float = float("inf"),
+    logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     n = _total_observations(datasets)
     p = int(len(params))
@@ -472,7 +475,12 @@ def _build_successful_fit_result(
     jacobian_rank, jacobian_condition = jacobian_rank_and_condition(best_res, p)
     active_mask = np.asarray(getattr(best_res, "active_mask", np.zeros(p)), dtype=int)
     logk_at_bound = bool(active_mask.size >= model.n_logk and np.any(active_mask[: model.n_logk]))
-    if jacobian_rank < p or jacobian_condition > MAX_JACOBIAN_CONDITION or logk_at_bound:
+    if (
+        jacobian_rank < p
+        or not np.isfinite(jacobian_condition)
+        or jacobian_condition > MAX_JACOBIAN_CONDITION
+        or logk_at_bound
+    ):
         if jacobian_rank < p:
             detail = f"Jacobian rank {jacobian_rank} < {p} fitted parameters"
         elif logk_at_bound:
@@ -491,6 +499,7 @@ def _build_successful_fit_result(
             species=species_list,
             jacobian_rank=jacobian_rank,
             jacobian_condition=jacobian_condition,
+            logk_bounds=logk_bounds,
         )
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
     r2, r2_per_peak = _r2_score(datasets, y_pred_list)
