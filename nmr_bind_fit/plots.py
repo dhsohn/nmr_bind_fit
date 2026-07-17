@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
@@ -48,14 +49,22 @@ _CLR_HIST = "#334155"
 
 
 def _safe_file_stem(value: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("_")
-    return safe or "peak"
+    """Return a bounded ASCII stem suitable for compatibility callers."""
+    text = str(value)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "peak"
+    if len(safe) <= 64:
+        return safe
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    prefix = safe[:51].rstrip("._-") or "peak"
+    return f"{prefix}-{digest}"
 
 
 def _safe_file_stems(values: List[str]) -> List[str]:
-    # Sanitize peak labels into unique filename stems. Suffix collisions until
-    # unique so a generated prefix cannot clash with another (already unique)
-    # stem and silently overwrite its plot files.
+    """Sanitize peak labels into deterministic, collision-free stems.
+
+    Plot artifacts use :func:`_peak_file_token`, but this helper remains for
+    callers that relied on the readable stems introduced on ``main``.
+    """
     stems = [_safe_file_stem(value) for value in values]
     counts = Counter(stems)
     used: set[str] = set()
@@ -75,6 +84,12 @@ def _safe_file_stems(values: List[str]) -> List[str]:
         used.add(chosen)
         unique.append(chosen)
     return unique
+
+
+def _peak_file_token(peak: str, index: int) -> str:
+    """Return a bounded, collision-resistant filesystem token for a peak label."""
+    digest = hashlib.sha256(str(peak).encode("utf-8")).hexdigest()[:16]
+    return f"peak-{index:04d}-{digest}"
 
 
 def _style_axes(ax: plt.Axes) -> None:
@@ -182,9 +197,7 @@ def plot_isotherms(
     files: List[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
-    peak_stems = _safe_file_stems(list(ds.y_cols))
-
-    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
+    for i, peak in enumerate(ds.y_cols):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
                    label="Observed", edgecolors="white", linewidths=0.4)
@@ -195,8 +208,9 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"isotherm_{peak_stem}.png"
-        pdf_path = out_dir / f"isotherm_{peak_stem}.pdf"
+        peak_token = _peak_file_token(peak, i + 1)
+        png_path = out_dir / f"isotherm_{peak_token}.png"
+        pdf_path = out_dir / f"isotherm_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files
@@ -211,8 +225,7 @@ def plot_residuals(
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
-    peak_stems = _safe_file_stems(list(ds.y_cols))
-    for i, (peak, peak_stem) in enumerate(zip(ds.y_cols, peak_stems)):
+    for i, peak in enumerate(ds.y_cols):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
@@ -221,8 +234,9 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        png_path = out_dir / f"residual_{peak_stem}.png"
-        pdf_path = out_dir / f"residual_{peak_stem}.pdf"
+        peak_token = _peak_file_token(peak, i + 1)
+        png_path = out_dir / f"residual_{peak_token}.png"
+        pdf_path = out_dir / f"residual_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files

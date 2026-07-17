@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from nmr_bind_fit.cli import _build_dataset_labels, _dataset_key
 
 
-def test_dataset_key_disambiguates_same_stem_different_paths():
-    ds1 = SimpleNamespace(name="sample", path=Path("a/sample.csv"))
-    ds2 = SimpleNamespace(name="sample", path=Path("b/sample.csv"))
+def test_dataset_key_disambiguates_same_stem_without_exposing_full_paths(tmp_path):
+    ds1 = SimpleNamespace(name="sample", path=tmp_path / "private-a" / "sample.csv")
+    ds2 = SimpleNamespace(name="sample", path=tmp_path / "private-b" / "sample.csv")
     labels = _build_dataset_labels([ds1, ds2])
 
     key1 = _dataset_key(SimpleNamespace(datasets=[ds1]), labels)
@@ -15,6 +15,10 @@ def test_dataset_key_disambiguates_same_stem_different_paths():
     assert key1 != key2
     assert key1.startswith("sample")
     assert key2.startswith("sample")
+    assert str(tmp_path) not in key1
+    assert str(tmp_path) not in key2
+    assert "sample.csv" in key1
+    assert "sample.csv" in key2
 
 
 def test_dataset_key_disambiguates_repeated_same_path():

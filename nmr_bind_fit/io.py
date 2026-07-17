@@ -44,7 +44,7 @@ def _norm_col(name: str) -> str:
 
 def _find_ppm_columns(columns: Sequence[str]) -> List[str]:
     # Infer ppm columns by name when they are not explicitly supplied.
-    ppm_cols = [c for c in columns if "ppm" in _norm_col(c)]
+    ppm_cols = [c for c in columns if "ppm" in _norm_col(str(c))]
     return ppm_cols
 
 
@@ -52,15 +52,39 @@ def _split_cols(value: Optional[str]) -> Optional[List[str]]:
     # Parse a comma-separated list into clean column names.
     if value is None:
         return None
-    cols = [c.strip() for c in value.split(",") if c.strip()]
-    return cols or None
+    return [c.strip() for c in value.split(",") if c.strip()]
 
 
 def _read_table(path: Path) -> pd.DataFrame:
     # Load tabular data based on file extension.
-    if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path)
-    return pd.read_csv(path)
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xls"}:
+        try:
+            return pd.read_excel(path)
+        except ImportError as exc:
+            if suffix == ".xls":
+                message = (
+                    "Reading .xls files requires the optional 'xlrd' dependency; "
+                    "install xlrd or convert the file to .xlsx or CSV."
+                )
+            else:
+                message = (
+                    "Reading .xlsx files requires the optional Excel dependency; "
+                    "install nmr_bind_fit[excel] or convert the file to CSV."
+                )
+            raise ValueError(message) from exc
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError(f"Input file is empty or has no header: {path}") from exc
+
+
+def _validate_input_file(path: Path) -> None:
+    """Require a concrete regular input file before invoking pandas."""
+    if not path.exists():
+        raise FileNotFoundError(f"Input file not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"Input path is not a regular file: {path}")
 
 
 def _resolve_concentration_columns(
@@ -87,6 +111,18 @@ def _resolve_ppm_cols(columns: Sequence[str], ppm_cols: Optional[Sequence[str]])
             )
     if not cols:
         raise ValueError("No ppm columns detected. Use --ppm-cols to specify.")
+    duplicates = sorted({col for col in cols if cols.count(col) > 1})
+    if duplicates:
+        raise ValueError("Duplicate ppm columns specified: " + ", ".join(map(str, duplicates)))
+    missing = [col for col in cols if col not in columns]
+    if missing:
+        raise ValueError("Specified ppm columns not found: " + ", ".join(map(str, missing)))
+    reserved = [col for col in cols if col in {REQUIRED_HOST_COL, REQUIRED_GUEST_COL}]
+    if reserved:
+        raise ValueError(
+            "Concentration columns cannot also be used as ppm columns: "
+            + ", ".join(map(str, reserved))
+        )
     return cols
 
 
@@ -99,6 +135,17 @@ def _subset_input_columns(
     # Keep only columns needed for fitting.
     use_cols = [host_col, guest_col] + list(ppm_cols)
     return df.loc[:, use_cols].copy()
+
+
+def _coerce_numeric_columns(data: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
+    """Convert fitting columns to numeric values with a column-specific error."""
+    converted = data.copy()
+    for col in columns:
+        try:
+            converted[col] = pd.to_numeric(converted[col], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Column '{col}' must contain only numeric values.") from exc
+    return converted
 
 
 def _drop_missing_required(
@@ -119,10 +166,10 @@ def _drop_incomplete_ppm_columns(
 ) -> Tuple[pd.DataFrame, List[str], List[str]]:
     # Remove ppm columns containing any missing value.
     ppm_cols_list = list(ppm_cols)
-    ppm_view = data.loc[:, ppm_cols_list].apply(pd.to_numeric, errors="coerce")
-    finite_mask = np.isfinite(ppm_view.to_numpy(dtype=float))
-    missing_by_col = pd.Series(~finite_mask.all(axis=0), index=ppm_cols_list)
-    dropped_ppm = [col for col in ppm_cols_list if bool(missing_by_col.get(col, False))]
+    ppm_view = data.loc[:, ppm_cols_list]
+    ppm_values = np.asarray(ppm_view, dtype=float)
+    incomplete_by_col = ~np.all(np.isfinite(ppm_values), axis=0)
+    dropped_ppm = [col for col, incomplete in zip(ppm_cols_list, incomplete_by_col) if bool(incomplete)]
     if dropped_ppm:
         warnings.warn(
             "Dropping ppm columns with missing or non-finite values: " + ", ".join(dropped_ppm),
@@ -160,6 +207,20 @@ def _validate_concentration_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> None
         raise ValueError("Guest concentration values must be non-negative and finite.")
 
 
+def _validate_ppm_array(y: np.ndarray, ppm_cols: Sequence[str]) -> None:
+    """Ensure every retained peak has at least one finite observation."""
+    if y.ndim != 2 or y.shape[0] == 0 or y.shape[1] == 0:
+        raise ValueError("No ppm observations remain after input filtering.")
+    finite = np.isfinite(y)
+    if not np.any(finite):
+        raise ValueError("No finite ppm observations remain after input filtering.")
+    empty_cols = [col for col, has_value in zip(ppm_cols, np.any(finite, axis=0)) if not has_value]
+    if empty_cols:
+        raise ValueError(
+            "ppm columns contain no finite observations: " + ", ".join(map(str, empty_cols))
+        )
+
+
 def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
     # Compute equivalents (G/H) for plotting and x-axis usage.
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -172,7 +233,11 @@ def load_dataset(
     missing_policy: str = "drop-column",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
+    path = Path(path)
+    _validate_input_file(path)
     df = _read_table(path)
+    if df.empty:
+        raise ValueError(f"Input dataset contains no data rows: {path}")
     columns = list(df.columns)
     host_col, guest_col = _resolve_concentration_columns(columns)
     ppm_cols = _resolve_ppm_cols(columns, ppm_cols)
@@ -181,6 +246,7 @@ def load_dataset(
     data, dropped_required_rows = _drop_missing_required(data, host_col, guest_col)
     if data.empty:
         raise ValueError("No rows remain after dropping rows with missing required concentrations.")
+    data = _coerce_numeric_columns(data, [host_col, guest_col, *ppm_cols])
 
     ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)
     use_cols = [host_col, guest_col] + ppm_cols
@@ -193,6 +259,7 @@ def load_dataset(
 
     # Extract ppm values.
     y = np.asarray(ppm_data, dtype=float)
+    _validate_ppm_array(y, ppm_cols)
     x = _compute_equivalents(h_tot, g_tot)
 
     name = path.stem

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import csv
 import html
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .report_html_renderer import write_report_html as _write_report_html_impl
+
+_NUMERIC_CELL_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 @dataclass
@@ -26,6 +30,7 @@ class ModelEntry:
     params: List[ParamEntry]
     plots: List[str]
     warnings: List[str]
+    plot_labels: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,15 +73,27 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
     return paragraphs
 
 
+def _spreadsheet_safe_cell(value: object) -> object:
+    """Neutralize spreadsheet formulas while preserving numeric text cells."""
+    if not isinstance(value, str):
+        return value
+    probe = value.lstrip("\ufeff \t\r\n\v\f")
+    if not probe or probe[0] not in _FORMULA_PREFIXES:
+        return value
+    if _NUMERIC_CELL_RE.fullmatch(probe):
+        return value
+    return "'" + value
+
+
 def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
     if not rows:
-        return
+        raise ValueError("Cannot write summary.csv without at least one successful fit result.")
     fieldnames = list(rows[0].keys())
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        writer.writerow({name: _spreadsheet_safe_cell(name) for name in fieldnames})
         for row in rows:
-            writer.writerow(row)
+            writer.writerow({key: _spreadsheet_safe_cell(value) for key, value in row.items()})
 
 
 def write_decision_txt(decisions: Sequence[str], path: Path) -> None:

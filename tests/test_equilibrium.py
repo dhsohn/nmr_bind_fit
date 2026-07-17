@@ -2,7 +2,14 @@ import numpy as np
 import pytest
 
 import nmr_bind_fit.equilibrium as equilibrium
-from nmr_bind_fit.equilibrium import solve_11, solve_12, solve_21
+from nmr_bind_fit.equilibrium import (
+    SolverStats,
+    solve_11,
+    solve_12,
+    solve_12_point,
+    solve_21,
+    solve_21_point,
+)
 
 
 def test_solve_11_mass_balance():
@@ -13,6 +20,66 @@ def test_solve_11_mass_balance():
     species = solve_11(h0, g0, k)
     np.testing.assert_allclose(species.h + species.hg, h0, rtol=1e-6, atol=1e-12)
     np.testing.assert_allclose(species.g + species.hg, g0, rtol=1e-6, atol=1e-12)
+
+
+def test_solve_11_preserves_dilute_weak_binding_complex():
+    species = solve_11(
+        np.array([1e-3], dtype=float),
+        np.array([1e-14], dtype=float),
+        1.0,
+    )
+
+    assert species.hg[0] > 0.0
+    np.testing.assert_allclose(species.hg[0], 9.99000999000989e-18, rtol=1e-12, atol=0.0)
+
+
+def test_solve_11_handles_extremely_small_positive_k_without_overflow():
+    species = solve_11(
+        np.array([1e-3], dtype=float),
+        np.array([1e-3], dtype=float),
+        1e-200,
+    )
+
+    assert np.all(np.isfinite(species.h))
+    assert np.all(np.isfinite(species.g))
+    assert np.all(np.isfinite(species.hg))
+    np.testing.assert_allclose(species.hg[0], 1e-206, rtol=1e-12, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    "h_tot,g_tot,k,expected_hg",
+    [
+        (1e297, 1e-27, 1e292, 1e-27),
+        (1e200, 1e-200, 1e200, 1e-200),
+        (1e297, 1e-27, 1e-292, 1e-27),
+        (1e-27, 1e297, 1e-292, 1e-27),
+    ],
+)
+def test_solve_11_preserves_limiting_species_across_disparate_scales(
+    h_tot,
+    g_tot,
+    k,
+    expected_hg,
+):
+    species = solve_11(np.array([h_tot]), np.array([g_tot]), k)
+
+    np.testing.assert_allclose(species.hg[0], expected_hg, rtol=1e-5, atol=0.0)
+    assert 0.0 <= species.hg[0] <= min(h_tot, g_tot)
+
+
+@pytest.mark.parametrize("k", [0.0, -1.0, np.nan, np.inf])
+def test_solve_11_rejects_invalid_k_domain(k):
+    with pytest.raises(ValueError, match="positive and finite"):
+        solve_11(np.array([1e-3]), np.array([1e-3]), k)
+
+
+def test_solve_11_rejects_invalid_total_arrays():
+    with pytest.raises(ValueError, match="matching shape"):
+        solve_11(np.array([1e-3, 2e-3]), np.array([1e-3]), 1e4)
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        solve_11(np.array([np.nan]), np.array([1e-3]), 1e4)
+    with pytest.raises(ValueError, match="non-negative and finite"):
+        solve_11(np.array([1e-3]), np.array([-1e-3]), 1e4)
 
 
 def test_solve_12_mass_balance():
@@ -71,6 +138,7 @@ def test_solve_12_continue_mode_records_failed_point_and_continues(monkeypatch):
 
     assert calls == 3
     assert species.solver_stats is not None
+    assert species.solver_stats.fail == 1
     assert species.solver_stats.failed_indices == [1]
     assert np.isnan(species.h[1])
     assert np.isfinite(species.h[2])
@@ -208,3 +276,119 @@ def test_solve_21_near_saturation(k1, k2):
     np.testing.assert_allclose(
         species.g + species.hg + species.h2g, g0, rtol=1e-5, atol=1e-12
     )
+
+
+@pytest.mark.parametrize(
+    "solver,host_balance,guest_balance",
+    [
+        (
+            solve_12_point,
+            lambda h, hg, complex_2: h + hg + complex_2,
+            lambda g, hg, complex_2: g + hg + 2.0 * complex_2,
+        ),
+        (
+            solve_21_point,
+            lambda h, hg, complex_2: h + hg + 2.0 * complex_2,
+            lambda g, hg, complex_2: g + hg + complex_2,
+        ),
+    ],
+)
+def test_point_solvers_keep_root_in_physical_interval_for_dilute_host(
+    monkeypatch, solver, host_balance, guest_balance
+):
+    h_tot = 1e-9
+    g_tot = 1e-6
+    calls = []
+    scipy_brentq = equilibrium.brentq
+
+    def tracking_brentq(function, lower, upper, **kwargs):
+        calls.append((lower, upper, kwargs))
+        return scipy_brentq(function, lower, upper, **kwargs)
+
+    monkeypatch.setattr(equilibrium, "brentq", tracking_brentq)
+
+    h, g, hg, complex_2 = solver(h_tot, g_tot, 100.0, 1e5)
+
+    assert calls
+    lower, upper, options = calls[0]
+    assert lower == 0.0
+    assert upper == g_tot
+    assert 0.0 < options["xtol"] < g_tot
+    assert options["maxiter"] > 100
+    assert 0.0 <= g <= g_tot
+    np.testing.assert_allclose(
+        host_balance(h, hg, complex_2), h_tot, rtol=1e-10, atol=1e-22
+    )
+    np.testing.assert_allclose(
+        guest_balance(g, hg, complex_2), g_tot, rtol=1e-10, atol=1e-20
+    )
+
+
+def test_solve_21_converges_for_small_guest_case_that_exceeded_default_maxiter():
+    h_tot = 2e-3
+    g_tot = 5e-7
+
+    h, g, hg, h2g = solve_21_point(h_tot, g_tot, 5e4, 5e2)
+
+    assert 0.0 <= g <= g_tot
+    np.testing.assert_allclose(h + hg + 2.0 * h2g, h_tot, rtol=1e-10, atol=1e-15)
+    np.testing.assert_allclose(g + hg + h2g, g_tot, rtol=1e-10, atol=1e-18)
+
+
+@pytest.mark.parametrize("solver", [solve_12_point, solve_21_point])
+@pytest.mark.parametrize("k", [1e100, 1e200, 1e300])
+def test_point_solvers_adapt_iteration_budget_for_extreme_finite_constants(solver, k):
+    h, g, hg, complex_2 = solver(1.0, 1.0, k, k)
+
+    assert np.all(np.isfinite([h, g, hg, complex_2]))
+    if solver is solve_12_point:
+        host_balance = h + hg + complex_2
+        guest_balance = g + hg + 2.0 * complex_2
+    else:
+        host_balance = h + hg + 2.0 * complex_2
+        guest_balance = g + hg + complex_2
+    np.testing.assert_allclose(host_balance, 1.0, rtol=1e-12, atol=1e-15)
+    np.testing.assert_allclose(guest_balance, 1.0, rtol=1e-12, atol=1e-15)
+
+
+def test_solve_21_handles_free_guest_below_smallest_representable_float():
+    h_tot = 0.0034637557380160595
+    g_tot = 4.669019767985327e-08
+    h, g, hg, h2g = solve_21_point(
+        h_tot,
+        g_tot,
+        4.267560963643155e263,
+        6.641208289680381e212,
+    )
+
+    assert g == 0.0
+    assert np.all(np.isfinite([h, g, hg, h2g]))
+    np.testing.assert_allclose(h + hg + 2.0 * h2g, h_tot, rtol=1e-12, atol=1e-18)
+    np.testing.assert_allclose(g + hg + h2g, g_tot, rtol=1e-12, atol=1e-20)
+
+
+@pytest.mark.parametrize("solver", [solve_12_point, solve_21_point])
+def test_point_solvers_handle_physical_endpoint_roots(solver):
+    stats = SolverStats()
+
+    h, g, hg, complex_2 = solver(0.0, 2e-3, 1e4, 1e3, stats=stats)
+
+    assert (h, g, hg, complex_2) == (0.0, 2e-3, 0.0, 0.0)
+    assert stats.success == 1
+    assert stats.fail == 0
+
+
+@pytest.mark.parametrize("solver", [solve_12_point, solve_21_point])
+def test_point_solvers_count_brent_runtime_failure(monkeypatch, solver):
+    stats = SolverStats()
+
+    def fail_brentq(*args, **kwargs):
+        raise RuntimeError("synthetic convergence failure")
+
+    monkeypatch.setattr(equilibrium, "brentq", fail_brentq)
+
+    with pytest.raises(RuntimeError, match="Equilibrium solver failed"):
+        solver(1e-3, 5e-4, 1e4, 1e3, stats=stats)
+
+    assert stats.success == 0
+    assert stats.fail == 1

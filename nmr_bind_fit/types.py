@@ -52,6 +52,9 @@ class BootstrapLike(Protocol):
     ci_low_bca: np.ndarray
     ci_high_bca: np.ndarray
     ci_method: str
+    ci_method_used: str
+    ci_valid: bool
+    ci_message: str
     n_success: int
     n_boot: int
     ci_warning: str
@@ -77,6 +80,10 @@ class FitResultLike(Protocol):
     aicc: float
     n: int
     p: int
+    dof: int
+    jacobian_rank: int
+    jacobian_condition: float
+    jacobian_logk_sensitivity: float
     residual_diagnostics: dict
     species: List[SpeciesLike]
     residuals: List[np.ndarray]

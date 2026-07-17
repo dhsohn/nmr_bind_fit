@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import re
 import sys
 from collections import Counter
@@ -52,9 +53,12 @@ def _non_negative_int(value: str) -> int:
 
 def _parse_k_starts(value: Optional[str]) -> List[float]:
     # Parse comma-separated starts or default to log-spaced values.
-    if not value:
+    if value is None:
         return [10**i for i in range(1, 9)]
-    return [float(v.strip()) for v in value.split(",") if v.strip()]
+    try:
+        return [float(v.strip()) for v in value.split(",") if v.strip()]
+    except ValueError as exc:
+        raise ValueError("--k-starts must be a comma-separated list of numeric values.") from exc
 
 
 def _validate_finite_number(value: float, message: str) -> float:
@@ -73,13 +77,15 @@ def _resolve_inputs(patterns: List[str]) -> List[Path]:
         matches = sorted(glob.glob(pattern))
         if not matches:
             path = Path(pattern)
-            if path.exists():
-                matches = [pattern]
-            else:
-                unmatched.append(pattern)
-                continue
+            if not path.exists():
+                raise FileNotFoundError(f"Input file or pattern not found: {pattern}")
+            matches = [pattern]
         for match in matches:
             path = Path(match)
+            if not path.exists():
+                raise FileNotFoundError(f"Input file not found: {path}")
+            if not path.is_file():
+                raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
             resolved_paths.append(path.resolve())
     if unmatched:
@@ -94,9 +100,14 @@ def _resolve_inputs(patterns: List[str]) -> List[Path]:
 
 
 def _safe_output_name(name: str) -> str:
-    # Sanitize output names for filesystem safety.
+    # Sanitize and bound output names for filesystem safety.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
-    return safe or "output"
+    safe = safe or "output"
+    if len(safe) <= 80:
+        return safe
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+    prefix = safe[:67].rstrip("._-") or "output"
+    return f"{prefix}-{digest}"
 
 
 def _auto_output_dir(paths: List[Path]) -> Path:
@@ -108,6 +119,21 @@ def _auto_output_dir(paths: List[Path]) -> Path:
     else:
         base = "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
+
+
+def _reserve_output_dir(paths: List[Path]) -> Path:
+    """Atomically reserve a unique output directory for one analysis run."""
+    base = _auto_output_dir(paths)
+    candidate = base
+    suffix = 2
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            candidate = base.with_name(f"{base.name}_{suffix:02d}")
+            suffix += 1
+        else:
+            return candidate
 
 
 def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
@@ -123,18 +149,10 @@ def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
             labels[idx] = f"{labels[idx]} ({filename})"
 
     counts = Counter(labels)
-    # Second pass: append full path if file names still collide.
-    for idx, ds in enumerate(datasets):
-        if counts[labels[idx]] > 1:
-            path = getattr(ds, "path", None)
-            path_text = str(path) if path is not None else labels[idx]
-            base_name = str(getattr(ds, "name", labels[idx]))
-            labels[idx] = f"{base_name} ({path_text})"
-
-    counts = Counter(labels)
     seen: Dict[str, int] = {}
     deduped: List[str] = []
-    # Final pass: force uniqueness even if the exact same path is repeated.
+    # Second pass: force uniqueness without exposing full input paths in
+    # shareable report labels.
     for label in labels:
         seen[label] = seen.get(label, 0) + 1
         if counts[label] > 1:
@@ -179,12 +197,15 @@ def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optiona
         raise ValueError("All K starts must be positive.")
     if any(v < STRICT_K_MIN or v > STRICT_K_MAX for v in k_starts):
         raise ValueError(f"All K starts must be within [{STRICT_K_MIN:.0e}, {STRICT_K_MAX:.0e}].")
-    args.bootstrap_logk_jitter = _validate_finite_number(
-        args.bootstrap_logk_jitter,
-        "--bootstrap-logk-jitter must be finite.",
-    )
-    if args.bootstrap_logk_jitter < 0:
+    try:
+        jitter = float(args.bootstrap_logk_jitter)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("--bootstrap-logk-jitter must be a finite number.") from exc
+    if not np.isfinite(jitter):
+        raise ValueError("--bootstrap-logk-jitter must be finite.")
+    if jitter < 0:
         raise ValueError("--bootstrap-logk-jitter must be non-negative.")
+    args.bootstrap_logk_jitter = jitter
     logk_starts = [float(np.log10(v)) for v in k_starts]
     logk_bounds = (float(np.log10(STRICT_K_MIN)), float(np.log10(STRICT_K_MAX)))
     return logk_starts, logk_bounds
@@ -217,13 +238,16 @@ def _display_model_name(name: str) -> str:
 def run_fit(args: argparse.Namespace) -> None:
     # Defensively re-validate for callers that build args directly and bypass
     # the parser (the CLI type converter already rejects negative --bootstrap).
+    if not isinstance(args.bootstrap, (int, np.integer)):
+        raise ValueError("--bootstrap must be a non-negative integer.")
     if args.bootstrap < 0:
         raise ValueError("--bootstrap must be non-negative.")
-    if args.max_nfev <= 0:
-        raise ValueError("--max-nfev must be positive.")
-    if args.bootstrap_ci_width is not None:
+    if not isinstance(args.max_nfev, (int, np.integer)) or args.max_nfev <= 0:
+        raise ValueError("--max-nfev must be a positive integer.")
+    ci_width = getattr(args, "bootstrap_ci_width", None)
+    if ci_width is not None:
         args.bootstrap_ci_width = _validate_finite_number(
-            args.bootstrap_ci_width,
+            ci_width,
             "--bootstrap-ci-width must be finite.",
         )
         if args.bootstrap_ci_width <= 0:
@@ -232,6 +256,8 @@ def run_fit(args: argparse.Namespace) -> None:
     if args.bootstrap_ci_method not in {"percentile", "bca"}:
         raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")
     args.residual_diagnostics = bool(getattr(args, "residual_diagnostics", False))
+    logk_starts, logk_bounds = _resolve_logk_config(args)
+
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
     datasets = load_datasets(
@@ -244,8 +270,6 @@ def run_fit(args: argparse.Namespace) -> None:
     dataset_labels = _build_dataset_labels(datasets)
 
     model_names = DEFAULT_MODEL_NAMES
-
-    logk_starts, logk_bounds = _resolve_logk_config(args)
 
     # Fit all requested models.
     results = fit_models(
@@ -264,12 +288,23 @@ def run_fit(args: argparse.Namespace) -> None:
         residual_diagnostics=args.residual_diagnostics,
     )
 
-    # Prepare output directory for reports and plots.
-    out_dir = _auto_output_dir(paths)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     # Index results by dataset key and collect failures.
     ordered_keys, results_by_key, failures_by_key = _index_results(results, dataset_labels)
+    if not results_by_key:
+        failure_details = [
+            f"{key} / {_display_model_name(model)}: {message}"
+            for key in ordered_keys
+            for model, message in failures_by_key.get(key, [])
+        ]
+        detail_text = "; ".join(failure_details)
+        message = "All model fits failed; no report was generated."
+        if detail_text:
+            message = f"{message} {detail_text}"
+        raise ValueError(message)
+
+    # Prepare output directory for reports and plots only after at least one
+    # model has produced a reportable result.
+    out_dir = _reserve_output_dir(paths)
 
     summary_rows, model_entries, report_warnings = build_report_artifacts(
         args,

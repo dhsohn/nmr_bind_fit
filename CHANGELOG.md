@@ -21,9 +21,12 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - Hardened model fitting and reporting guardrails: invalid multivalent binding constants
   are rejected, weak-binding solver brackets include the physical root, failed candidates
   remain visible in `summary.csv`, and model selection now ranks only finite-BIC fits.
-- Bootstrap confidence intervals now require enough successful refits; BCa-style intervals
-  use leave-one-titration-point jackknife refits and warn when falling back to percentile
-  intervals.
+- Bootstrap confidence intervals now require every requested pseudo-dataset to yield an
+  uncensored acceptable refit after comparing jittered and full-data-optimum starts. A
+  statistically competitive bound-limited or otherwise non-identifiable solution censors the
+  draw, preventing convergence-filtered tail samples from being reported as unconditional
+  intervals. BCa-style intervals use leave-one-titration-point jackknife refits and explicitly
+  omit the requested estimate when unavailable rather than silently falling back to percentile.
 - Input handling now treats non-finite ppm values as invalid peak observations and reports
   rows dropped for missing required concentrations.
 - Renamed the import package namespace from `core` to `nmr_bind_fit` while keeping the CLI command `nmr_bind_fit`.
@@ -32,6 +35,14 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - The generated HTML report is now labeled consistently as `nmr_bind_fit` (previously "NMRBindFit").
 - The CLI now reports expected input and validation errors as a concise message with a nonzero exit status instead of an uncaught traceback.
 - `fit_models` now documents its parameters and defaults the optional ones, so it can be used as a library entry point with only datasets, model names, and log10(K) starts.
+
+### Fixed
+
+- Isolated independent multi-dataset report artifacts so plots and bootstrap files cannot overwrite one another.
+- Rejected underdetermined, rank-deficient, severely ill-conditioned, low-sensitivity, or bound-limited fits using response-unit-invariant diagnostics instead of reporting non-identifiable binding constants.
+- Required sufficient successful bootstrap refits before reporting confidence intervals and replaced bootstrap-sample acceleration with explicitly labeled local-refit BCa jackknife estimates.
+- Hardened 1:2 and 2:1 equilibrium bracketing and convergence behavior across extreme valid inputs.
+- Added early input/configuration validation and nonzero CLI failures when no candidate model succeeds.
 
 ### Removed
 

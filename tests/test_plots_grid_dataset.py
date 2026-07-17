@@ -56,3 +56,17 @@ def test_safe_file_stems_avoids_collision_with_existing_prefix():
 
     assert len(stems) == len(set(stems))
     assert stems[2] not in {stems[0], stems[1]}
+
+
+def test_safe_file_stems_are_bounded_and_collision_free_for_long_labels():
+    stems = _safe_file_stems(
+        [
+            "ppm/" + "a" * 300,
+            "ppm?" + "a" * 300,
+            "측정값" * 200,
+            "측정값" * 200,
+        ]
+    )
+
+    assert len(stems) == len(set(stems))
+    assert all(len(stem) <= 70 for stem in stems)

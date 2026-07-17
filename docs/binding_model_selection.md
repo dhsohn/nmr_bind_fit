@@ -95,8 +95,10 @@ data that do not in fact support binding — the kind of false positive examined
 
 - **Method**: nonlinear least squares (`scipy.optimize.least_squares`, Trust Region Reflective).
 - **1:1**: equilibrium solved analytically (closed-form quadratic).
-- **1:2 / 2:1**: solved point-by-point with Brent's method
-  (`scipy.optimize.brentq`, `xtol=1e-50`, `rtol=1e-15`). The full mass-balance polynomial is
+- **1:2 / 2:1**: solved point-by-point with Brent's method over the physical free-guest
+  interval `[0, G_tot]` (`scipy.optimize.brentq`, scale-adaptive absolute tolerance,
+  `rtol=8·eps`, and a bracket-scale-adaptive iteration budget with a minimum of 200).
+  The full mass-balance relation is
   solved at every point — the simplifying approximation that free guest equals total guest is
   *not* used — in line with the rigorous equilibrium treatment of Hargrove et al. (2010).
 - **K parameterization**: estimated as $\log_{10}(K)$ and **constrained to [0, 12]**
@@ -104,10 +106,15 @@ data that do not in fact support binding — the kind of false positive examined
   This range ensures physically meaningful and numerically stable estimation. A
   $\log_{10}K$ estimate pinned at 0 or 12 indicates the estimate is not trustworthy (see §6).
 - **Multistart**: fits are launched from a grid of $\log_{10}K$ starting values to avoid
-  local minima; the lowest finite-RSS result is retained with its optimizer status preserved
-  (`select_best_multistart` in `nmr_bind_fit/fit_optimizer.py`). A lower-RSS run that still
-  fails optimizer convergence is reported as a failed candidate rather than being replaced by
-  a worse successful local minimum.
+  local minima; among successful fits, the solution with the lowest RSS is retained
+  (`select_best_multistart` in `nmr_bind_fit/fit_optimizer.py`).
+- **Response-unit invariance**: residuals are divided by one global observed-response
+  scale during optimization. This does not change the least-squares minimum or relative
+  residual weights, but prevents response-unit changes from altering optimizer termination.
+- **Identifiability gate**: a fit is excluded from model comparison unless it has positive
+  residual degrees of freedom, a full-column-rank dimensionless Jacobian with condition
+  number at most $10^6$, minimum dimensionless $\log_{10}K$ RMS sensitivity of at least
+  $10^{-4}$, and no fitted $\log_{10}K$ value on an active optimization bound.
 - **Missing data**: rows with missing host/guest concentrations are dropped; any ppm column
   containing missing or non-finite values is excluded entirely (remaining peaks retained).
 - **Solver failures**: per-point solver failures in 1:2/2:1 use fail-fast behavior; penalty
@@ -219,11 +226,15 @@ estimation methods advocated by Hibbert and Thordarson (2016).
 
 - Iterations via `--bootstrap` (default 1000); resampling via `--bootstrap-method`
   (`residual` default / `parametric` / `points`).
-- CI method: percentile (2.5th/97.5th, default) or BCa-style
-  (`--bootstrap-ci-method bca`). Confidence intervals are reported only when at least 20
-  bootstrap refits succeed. BCa-style intervals use leave-one-titration-point jackknife refits
-  for the acceleration term; if those refits cannot support finite BCa bounds, percentile
-  bounds are reported with a warning.
+- CI method: percentile (2.5th/97.5th, default) or BCa-style local refitting
+  (`--bootstrap-ci-method bca`). The acceleration term is estimated from delete-one jackknife
+  refits initialized at the full-data optimum. Because the complete multistart estimator is not
+  rerun for every bootstrap and jackknife sample, reports identify the method as `bca-local`.
+- CI validity: each pseudo-dataset is fitted from the jittered and full-data-optimum starts.
+  A statistically competitive bound-limited or otherwise non-identifiable solution within a
+  95% profile-likelihood RSS window censors that draw. At least 20 refits must be requested and
+  every requested pseudo-dataset must yield an uncensored acceptable refit; otherwise the
+  interval and bootstrap SE are unavailable to avoid convergence-filtered tail truncation.
 - Each bootstrap refit applies a small jitter to the $\log_{10}K$ start to explore the
   objective surface near the optimum.
 
@@ -314,7 +325,7 @@ the lowest BIC, and the model itself should be reconsidered.
 | Model-comparison table (BIC, AICc, RMSE, R², …) | `summary.csv` | Per-model values of the §4 indices, including failed-candidate audit rows |
 | Selection decision and reasons | `decision.txt` | Provisional working model, ΔBIC, warnings (§5) |
 | Combined report | `report.html` | Methods + plots + decision paragraphs |
-| Per-model diagnostics | `model_*/` | Plots, bootstrap histograms, correlation matrix |
+| Per-model diagnostics | `model_*/dataset_*/` | Dataset-scoped plots, bootstrap histograms, correlation matrix |
 
 ---
 

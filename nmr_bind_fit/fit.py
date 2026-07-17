@@ -11,7 +11,15 @@ from scipy.optimize import OptimizeResult
 from .fit_bootstrap import BootstrapResult
 from .fit_bootstrap import bootstrap_params as _bootstrap_params_impl
 from .fit_criteria import information_criteria
-from .fit_optimizer import build_logk_grid, param_bounds, select_best_multistart
+from .fit_optimizer import (
+    MAX_JACOBIAN_CONDITION,
+    MIN_LOGK_RMS_SENSITIVITY,
+    build_logk_grid,
+    jacobian_logk_rms_sensitivity,
+    jacobian_rank_and_condition,
+    param_bounds,
+    select_best_multistart,
+)
 from .fit_optimizer import fit_with_initial as _optimizer_fit_with_initial
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
@@ -42,6 +50,9 @@ class FitResult:
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
     logk_bounds: Optional[Tuple[float, float]] = None
+    jacobian_rank: int = 0
+    jacobian_condition: float = float("inf")
+    jacobian_logk_sensitivity: float = float("nan")
 
 
 class ModelFitError(RuntimeError):
@@ -73,31 +84,25 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
 def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
     y = np.asarray(dataset.y, dtype=float)
     x = np.asarray(dataset.x, dtype=float)
-    y0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
-    y1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
-    x0 = np.full((dataset.n_peaks,), np.nan, dtype=float)
-    x1 = np.full((dataset.n_peaks,), np.nan, dtype=float)
-
+    y0 = np.empty((dataset.n_peaks,), dtype=float)
+    y1 = np.empty((dataset.n_peaks,), dtype=float)
+    x0 = np.empty((dataset.n_peaks,), dtype=float)
+    x1 = np.empty((dataset.n_peaks,), dtype=float)
     for peak_idx in range(dataset.n_peaks):
-        mask = np.isfinite(y[:, peak_idx]) & np.isfinite(x)
-        if not np.any(mask):
-            continue
-        indices = np.flatnonzero(mask)
-        first = int(indices[0])
-        last = int(indices[-1])
-        y0[peak_idx] = y[first, peak_idx]
-        y1[peak_idx] = y[last, peak_idx]
-        x0[peak_idx] = x[first]
-        x1[peak_idx] = x[last]
-
-    if not np.all(np.isfinite(y0) & np.isfinite(y1)):
-        raise ValueError("Each ppm column must contain at least one finite value for fitting.")
-
+        finite = np.isfinite(y[:, peak_idx]) & np.isfinite(x)
+        if not np.any(finite):
+            raise ValueError(f"Peak {dataset.y_cols[peak_idx]!r} has no finite observations.")
+        indices = np.flatnonzero(finite)
+        low_idx = int(indices[np.argmin(x[indices])])
+        high_idx = int(indices[np.argmax(x[indices])])
+        y0[peak_idx] = y[low_idx, peak_idx]
+        y1[peak_idx] = y[high_idx, peak_idx]
+        x0[peak_idx] = x[low_idx]
+        x1[peak_idx] = x[high_idx]
     if model.name == "nb":
         slope = np.zeros_like(y0)
-        span = x1 - x0
-        mask = np.isfinite(span) & (span != 0)
-        slope[mask] = (y1[mask] - y0[mask]) / span[mask]
+        varying = x1 != x0
+        slope[varying] = (y1[varying] - y0[varying]) / (x1[varying] - x0[varying])
         return np.column_stack([y0, slope])
     if model.n_delta_per_peak == 2:
         return np.column_stack([y0, y1])
@@ -125,10 +130,11 @@ def _param_names_multi(model: ModelSpec, datasets: List[Dataset]) -> List[str]:
         names.append("logK")
     elif model.n_logk == 2:
         names.extend(["logK1", "logK2"])
-    for ds in datasets:
+    for dataset_idx, ds in enumerate(datasets, start=1):
+        dataset_label = ds.name if len(datasets) == 1 else f"{dataset_idx}_{ds.name}"
         for peak in ds.y_cols:
             for label in model.species_labels:
-                names.append(f"{label}_{ds.name}_{peak}")
+                names.append(f"{label}_{dataset_label}_{peak}")
     return names
 
 
@@ -265,7 +271,134 @@ def _fit_with_initial(
 
 
 def _total_observations(datasets: List[Dataset]) -> int:
-    return int(sum(np.count_nonzero(np.isfinite(ds.y)) for ds in datasets))
+    total = 0
+    for ds in datasets:
+        try:
+            values = np.asarray(ds.y, dtype=float)
+        except (TypeError, ValueError):
+            continue
+        total += int(np.count_nonzero(np.isfinite(values)))
+    return total
+
+
+def _validate_fit_design(model: ModelSpec, datasets: List[Dataset]) -> None:
+    """Reject datasets that cannot identify the requested parameterization."""
+    if not datasets:
+        raise ModelFitError("At least one dataset is required.")
+
+    parameter_count = model.n_logk
+    any_positive_guest = False
+    for ds in datasets:
+        try:
+            y = np.asarray(ds.y, dtype=float)
+            h_tot = np.asarray(ds.h_tot, dtype=float)
+            g_tot = np.asarray(ds.g_tot, dtype=float)
+            x = np.asarray(ds.x, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ModelFitError(f"Dataset {ds.name!r} contains non-numeric values.") from exc
+        if y.ndim != 2 or y.shape[0] == 0 or y.shape[1] == 0:
+            raise ModelFitError(f"Dataset {ds.name!r} must contain at least one point and one peak.")
+        if h_tot.shape != (y.shape[0],) or g_tot.shape != (y.shape[0],) or x.shape != (y.shape[0],):
+            raise ModelFitError(f"Dataset {ds.name!r} has inconsistent concentration or observation shapes.")
+        if len(ds.y_cols) != y.shape[1]:
+            raise ModelFitError(f"Dataset {ds.name!r} has inconsistent peak labels.")
+        if not np.all(np.isfinite(h_tot)) or np.any(h_tot <= 0):
+            raise ModelFitError(f"Dataset {ds.name!r} has invalid host concentrations.")
+        if not np.all(np.isfinite(g_tot)) or np.any(g_tot < 0):
+            raise ModelFitError(f"Dataset {ds.name!r} has invalid guest concentrations.")
+        if not np.all(np.isfinite(x)):
+            raise ModelFitError(f"Dataset {ds.name!r} has invalid concentration equivalents.")
+
+        any_positive_guest = any_positive_guest or bool(np.any(g_tot > 0))
+        for peak_idx, peak_name in enumerate(ds.y_cols):
+            finite_count = int(np.count_nonzero(np.isfinite(y[:, peak_idx])))
+            if finite_count == 0:
+                raise ModelFitError("Each ppm column must contain at least one finite value for fitting.")
+            if finite_count < model.n_delta_per_peak:
+                raise ModelFitError(
+                    f"Peak {peak_name!r} in dataset {ds.name!r} has {finite_count} finite observations; "
+                    f"at least {model.n_delta_per_peak} are required for model {model.name}."
+                )
+        parameter_count += y.shape[1] * model.n_delta_per_peak
+
+    observation_count = _total_observations(datasets)
+    if observation_count <= parameter_count:
+        raise ModelFitError(
+            f"Insufficient observations for model {model.name}: n={observation_count}, "
+            f"p={parameter_count}; positive residual degrees of freedom are required."
+        )
+    if model.is_binding and not any_positive_guest:
+        raise ModelFitError(f"Model {model.name} cannot identify binding constants without positive guest concentrations.")
+
+
+def _validate_fit_options(
+    model_names: Sequence[str],
+    logk_starts: Sequence[float],
+    max_nfev: int,
+    bootstrap: int,
+    bootstrap_method: str,
+    bootstrap_ci_method: str,
+    logk_bounds: Optional[Tuple[float, float]],
+    logk_jitter: float,
+    solver_failure_mode: str,
+) -> None:
+    if not model_names:
+        raise ValueError("At least one model name is required")
+    unknown_models = [name for name in model_names if name not in MODEL_SPECS]
+    if unknown_models:
+        raise ValueError("Unknown model names: " + ", ".join(unknown_models))
+    if not isinstance(max_nfev, (int, np.integer)) or max_nfev <= 0:
+        raise ValueError("max_nfev must be a positive integer")
+    if not isinstance(bootstrap, (int, np.integer)) or bootstrap < 0:
+        raise ValueError("bootstrap must be a non-negative integer")
+    if bootstrap_method not in {"residual", "points", "parametric"}:
+        raise ValueError("bootstrap_method must be one of: residual, points, parametric")
+    if bootstrap_ci_method not in {"percentile", "bca"}:
+        raise ValueError("bootstrap_ci_method must be one of: percentile, bca")
+    if solver_failure_mode not in {"fail-fast", "continue"}:
+        raise ValueError("solver_failure_mode must be one of: fail-fast, continue")
+    try:
+        jitter_value = float(logk_jitter)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("logk_jitter must be finite and non-negative") from exc
+    if not np.isfinite(jitter_value) or jitter_value < 0:
+        raise ValueError("logk_jitter must be finite and non-negative")
+
+    binding_requested = any(MODEL_SPECS[name].n_logk > 0 for name in model_names)
+    try:
+        starts = np.asarray(list(logk_starts), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("logk_starts must contain numeric values") from exc
+    if binding_requested and starts.size == 0:
+        raise ValueError("logk_starts must include at least one value for binding models")
+    if starts.size > 0 and (starts.ndim != 1 or not np.all(np.isfinite(starts))):
+        raise ValueError("logk_starts must contain only finite values")
+    if binding_requested:
+        for value in starts:
+            try:
+                converted = 10.0 ** float(value)
+            except OverflowError as exc:
+                raise ValueError(
+                    "logk_starts must convert to positive finite binding constants"
+                ) from exc
+            if not np.isfinite(converted) or converted <= 0.0:
+                raise ValueError("logk_starts must convert to positive finite binding constants")
+
+    if logk_bounds is not None:
+        if len(logk_bounds) != 2:
+            raise ValueError("logk_bounds must contain exactly two values")
+        low, high = float(logk_bounds[0]), float(logk_bounds[1])
+        if not np.isfinite(low) or not np.isfinite(high) or low >= high:
+            raise ValueError("logk_bounds must be finite and strictly increasing")
+        if binding_requested:
+            try:
+                converted_bounds = (10.0 ** low, 10.0 ** high)
+            except OverflowError as exc:
+                raise ValueError(
+                    "logk_bounds must convert to positive finite binding constants"
+                ) from exc
+            if any(not np.isfinite(value) or value <= 0.0 for value in converted_bounds):
+                raise ValueError("logk_bounds must convert to positive finite binding constants")
 
 
 def _failed_fit_result(
@@ -275,6 +408,9 @@ def _failed_fit_result(
     param_names: List[str],
     message: str,
     species: Optional[List] = None,
+    jacobian_rank: int = 0,
+    jacobian_condition: float = float("inf"),
+    jacobian_logk_sensitivity: float = float("nan"),
     logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     n = _total_observations(datasets)
@@ -296,6 +432,9 @@ def _failed_fit_result(
         n=n,
         p=p,
         dof=dof,
+        jacobian_rank=jacobian_rank,
+        jacobian_condition=jacobian_condition,
+        jacobian_logk_sensitivity=jacobian_logk_sensitivity,
         y_pred=[],
         species=species if species is not None else [],
         residuals=[],
@@ -357,6 +496,62 @@ def _build_successful_fit_result(
     n = _total_observations(datasets)
     p = int(len(best_params))
     dof = int(n - p)
+    jacobian_rank, jacobian_condition = jacobian_rank_and_condition(
+        best_res,
+        p,
+        model,
+        datasets,
+    )
+    jacobian_logk_sensitivity = jacobian_logk_rms_sensitivity(
+        best_res,
+        p,
+        model.n_logk,
+        model,
+        datasets,
+    )
+    active_mask = np.asarray(getattr(best_res, "active_mask", np.zeros(p)), dtype=int)
+    logk_at_bound = bool(active_mask.size >= model.n_logk and np.any(active_mask[: model.n_logk]))
+    logk_insensitive = bool(
+        model.n_logk > 0
+        and (
+            not np.isfinite(jacobian_logk_sensitivity)
+            or jacobian_logk_sensitivity < MIN_LOGK_RMS_SENSITIVITY
+        )
+    )
+    if (
+        jacobian_rank < p
+        or not np.isfinite(jacobian_condition)
+        or jacobian_condition > MAX_JACOBIAN_CONDITION
+        or logk_at_bound
+        or logk_insensitive
+    ):
+        if jacobian_rank < p:
+            detail = f"Jacobian rank {jacobian_rank} < {p} fitted parameters"
+        elif logk_at_bound:
+            detail = "one or more fitted logK values are on an optimization bound"
+        elif logk_insensitive:
+            detail = (
+                f"minimum dimensionless logK RMS sensitivity "
+                f"{jacobian_logk_sensitivity:.6g} is below "
+                f"{MIN_LOGK_RMS_SENSITIVITY:.6g}"
+            )
+        else:
+            detail = (
+                f"Jacobian condition number {jacobian_condition:.6g} exceeds "
+                f"{MAX_JACOBIAN_CONDITION:.6g}"
+            )
+        return _failed_fit_result(
+            model=model,
+            datasets=datasets,
+            params=best_params,
+            param_names=param_names,
+            message=f"Fit is not locally identifiable for model {model.name}: {detail}.",
+            species=species_list,
+            jacobian_rank=jacobian_rank,
+            jacobian_condition=jacobian_condition,
+            jacobian_logk_sensitivity=jacobian_logk_sensitivity,
+            logk_bounds=logk_bounds,
+        )
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
     r2, r2_per_peak = _r2_score(datasets, y_pred_list)
     bic, aicc = information_criteria(datasets, residuals, p)
@@ -407,6 +602,9 @@ def _build_successful_fit_result(
         n=n,
         p=p,
         dof=dof,
+        jacobian_rank=jacobian_rank,
+        jacobian_condition=jacobian_condition,
+        jacobian_logk_sensitivity=jacobian_logk_sensitivity,
         y_pred=y_pred_list,
         species=species_list,
         residuals=residuals,
@@ -431,7 +629,19 @@ def fit_model(
     solver_failure_mode: str = "fail-fast",
     residual_diagnostics: bool = False,
 ) -> FitResult:
+    _validate_fit_options(
+        [model_name],
+        logk_starts,
+        max_nfev,
+        bootstrap,
+        bootstrap_method,
+        bootstrap_ci_method,
+        logk_bounds,
+        logk_jitter,
+        solver_failure_mode,
+    )
     model = MODEL_SPECS[model_name]
+    _validate_fit_design(model, datasets)
     try:
         logk_grid = build_logk_grid(model, logk_starts, logk_bounds)
     except ValueError as exc:
@@ -487,7 +697,7 @@ def fit_model(
             solver_failure_mode=solver_failure_mode,
             compute_residual_diagnostics=residual_diagnostics,
         )
-    except RuntimeError as exc:
+    except _NUMERIC_EXCEPTIONS as exc:
         raise ModelFitError(str(exc)) from exc
 
 
@@ -531,7 +741,7 @@ def _exception_failure_result(
     logk_bounds: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
-    n_delta = sum(ds.n_peaks * model.n_delta_per_peak for ds in datasets)
+    n_delta = sum(len(ds.y_cols) * model.n_delta_per_peak for ds in datasets)
     n_params = int(model.n_logk + n_delta)
     params = np.full((n_params,), np.nan, dtype=float)
     param_names = _param_names_multi(model, datasets)
@@ -607,7 +817,23 @@ def fit_models(
     Returns:
         One :class:`FitResult` per (dataset-group, model) job, in job order.
         Check ``FitResult.success`` before using the fitted values.
+
+    Raises:
+        ValueError: If model names or fitting options are invalid.
     """
+    if not datasets:
+        raise ValueError("At least one dataset is required.")
+    _validate_fit_options(
+        model_names,
+        logk_starts,
+        max_nfev,
+        bootstrap,
+        bootstrap_method,
+        bootstrap_ci_method,
+        logk_bounds,
+        logk_jitter,
+        solver_failure_mode,
+    )
     results = []
     for fit_datasets, model_name in _iter_fit_jobs(datasets, model_names, replicates):
         try:

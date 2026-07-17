@@ -79,13 +79,13 @@ Multiple replicate files with shared binding constants:
 nmr_bind_fit --input data1.xlsx data2.xlsx --replicates
 ```
 
-BCa-style intervals are available as an experimental option:
+BCa-style local-refit intervals are available as an optional method:
 
 ```bash
 nmr_bind_fit --input data.csv --bootstrap-ci-method bca
 ```
 
-Note: BCa-style intervals require enough successful bootstrap and jackknife refits; when those checks fail, the report falls back to percentile intervals or omits the CI with a warning. The default percentile bootstrap interval is the conservative choice for publication-facing analyses.
+BCa-style acceleration is estimated from delete-one jackknife refits of the original titration rows, initialized at the full-data optimum. Because bootstrap and jackknife samples use local warm-start refits rather than rerunning the complete multistart search, reports label this method `bca-local`. Each pseudo-dataset is fitted from the jittered and full-data-optimum starts; a statistically competitive bound-limited or otherwise non-identifiable solution within a 95% profile-likelihood RSS window censors that draw. Confidence intervals are reported only when at least 20 refits are requested and every requested pseudo-dataset yields an uncensored acceptable refit; otherwise the report marks the interval unavailable so convergence-filtered tail samples cannot be mistaken for an unconditional interval. The default percentile interval remains the less computationally expensive choice.
 
 For reproducible, paper-oriented analysis, the CLI uses fixed strict policies: ppm columns with missing or non-finite values are dropped before fitting, and point-wise nonlinear solver failures in 1:2/2:1 models use fail-fast behavior. `log10 K` is constrained to `[0, 12]` (`K` in `[1e0, 1e12]` `M⁻¹`).
 
@@ -120,12 +120,12 @@ Synthetic examples are available in [examples/](examples/):
 
 ## Outputs
 
-The output directory is auto-created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `..._replicates`) and contains:
+The output directory is atomically created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `..._replicates`), with an ordinal suffix if that name is already reserved, and contains:
 
 - `summary.csv` — model comparison table;
 - `decision.txt` — recommended provisional working model and diagnostics;
 - `report.html` — plots, methods summary, decision text, and model sections;
-- `model_*/` — per-model plots, bootstrap histograms, and correlation matrices when available.
+- `model_*/dataset_*/` — dataset-scoped model plots, bootstrap histograms, and correlation matrices when available.
 
 ## Flowchart
 
@@ -163,7 +163,7 @@ flowchart TD
 
 ## Methods summary
 
-NMR chemical-shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (`H + G <=> HG`), sequential 1:2 binding (`H + G <=> HG`; `HG + G <=> HG2`), sequential 2:1 binding (`H + G <=> HG`; `H + HG <=> H2G`), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (`scipy.optimize.least_squares`). The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Brent's method (`scipy.optimize.brentq`). Uncertainty is evaluated by bootstrap resampling with small `log10 K` perturbations in each refit. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. One shared residual variance term is estimated for model comparison and counted as one additional information-criteria parameter (`k = p + 1`). Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts.
+NMR chemical-shift titration data are interpreted under a fast-exchange assumption, with observed host-resonance shifts modeled as population-weighted averages of chemical states. Candidate stoichiometries are 1:1 binding (`H + G <=> HG`), sequential 1:2 binding (`H + G <=> HG`; `HG + G <=> HG2`), sequential 2:1 binding (`H + G <=> HG`; `H + HG <=> H2G`), and a non-binding linear drift model. Parameters are estimated by nonlinear least squares (`scipy.optimize.least_squares`) with global response scaling that leaves the objective minimum unchanged while making optimizer termination response-unit invariant. The 1:1 model is solved analytically, while 1:2 and 2:1 are solved numerically point-by-point with Brent's method (`scipy.optimize.brentq`). Fits with nonpositive residual degrees of freedom, rank-deficient or severely ill-conditioned dimensionless Jacobians, insufficient dimensionless `log10 K` sensitivity, or binding constants on active bounds are excluded from model comparison. Uncertainty is evaluated by bootstrap resampling with small `log10 K` perturbations in each refit. Model comparison uses BIC as the primary ranking index with AICc as supporting information. These criteria indicate relative support among tested candidates and should be interpreted together with chemical plausibility and spectral consistency. One shared residual variance term is estimated for model comparison and counted as one additional information-criteria parameter (`k = p + 1`). Replicate titrations are handled by simultaneous fitting with shared binding constants and replicate-specific chemical shifts.
 
 ## Citation
 
