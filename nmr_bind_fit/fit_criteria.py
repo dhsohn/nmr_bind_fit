@@ -2,26 +2,24 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 
-from .io import Dataset
 from .stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
 
 
 def information_criteria(
-    datasets: List[Dataset],
-    residuals: List[np.ndarray],
-    p: int,
+    residuals: Sequence[np.ndarray],
+    n_model_params: int,
 ) -> Tuple[float, float]:
     stacked = np.concatenate([res.ravel() for res in residuals]) if residuals else np.array([], dtype=float)
-    loglik, n_loglik, n_sigma = gaussian_loglik(stacked)
-    bic_p = p + n_sigma
-    if n_loglik <= 0:
+    loglik, n_obs, n_variance_params = gaussian_loglik(stacked)
+    n_ic_params = n_model_params + n_variance_params
+    if n_obs <= 0:
         return float("nan"), float("nan")
     if not np.isfinite(loglik):
         return float("nan"), float("nan")
-    bic = bic_from_loglik(loglik, n_loglik, bic_p)
-    aicc = aicc_from_loglik(loglik, n_loglik, bic_p)
+    bic = bic_from_loglik(loglik, n_obs, n_ic_params)
+    aicc = aicc_from_loglik(loglik, n_obs, n_ic_params)
     return bic, aicc

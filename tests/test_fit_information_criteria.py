@@ -1,80 +1,44 @@
-from pathlib import Path
-
 import numpy as np
+import pytest
 
 from nmr_bind_fit.fit_criteria import information_criteria
-from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
 
 
-def _dataset(name: str, n_points: int, n_peaks: int) -> Dataset:
-    h_tot = np.full((n_points,), 1e-3, dtype=float)
-    g_tot = np.linspace(0.0, 1e-3, n_points, dtype=float)
-    x = g_tot / h_tot
-    y = np.zeros((n_points, n_peaks), dtype=float)
-    return Dataset(
-        name=name,
-        path=Path(f"{name}.csv"),
-        h_tot=h_tot,
-        g_tot=g_tot,
-        x=x,
-        y=y,
-        y_cols=[f"ppm{i + 1}" for i in range(n_peaks)],
-        dropped_peaks=[],
-    )
-
-
-def test_information_criteria_uses_shared_variance_including_sigma_single_dataset():
-    ds = _dataset("single", n_points=4, n_peaks=2)
-    residuals = [np.array([[0.1, -0.2], [0.0, 0.3], [-0.1, 0.2], [0.05, -0.15]], dtype=float)]
-    p = 5
-
-    bic, aicc = information_criteria([ds], residuals, p)
-
-    loglik, n_obs, n_sigma = gaussian_loglik(residuals[0].ravel())
-    assert n_sigma == 1
-    expected_bic = bic_from_loglik(loglik, n_obs, p + n_sigma)
-    expected_aicc = aicc_from_loglik(loglik, n_obs, p + n_sigma)
-    np.testing.assert_allclose(bic, expected_bic)
-    np.testing.assert_allclose(aicc, expected_aicc)
-
-
-def test_information_criteria_uses_one_shared_variance_including_sigma_multiple_datasets():
-    ds1 = _dataset("d1", n_points=3, n_peaks=1)
-    ds2 = _dataset("d2", n_points=3, n_peaks=1)
-    residuals = [
-        np.array([[0.1], [-0.1], [0.2]], dtype=float),
-        np.array([[0.3], [-0.2], [0.1]], dtype=float),
-    ]
-    p = 4
-
-    bic, aicc = information_criteria([ds1, ds2], residuals, p)
+@pytest.mark.parametrize(
+    ("residuals", "n_model_params"),
+    [
+        ([np.array([[0.1, -0.2], [0.0, 0.3], [-0.1, 0.2], [0.05, -0.15]])], 5),
+        ([np.array([[0.1], [-0.1], [0.2]]), np.array([[0.3], [-0.2], [0.1]])], 4),
+    ],
+)
+def test_information_criteria_uses_one_shared_variance_parameter(residuals, n_model_params):
+    bic, aicc = information_criteria(residuals, n_model_params)
 
     stacked = np.concatenate([res.ravel() for res in residuals])
-    loglik, n_obs, n_sigma = gaussian_loglik(stacked)
-    assert n_sigma == 1
-    expected_bic = bic_from_loglik(loglik, n_obs, p + n_sigma)
-    expected_aicc = aicc_from_loglik(loglik, n_obs, p + n_sigma)
+    loglik, n_obs, n_variance_params = gaussian_loglik(stacked)
+    assert n_variance_params == 1
+    n_ic_params = n_model_params + n_variance_params
+    expected_bic = bic_from_loglik(loglik, n_obs, n_ic_params)
+    expected_aicc = aicc_from_loglik(loglik, n_obs, n_ic_params)
     np.testing.assert_allclose(bic, expected_bic)
     np.testing.assert_allclose(aicc, expected_aicc)
 
 
 def test_information_criteria_keeps_bic_when_aicc_is_underpowered():
-    ds = _dataset("small", n_points=3, n_peaks=1)
     residuals = [np.array([[0.1], [-0.1], [0.2]], dtype=float)]
 
-    bic, aicc = information_criteria([ds], residuals, p=2)
-    loglik, n_obs, n_sigma = gaussian_loglik(residuals[0].ravel())
+    bic, aicc = information_criteria(residuals, n_model_params=2)
+    loglik, n_obs, n_variance_params = gaussian_loglik(residuals[0].ravel())
 
-    np.testing.assert_allclose(bic, bic_from_loglik(loglik, n_obs, 2 + n_sigma))
+    np.testing.assert_allclose(bic, bic_from_loglik(loglik, n_obs, 2 + n_variance_params))
     assert np.isnan(aicc)
 
 
 def test_information_criteria_returns_nan_for_zero_rss():
-    ds = _dataset("perfect", n_points=5, n_peaks=1)
     residuals = [np.zeros((5, 1), dtype=float)]
 
-    bic, aicc = information_criteria([ds], residuals, p=2)
+    bic, aicc = information_criteria(residuals, n_model_params=2)
 
     assert np.isnan(bic)
     assert np.isnan(aicc)

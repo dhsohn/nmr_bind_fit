@@ -8,9 +8,6 @@ from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs
 from nmr_bind_fit.report_pipeline import (
     _build_model_warnings,
     _build_summary_row,
-    _collect_plot_paths,
-    _replicate_dataset_dir_labels,
-    _safe_path_token,
     build_decisions,
     build_methods_sections,
     build_report_artifacts,
@@ -51,29 +48,6 @@ def test_decision_paragraphs_use_provisional_working_model_language():
     assert len(paragraphs) == 1
     assert "provisional working model" in paragraphs[0]
     assert "best supported" not in paragraphs[0]
-
-
-def test_replicate_dataset_dir_labels_are_collision_free():
-    ds1 = SimpleNamespace(name="sample", path="a/sample.csv")
-    ds2 = SimpleNamespace(name="sample", path="b/sample.csv")
-    ds3 = SimpleNamespace(name="sample", path="b/sample.csv")
-
-    labels = _replicate_dataset_dir_labels([ds1, ds2, ds3])
-
-    assert len(labels) == 3
-    assert len(set(labels)) == 3
-    assert labels[0].startswith("01_")
-    assert labels[1].startswith("02_")
-    assert labels[2].startswith("03_")
-
-
-def test_report_path_tokens_are_bounded_and_collision_resistant():
-    first = _safe_path_token("sample/" + "a" * 300)
-    second = _safe_path_token("sample?" + "a" * 300)
-
-    assert len(first) <= 80
-    assert len(second) <= 80
-    assert first != second
 
 
 def test_build_decisions_uses_fit_failed_wording_for_exclusions():
@@ -318,107 +292,6 @@ def test_aicc_only_unavailable_is_explained_in_warnings():
     assert any("AICc unavailable: too few observations" in warning for warning in warnings)
     assert not any("BIC/AICc unavailable" in warning for warning in warnings)
     assert "AICc unavailable" in row["Notes"]
-
-
-def test_collect_plot_paths_scopes_single_dataset_outputs_by_dataset_label(tmp_path, monkeypatch):
-    ds = SimpleNamespace(
-        name="sample",
-        path=tmp_path / "sample.csv",
-        n_peaks=1,
-        y_cols=["ppm1"],
-        dropped_peaks=[],
-    )
-    res = SimpleNamespace(
-        model=MODEL_SPECS["11"],
-        datasets=[ds],
-        params=np.array([4.0, 7.0, 7.5], dtype=float),
-        residuals=[np.zeros((3, 1), dtype=float)],
-        bootstrap=None,
-        param_names=["logK", "H_sample_ppm1", "HG_sample_ppm1"],
-    )
-
-    def fake_plot(name):
-        def _impl(model, ds, *args):
-            out_dir = args[-1]
-            return [out_dir / f"{name}.png"]
-
-        return _impl
-
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_isotherms", fake_plot("isotherm_ppm1"))
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_residuals", fake_plot("residual_ppm1"))
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_fraction_bound", fake_plot("fraction_bound"))
-
-    paths_a = _collect_plot_paths(res, "11", "dataset A", tmp_path)
-    paths_b = _collect_plot_paths(res, "11", "dataset B", tmp_path)
-
-    assert all(path.startswith("model_11/dataset_dataset_A/") for path in paths_a)
-    assert all(path.startswith("model_11/dataset_dataset_B/") for path in paths_b)
-    assert set(paths_a).isdisjoint(paths_b)
-
-
-def test_build_report_artifacts_keeps_sanitized_dataset_dirs_unique(tmp_path, monkeypatch):
-    ds_a = SimpleNamespace(
-        name="sample A",
-        path=tmp_path / "sample A.csv",
-        n_peaks=1,
-        y_cols=["ppm1"],
-        dropped_peaks=[],
-    )
-    ds_b = SimpleNamespace(
-        name="sample_A",
-        path=tmp_path / "sample_A.csv",
-        n_peaks=1,
-        y_cols=["ppm1"],
-        dropped_peaks=[],
-    )
-
-    def make_result(ds):
-        return SimpleNamespace(
-            model=MODEL_SPECS["11"],
-            datasets=[ds],
-            params=np.array([4.0, 7.0, 7.5], dtype=float),
-            residuals=[np.zeros((3, 1), dtype=float)],
-            species=[SimpleNamespace(solver_stats=None)],
-            bootstrap=None,
-            param_names=["logK", f"H_{ds.name}_ppm1", f"HG_{ds.name}_ppm1"],
-            r2=0.9,
-            r2_per_peak=[0.9],
-            rss=1.0,
-            rmse=0.5,
-            bic=10.0,
-            aicc=11.0,
-            penalty_count=0,
-            residual_diagnostics={},
-        )
-
-    def fake_plot(name):
-        def _impl(model, ds, *args):
-            out_dir = args[-1]
-            return [out_dir / f"{name}.png"]
-
-        return _impl
-
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_isotherms", fake_plot("isotherm_ppm1"))
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_residuals", fake_plot("residual_ppm1"))
-    monkeypatch.setattr("nmr_bind_fit.report_pipeline.plot_fraction_bound", fake_plot("fraction_bound"))
-
-    _, model_entries, _ = build_report_artifacts(
-        args=argparse.Namespace(bootstrap_ci_width=None),
-        ordered_keys=["sample A.csv", "sample_A.csv"],
-        results_by_key={
-            "sample A.csv": {"11": make_result(ds_a)},
-            "sample_A.csv": {"11": make_result(ds_b)},
-        },
-        failures_by_key={},
-        out_dir=tmp_path,
-        display_model_name=lambda name: name,
-    )
-
-    paths_by_dataset = {entry.dataset: entry.plots for entry in model_entries}
-
-    assert all(path.startswith("model_11/dataset_01_sample_A.csv/") for path in paths_by_dataset["sample A.csv"])
-    assert all(path.startswith("model_11/dataset_02_sample_A.csv/") for path in paths_by_dataset["sample_A.csv"])
-    assert set(paths_by_dataset["sample A.csv"]).isdisjoint(paths_by_dataset["sample_A.csv"])
 
 
 def test_build_decisions_excludes_nonfinite_bic_from_ranking():

@@ -151,6 +151,29 @@ def test_dataset_directory_tokens_are_case_insensitive_safe():
     assert len({token.casefold() for token in tokens.values()}) == 2
 
 
+def test_replicate_dataset_dir_labels_are_collision_free():
+    datasets = [
+        SimpleNamespace(name="sample", path="a/sample.csv"),
+        SimpleNamespace(name="sample", path="b/sample.csv"),
+        SimpleNamespace(name="sample", path="b/sample.csv"),
+    ]
+
+    labels = report_pipeline._replicate_dataset_dir_labels(datasets)
+
+    assert len(labels) == len(set(labels)) == 3
+    assert all(label.startswith(f"{index:02d}_") for index, label in enumerate(labels, start=1))
+
+
+def test_report_path_tokens_are_bounded_and_collision_resistant():
+    tokens = [
+        report_pipeline._safe_path_token("sample/" + "a" * 300),
+        report_pipeline._safe_path_token("sample?" + "a" * 300),
+    ]
+
+    assert all(len(token) <= 80 for token in tokens)
+    assert len(set(tokens)) == 2
+
+
 def test_slash_containing_peak_labels_use_safe_unique_files_and_original_captions(tmp_path):
     peak_names = ["ppm/H1", "ppm?H1"]
     ds = _dataset("sample", peak_names)
