@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import hashlib
 import re
 import sys
 from collections import Counter
@@ -45,7 +44,7 @@ def _non_negative_int(value: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("--bootstrap must be non-negative.") from exc
+        raise argparse.ArgumentTypeError("--bootstrap must be an integer.") from exc
     if parsed < 0:
         raise argparse.ArgumentTypeError("--bootstrap must be non-negative.")
     return parsed
@@ -68,72 +67,59 @@ def _validate_finite_number(value: float, message: str) -> float:
     return parsed
 
 
-def _resolve_inputs(patterns: List[str]) -> List[Path]:
-    # Expand glob patterns and validate file existence.
-    paths: List[Path] = []
-    resolved_paths: List[Path] = []
-    unmatched: List[str] = []
+def _resolve_inputs(patterns: list[str]) -> list[Path]:
+    paths: list[Path] = []
+    resolved_paths: list[Path] = []
+
     for pattern in patterns:
-        matches = sorted(glob.glob(pattern))
-        if not matches:
-            path = Path(pattern)
-            if not path.exists():
-                raise FileNotFoundError(f"Input file or pattern not found: {pattern}")
-            matches = [pattern]
-        for match in matches:
-            path = Path(match)
-            if not path.exists():
-                raise FileNotFoundError(f"Input file not found: {path}")
+        if glob.has_magic(pattern):
+            matches = sorted(glob.glob(pattern))
+            if not matches:
+                raise FileNotFoundError(f"No files match pattern: {pattern}")    
+            candidates = [Path(match) for match in matches]
+        else:
+            candidate = Path(pattern)    
+            if not candidate.exists():
+                raise FileNotFoundError(f"Input file not found: {candidate}")
+            candidates = [candidate]
+        for path in candidates:
             if not path.is_file():
                 raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
             resolved_paths.append(path.resolve())
-    if unmatched:
-        raise FileNotFoundError("Input file or pattern not found: " + ", ".join(unmatched))
+            
     if not paths:
         raise FileNotFoundError("No input files found.")
-    counts = Counter(resolved_paths)
-    duplicates = sorted(str(path) for path, count in counts.items() if count > 1)
+    duplicates = sorted(str(path) for path, count in Counter(resolved_paths).items() if count > 1)
+    
     if duplicates:
-        raise ValueError("Duplicate input files detected: " + ", ".join(duplicates))
+        raise ValueError("Duplicate input files detected: "+ ", ".join(duplicates))
     return paths
 
 
 def _safe_output_name(name: str) -> str:
-    # Sanitize and bound output names for filesystem safety.
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
+    # Normalize a user-derived output directory label and limit its length.
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._-")
     safe = safe or "output"
-    if len(safe) <= 80:
-        return safe
-    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
-    prefix = safe[:67].rstrip("._-") or "output"
-    return f"{prefix}-{digest}"
+    safe = safe[:80].rstrip("._-")
+    return safe or "output"
 
 
 def _auto_output_dir(paths: List[Path]) -> Path:
-    # Build a timestamped output directory based on input names.
-    now = datetime.now()
-    timestamp = f"{now:%Y%m%d_%H%M%S}_{now.microsecond // 1000:03d}"
-    if len(paths) == 1:
-        base = paths[0].stem
-    else:
-        base = "replicates"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = paths[0].stem if len(paths) == 1 else "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
 
 def _reserve_output_dir(paths: List[Path]) -> Path:
-    """Atomically reserve a unique output directory for one analysis run."""
     base = _auto_output_dir(paths)
     candidate = base
     suffix = 2
-    while True:
-        try:
-            candidate.mkdir(parents=True, exist_ok=False)
-        except FileExistsError:
-            candidate = base.with_name(f"{base.name}_{suffix:02d}")
-            suffix += 1
-        else:
-            return candidate
+    while candidate.exists():
+        candidate = base.with_name(f"{base.name}_{suffix:02d}")
+        suffix += 1
+    candidate.mkdir()
+    return candidate
 
 
 def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
