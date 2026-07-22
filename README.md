@@ -56,7 +56,7 @@ Run a single-file fit across all candidate models:
 
 ```bash
 # Run from a clone/source tree that contains examples/synthetic_11.csv.
-nmr_bind_fit --input examples/synthetic_11.csv
+nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 0
 ```
 
 Run bootstrap uncertainty estimation:
@@ -120,7 +120,7 @@ Synthetic examples are available in [examples/](examples/):
 
 ## Outputs
 
-The output directory is atomically created as `YYYYMMDD_HHMMSS_mmm_<input_name>` (or `..._replicates`), with an ordinal suffix if that name is already reserved, and contains:
+The output directory is atomically created as `YYYYMMDD_HHMMSS_<input_name>` (or `..._replicates`), with an ordinal suffix if that name is already reserved, and contains:
 
 - `summary.csv` — model comparison table;
 - `decision.txt` — recommended provisional working model and diagnostics;

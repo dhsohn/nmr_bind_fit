@@ -9,7 +9,7 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -50,7 +50,27 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
-def _parse_k_starts(value: Optional[str]) -> List[float]:
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive finite number") from exc
+    if not np.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return parsed
+
+
+def _parse_k_starts(value: Optional[str]) -> list[float]:
     # Parse comma-separated starts or default to log-spaced values.
     if value is None:
         return [10**i for i in range(1, 9)]
@@ -61,7 +81,10 @@ def _parse_k_starts(value: Optional[str]) -> List[float]:
 
 
 def _validate_finite_number(value: float, message: str) -> float:
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed):
         raise ValueError(message)
     return parsed
@@ -72,28 +95,22 @@ def _resolve_inputs(patterns: list[str]) -> list[Path]:
     resolved_paths: list[Path] = []
 
     for pattern in patterns:
-        if glob.has_magic(pattern):
-            matches = sorted(glob.glob(pattern))
-            if not matches:
-                raise FileNotFoundError(f"No files match pattern: {pattern}")    
-            candidates = [Path(match) for match in matches]
-        else:
-            candidate = Path(pattern)    
-            if not candidate.exists():
-                raise FileNotFoundError(f"Input file not found: {candidate}")
-            candidates = [candidate]
+        matches = sorted(glob.glob(pattern))
+        candidates = [Path(match) for match in matches] or [Path(pattern)]
         for path in candidates:
+            if not path.exists():
+                raise FileNotFoundError(f"Input file or pattern not found: {pattern}")
             if not path.is_file():
                 raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
             resolved_paths.append(path.resolve())
-            
+
     if not paths:
         raise FileNotFoundError("No input files found.")
     duplicates = sorted(str(path) for path, count in Counter(resolved_paths).items() if count > 1)
-    
+
     if duplicates:
-        raise ValueError("Duplicate input files detected: "+ ", ".join(duplicates))
+        raise ValueError("Duplicate input files detected: " + ", ".join(duplicates))
     return paths
 
 
@@ -105,75 +122,38 @@ def _safe_output_name(name: str) -> str:
     return safe or "output"
 
 
-def _auto_output_dir(paths: List[Path]) -> Path:
+def _auto_output_dir(paths: list[Path]) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = paths[0].stem if len(paths) == 1 else "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
 
-def _reserve_output_dir(paths: List[Path]) -> Path:
+def _reserve_output_dir(paths: list[Path]) -> Path:
     base = _auto_output_dir(paths)
     candidate = base
     suffix = 2
-    while candidate.exists():
-        candidate = base.with_name(f"{base.name}_{suffix:02d}")
-        suffix += 1
-    candidate.mkdir()
-    return candidate
-
-
-def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> Dict[int, str]:
-    # Build collision-free labels so same-stem files do not overwrite each other.
-    labels = [str(getattr(ds, "name", "dataset")) for ds in datasets]
-    counts = Counter(labels)
-
-    # First disambiguation pass: append file name.
-    for idx, ds in enumerate(datasets):
-        if counts[labels[idx]] > 1:
-            path = getattr(ds, "path", None)
-            filename = Path(path).name if path is not None else labels[idx]
-            labels[idx] = f"{labels[idx]} ({filename})"
-
-    counts = Counter(labels)
-    seen: Dict[str, int] = {}
-    deduped: List[str] = []
-    # Second pass: force uniqueness without exposing full input paths in
-    # shareable report labels.
-    for label in labels:
-        seen[label] = seen.get(label, 0) + 1
-        if counts[label] > 1:
-            deduped.append(f"{label} #{seen[label]}")
-        else:
-            deduped.append(label)
-
-    # Reserve the simultaneous-fit sentinel: no single-dataset label may equal
-    # it. Re-check uniqueness here so the rename cannot collide with an existing
-    # "... (dataset)" label already produced by the passes above.
-    existing = set(deduped)
-    for idx, label in enumerate(deduped):
-        if label != SIMULTANEOUS_FIT_LABEL:
-            continue
-        existing.discard(label)
-        candidate = f"{label} (dataset)"
-        suffix = 2
-        while candidate in existing:
-            candidate = f"{label} (dataset {suffix})"
+    while True:
+        try:
+            candidate.mkdir()
+            return candidate
+        except FileExistsError:
+            candidate = base.with_name(f"{base.name}_{suffix:02d}")
             suffix += 1
-        deduped[idx] = candidate
-        existing.add(candidate)
-
-    return {id(ds): label for ds, label in zip(datasets, deduped)}
 
 
-def _dataset_key(result: FitResultLike, dataset_labels: Dict[int, str]) -> str:
-    # Normalize dataset key for grouping summaries.
-    if len(result.datasets) == 1:
-        ds = result.datasets[0]
-        return dataset_labels.get(id(ds), ds.name) or ds.name
-    return SIMULTANEOUS_FIT_LABEL
+def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> dict[int, str]:
+    names = [dataset.name for dataset in datasets]
+    if len(names) == len(set(names)):
+        return {id(dataset): dataset.name for dataset in datasets}
+    return {
+        id(dataset): f"{index}. {dataset.name}"
+        for index, dataset in enumerate(datasets, start=1)
+    }
 
 
-def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optional[Tuple[float, float]]]:
+def _resolve_logk_config(
+    args: argparse.Namespace,
+) -> tuple[list[float], tuple[float, float], float]:
     k_starts = _parse_k_starts(args.k_starts)
     if not k_starts:
         raise ValueError("--k-starts must include at least one positive value.")
@@ -183,37 +163,37 @@ def _resolve_logk_config(args: argparse.Namespace) -> Tuple[List[float], Optiona
         raise ValueError("All K starts must be positive.")
     if any(v < STRICT_K_MIN or v > STRICT_K_MAX for v in k_starts):
         raise ValueError(f"All K starts must be within [{STRICT_K_MIN:.0e}, {STRICT_K_MAX:.0e}].")
-    try:
-        jitter = float(args.bootstrap_logk_jitter)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("--bootstrap-logk-jitter must be a finite number.") from exc
-    if not np.isfinite(jitter):
-        raise ValueError("--bootstrap-logk-jitter must be finite.")
+    jitter = _validate_finite_number(
+        args.bootstrap_logk_jitter,
+        "--bootstrap-logk-jitter must be finite.",
+    )
     if jitter < 0:
         raise ValueError("--bootstrap-logk-jitter must be non-negative.")
-    args.bootstrap_logk_jitter = jitter
     logk_starts = [float(np.log10(v)) for v in k_starts]
     logk_bounds = (float(np.log10(STRICT_K_MIN)), float(np.log10(STRICT_K_MAX)))
-    return logk_starts, logk_bounds
+    return logk_starts, logk_bounds, jitter
 
 
 def _index_results(
     results: Sequence[FitResultLike],
-    dataset_labels: Dict[int, str],
-) -> Tuple[List[str], Dict[str, Dict[str, FitResultLike]], Dict[str, List[Tuple[str, str]]]]:
-    # Build ordered successful result map and per-dataset failure list.
-    results_by_key: Dict[str, Dict[str, FitResultLike]] = {}
-    failures_by_key: Dict[str, List[Tuple[str, str]]] = {}
-    ordered_keys: List[str] = []
-    for res in results:
-        key = _dataset_key(res, dataset_labels)
-        if key not in ordered_keys:
-            ordered_keys.append(key)
-        if not res.success:
-            failures_by_key.setdefault(key, []).append((res.model.name, res.message))
-            continue
-        results_by_key.setdefault(key, {})[res.model.name] = res
-    return ordered_keys, results_by_key, failures_by_key
+    dataset_labels: dict[int, str],
+) -> tuple[
+    dict[str, dict[str, FitResultLike]],
+    dict[str, list[tuple[str, str]]],
+]:
+    results_by_key: dict[str, dict[str, FitResultLike]] = {}
+    failures_by_key: dict[str, list[tuple[str, str]]] = {}
+    for result in results:
+        if len(result.datasets) > 1:
+            key = SIMULTANEOUS_FIT_LABEL
+        else:
+            key = dataset_labels[id(result.datasets[0])]
+        model_results = results_by_key.setdefault(key, {})
+        if result.success:
+            model_results[result.model.name] = result
+        else:
+            failures_by_key.setdefault(key, []).append((result.model.name, result.message))
+    return results_by_key, failures_by_key
 
 
 def _display_model_name(name: str) -> str:
@@ -222,27 +202,7 @@ def _display_model_name(name: str) -> str:
 
 
 def run_fit(args: argparse.Namespace) -> None:
-    # Defensively re-validate for callers that build args directly and bypass
-    # the parser (the CLI type converter already rejects negative --bootstrap).
-    if not isinstance(args.bootstrap, (int, np.integer)):
-        raise ValueError("--bootstrap must be a non-negative integer.")
-    if args.bootstrap < 0:
-        raise ValueError("--bootstrap must be non-negative.")
-    if not isinstance(args.max_nfev, (int, np.integer)) or args.max_nfev <= 0:
-        raise ValueError("--max-nfev must be a positive integer.")
-    ci_width = getattr(args, "bootstrap_ci_width", None)
-    if ci_width is not None:
-        args.bootstrap_ci_width = _validate_finite_number(
-            ci_width,
-            "--bootstrap-ci-width must be finite.",
-        )
-        if args.bootstrap_ci_width <= 0:
-            raise ValueError("--bootstrap-ci-width must be positive.")
-    args.bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
-    if args.bootstrap_ci_method not in {"percentile", "bca"}:
-        raise ValueError("--bootstrap-ci-method must be one of: percentile, bca.")
-    args.residual_diagnostics = bool(getattr(args, "residual_diagnostics", False))
-    logk_starts, logk_bounds = _resolve_logk_config(args)
+    logk_starts, logk_bounds, logk_jitter = _resolve_logk_config(args)
 
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
@@ -255,12 +215,10 @@ def run_fit(args: argparse.Namespace) -> None:
         raise ValueError("--replicates requires at least two input datasets.")
     dataset_labels = _build_dataset_labels(datasets)
 
-    model_names = DEFAULT_MODEL_NAMES
-
     # Fit all requested models.
     results = fit_models(
         datasets,
-        model_names,
+        DEFAULT_MODEL_NAMES,
         logk_starts=logk_starts,
         replicates=args.replicates,
         max_nfev=args.max_nfev,
@@ -269,14 +227,15 @@ def run_fit(args: argparse.Namespace) -> None:
         bootstrap_ci_method=args.bootstrap_ci_method,
         seed=args.seed,
         logk_bounds=logk_bounds,
-        logk_jitter=args.bootstrap_logk_jitter,
+        logk_jitter=logk_jitter,
         solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
         residual_diagnostics=args.residual_diagnostics,
     )
 
     # Index results by dataset key and collect failures.
-    ordered_keys, results_by_key, failures_by_key = _index_results(results, dataset_labels)
-    if not results_by_key:
+    results_by_key, failures_by_key = _index_results(results, dataset_labels)
+    ordered_keys = list(results_by_key)
+    if not any(results_by_key.values()):
         failure_details = [
             f"{key} / {_display_model_name(model)}: {message}"
             for key in ordered_keys
@@ -327,15 +286,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # Define CLI flags and defaults.
     parser = argparse.ArgumentParser(prog="nmr_bind_fit")
-    parser.add_argument(
-        "command",
-        nargs="?",
-        default="fit",
-        choices=["fit"],
-        help="Command (default: fit)",
-    )
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
     parser.add_argument("--bootstrap", type=_non_negative_int, default=1000, help="Bootstrap iterations")
@@ -358,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fit replicate inputs with shared binding constants",
     )
-    parser.add_argument("--max-nfev", type=int, default=5000, help="Max optimizer evaluations")
+    parser.add_argument("--max-nfev", type=_positive_int, default=5000, help="Max optimizer evaluations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument(
         "--residual-diagnostics",
@@ -367,25 +318,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bootstrap-ci-width",
-        type=float,
+        type=_positive_float,
         default=None,
         help="Warn if bootstrap K CI width exceeds this threshold",
     )
-    parser.set_defaults(
-        func=run_fit,
-        missing_policy=STRICT_MISSING_POLICY,
-        solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
-    )
-
     return parser
 
 
 def main() -> None:
-    # Parse CLI arguments and run the requested command.
-    parser = build_parser()
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     try:
-        args.func(args)
+        run_fit(args)
     except (FileNotFoundError, ValueError) as exc:
         # Report expected input/validation problems as a clean message and a
         # nonzero exit status instead of an uncaught traceback.
