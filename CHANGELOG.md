@@ -18,6 +18,10 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Changed
 
+- Simplified CLI input and output handling: glob-like literal filenames are accepted,
+  duplicate dataset names receive deterministic numbered labels, positive numeric options
+  are validated by the argument parser, and output directories use second-resolution
+  timestamps with ordinal collision suffixes.
 - Hardened model fitting and reporting guardrails: invalid multivalent binding constants
   are rejected, weak-binding solver brackets include the physical root, failed candidates
   remain visible in `summary.csv`, and model selection now ranks only finite-BIC fits.
@@ -46,6 +50,8 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Removed
 
+- Removed the optional `fit` positional command. Invoke `nmr_bind_fit --input ...`
+  directly.
 - Removed the `--concentration-unit` flag, which only relabeled report text while the fit and `K` bounds used raw numeric values. Supply concentrations in molar (M) instead.
 
 ## [0.1.0] - 2026-06-30
