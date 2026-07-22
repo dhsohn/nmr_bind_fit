@@ -4,6 +4,7 @@ from typing import cast
 import numpy as np
 from scipy.optimize import OptimizeResult
 
+from nmr_bind_fit.fit import fit_models
 from nmr_bind_fit.fit_bootstrap import (
     MIN_BOOTSTRAP_CI_SAMPLES,
     MIN_BOOTSTRAP_CI_SUCCESSES,
@@ -14,7 +15,7 @@ from nmr_bind_fit.fit_bootstrap import (
     bootstrap_params,
 )
 from nmr_bind_fit.fit_optimizer import param_bounds
-from nmr_bind_fit.io import Dataset
+from nmr_bind_fit.io import Dataset, load_dataset
 from nmr_bind_fit.models import MODEL_SPECS
 
 _NUMERIC_EXCEPTIONS = (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
@@ -52,6 +53,26 @@ def test_bootstrap_minimum_sample_name_remains_compatible_with_stricter_contract
     assert MIN_BOOTSTRAP_CI_SAMPLES == MIN_BOOTSTRAP_CI_SUCCESSES == 20
     assert _bootstrap_ci_requirement(20) == 20
     assert _bootstrap_ci_requirement(100) == 100
+
+
+def test_real_bootstrap_samples_are_reproducible_for_a_fixed_seed():
+    dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_11.csv")
+    kwargs = {
+        "logk_starts": [4.0],
+        "logk_bounds": (0.0, 12.0),
+        "max_nfev": 500,
+        "bootstrap": 5,
+        "seed": 17,
+        "logk_jitter": 0.0,
+    }
+
+    first = fit_models([dataset], ["11"], **kwargs)[0]
+    second = fit_models([dataset], ["11"], **kwargs)[0]
+
+    assert first.bootstrap is not None
+    assert second.bootstrap is not None
+    assert first.bootstrap.n_success == second.bootstrap.n_success == 5
+    np.testing.assert_array_equal(first.bootstrap.param_samples, second.bootstrap.param_samples)
 
 
 def test_bootstrap_tail_failures_never_produce_an_unconditional_ci():

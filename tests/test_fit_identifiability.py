@@ -113,7 +113,7 @@ def test_fit_rejects_practically_flat_high_affinity_solution(start):
 
 
 @pytest.mark.parametrize(
-    "model_name,filename,starts",
+    "model_name,filename,expected_logk",
     [
         ("11", "synthetic_11.csv", [4.0]),
         ("12", "synthetic_12.csv", [4.1, 3.2]),
@@ -123,7 +123,7 @@ def test_fit_rejects_practically_flat_high_affinity_solution(start):
 def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
     model_name,
     filename,
-    starts,
+    expected_logk,
 ):
     source = load_dataset(Path(__file__).parents[1] / "examples" / filename)
     results = []
@@ -141,7 +141,7 @@ def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
         result = fit_models(
             [dataset],
             [model_name],
-            logk_starts=starts,
+            logk_starts=[4.0],
             logk_bounds=(0.0, 12.0),
             max_nfev=2000,
             bootstrap=0,
@@ -150,6 +150,12 @@ def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
         results.append(result)
 
     reference = results[1]
+    np.testing.assert_allclose(
+        reference.params[: reference.model.n_logk],
+        expected_logk,
+        rtol=0.0,
+        atol=5e-4,
+    )
     for result in results:
         np.testing.assert_allclose(
             result.params[: result.model.n_logk],
@@ -167,6 +173,23 @@ def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
             reference.jacobian_logk_sensitivity,
             rtol=5e-5,
         )
+
+
+def test_nonbinding_control_is_selected_without_forcing_a_binding_model():
+    dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_nonbinding.csv")
+
+    results = fit_models(
+        [dataset],
+        ["11", "nb"],
+        logk_starts=[4.0],
+        logk_bounds=(0.0, 12.0),
+        max_nfev=200,
+        bootstrap=0,
+    )
+
+    successful = [result for result in results if result.success and np.isfinite(result.bic)]
+    assert successful
+    assert min(successful, key=lambda result: result.bic).model.name == "nb"
 
 
 def test_masked_endpoint_uses_finite_peak_endpoints_for_initialization():

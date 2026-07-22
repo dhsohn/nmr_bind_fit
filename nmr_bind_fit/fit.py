@@ -554,7 +554,7 @@ def _build_successful_fit_result(
         )
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
     r2, r2_per_peak = _r2_score(datasets, y_pred_list)
-    bic, aicc = information_criteria(datasets, residuals, p)
+    bic, aicc = information_criteria(residuals, n_model_params=p)
     diag: Dict[str, float] = {}
     if compute_residual_diagnostics:
         finite_residuals = []
