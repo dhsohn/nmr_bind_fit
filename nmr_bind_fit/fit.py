@@ -43,6 +43,9 @@ class FitResult:
     n: int
     p: int
     dof: int
+    jacobian_rank: int
+    jacobian_condition: float
+    jacobian_logk_sensitivity: float
     y_pred: List[np.ndarray]
     species: List
     residuals: List[np.ndarray]
@@ -50,9 +53,6 @@ class FitResult:
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
     logk_bounds: Optional[Tuple[float, float]] = None
-    jacobian_rank: int = 0
-    jacobian_condition: float = float("inf")
-    jacobian_logk_sensitivity: float = float("nan")
 
 
 class ModelFitError(RuntimeError):

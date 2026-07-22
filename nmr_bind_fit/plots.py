@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
-from collections import Counter
 from pathlib import Path
 from typing import List, Tuple
 
@@ -46,44 +44,6 @@ _CLR_DATA = "#2b2d42"
 _CLR_FIT = "#d90429"
 _CLR_ZERO = "#94a3b8"
 _CLR_HIST = "#334155"
-
-
-def _safe_file_stem(value: str) -> str:
-    """Return a bounded ASCII stem suitable for compatibility callers."""
-    text = str(value)
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "peak"
-    if len(safe) <= 64:
-        return safe
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-    prefix = safe[:51].rstrip("._-") or "peak"
-    return f"{prefix}-{digest}"
-
-
-def _safe_file_stems(values: List[str]) -> List[str]:
-    """Sanitize peak labels into deterministic, collision-free stems.
-
-    Plot artifacts use :func:`_peak_file_token`, but this helper remains for
-    callers that relied on the readable stems introduced on ``main``.
-    """
-    stems = [_safe_file_stem(value) for value in values]
-    counts = Counter(stems)
-    used: set[str] = set()
-    unique: List[str] = []
-    for idx, stem in enumerate(stems, start=1):
-        candidates = []
-        if counts[stem] == 1:
-            candidates.append(stem)
-        candidates.append(f"{idx:02d}_{stem}")
-        chosen = next((candidate for candidate in candidates if candidate not in used), "")
-        if not chosen:
-            suffix = 1
-            chosen = f"{idx:02d}_{stem}_{suffix}"
-            while chosen in used:
-                suffix += 1
-                chosen = f"{idx:02d}_{stem}_{suffix}"
-        used.add(chosen)
-        unique.append(chosen)
-    return unique
 
 
 def _peak_file_token(peak: str, index: int) -> str:

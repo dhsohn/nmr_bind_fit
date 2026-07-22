@@ -361,7 +361,7 @@ Confirm the final model together with chemical plausibility (§6)
 
 - Thordarson, P. (2011). Determining association constants from titration experiments in
   supramolecular chemistry. *Chemical Society Reviews*, 40(3), 1305–1323.
-  DOI: 10.1039/c1cs15071e.
+  DOI: 10.1039/c0cs00062k.
 - Hibbert, D. B., & Thordarson, P. (2016). The death of the Job plot, transparency, open
   science and online tools, uncertainty estimation methods and other developments in
   supramolecular chemistry data analysis. *Chemical Communications*, 52, 12792–12805.

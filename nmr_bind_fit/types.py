@@ -57,7 +57,6 @@ class BootstrapLike(Protocol):
     ci_message: str
     n_success: int
     n_boot: int
-    ci_warning: str
 
 
 class ModelLike(Protocol):

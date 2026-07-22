@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import List, Optional
 
 import numpy as np
+import pytest
 
 import nmr_bind_fit.report_pipeline as report_pipeline
 from nmr_bind_fit.io import Dataset
@@ -35,25 +36,36 @@ def _dataset(name: str, peak_names: Optional[List[str]] = None) -> Dataset:
     )
 
 
-def _fit_result(ds: Dataset) -> SimpleNamespace:
-    param_samples = np.array(
+def _fit_result(
+    ds: Dataset,
+    *,
+    n_boot: int = 20,
+    n_success: Optional[int] = None,
+    ci_valid: bool = True,
+    ci_method_used: Optional[str] = None,
+    ci_message: Optional[str] = None,
+) -> SimpleNamespace:
+    success_count = n_boot if n_success is None else n_success
+    offsets = np.linspace(-0.1, 0.1, success_count, dtype=float)
+    param_samples = np.column_stack(
         [
-            [1.9, 7.0, 7.2],
-            [2.0, 7.0, 7.2],
-            [2.1, 7.0, 7.2],
-        ],
-        dtype=float,
+            2.0 + offsets,
+            7.0 + 0.2 * offsets,
+            7.2 - 0.1 * offsets,
+        ]
     )
     bootstrap = SimpleNamespace(
         param_samples=param_samples,
         logk_samples=param_samples[:, :1],
         ci_low=np.array([1.8], dtype=float),
         ci_high=np.array([2.2], dtype=float),
-        n_boot=4,
-        n_success=3,
-        ci_valid=False,
-        ci_method_used="unavailable",
-        ci_message="bootstrap CI requires more successful refits",
+        n_boot=n_boot,
+        n_success=success_count,
+        ci_valid=ci_valid,
+        ci_method_used=ci_method_used or ("percentile" if ci_valid else "unavailable"),
+        ci_message=ci_message if ci_message is not None else (
+            "" if ci_valid else "bootstrap CI requires more successful refits"
+        ),
     )
     return SimpleNamespace(
         model=MODEL_SPECS["11"],
@@ -134,14 +146,156 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert entries[0].stats["Residual degrees of freedom"] == "0"
     assert entries[0].stats["Jacobian rank"] == "2"
     assert entries[0].stats["Jacobian condition number"] == "123"
-    assert entries[0].stats["Successful bootstrap refits"] == "3 / 4"
-    assert entries[0].stats["Bootstrap CI method used"] == "unavailable"
+    assert entries[0].stats["Successful bootstrap refits"] == "20 / 20"
+    assert entries[0].stats["Bootstrap CI method used"] == "percentile"
+    assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0
+    assert all(np.isfinite(param.se) for param in entries[0].params)
+    assert summary_rows[0]["95 % CI"] != "N/A"
+    assert warnings == []
+    assert all(not entry.warnings for entry in entries)
+    assert set(entries[0].plot_labels.values()) == {"ppm_H1"}
+
+
+@pytest.mark.parametrize(("n_boot", "n_success"), [(20, 19), (19, 19)])
+def test_incomplete_or_too_small_bootstrap_withholds_raw_distribution_artifacts(
+    tmp_path,
+    monkeypatch,
+    n_boot,
+    n_success,
+):
+    ds = _dataset("sample")
+
+    def unexpected_bootstrap_plot(*args):
+        raise AssertionError("bootstrap histogram must not be generated")
+
+    monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", unexpected_bootstrap_plot)
+
+    message = "Bootstrap uncertainty unavailable: the raw sample is incomplete or too small."
+    summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
+        args=SimpleNamespace(bootstrap_ci_width=None),
+        ordered_keys=["sample"],
+        results_by_key={
+            "sample": {
+                "11": _fit_result(
+                    ds,
+                    n_boot=n_boot,
+                    n_success=n_success,
+                    ci_valid=False,
+                    ci_message=message,
+                )
+            }
+        },
+        failures_by_key={},
+        out_dir=tmp_path,
+        display_model_name=lambda name: name,
+    )
+
+    assert report_warnings == []
+    assert not any("bootstrap_" in path for path in entries[0].plots)
+    assert list(tmp_path.rglob("correlation.csv")) == []
     assert entries[0].stats["Bootstrap SE (log10 K)"] == "N/A"
     assert all(np.isnan(param.se) for param in entries[0].params)
     assert summary_rows[0]["95 % CI"] == "N/A"
-    assert warnings == []
-    assert all("bootstrap CI requires more successful refits" in entry.warnings for entry in entries)
-    assert set(entries[0].plot_labels.values()) == {"ppm_H1"}
+    assert message in entries[0].warnings
+
+
+def test_bca_only_failure_keeps_complete_raw_distribution_artifacts(tmp_path, monkeypatch):
+    ds = _dataset("sample")
+
+    def fake_bootstrap(samples, names, out_dir):
+        assert samples.shape == (20, 1)
+        assert names == ["K"]
+        path = out_dir / "bootstrap_K.png"
+        path.write_text("complete distribution", encoding="utf-8")
+        return [path]
+
+    monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", fake_bootstrap)
+
+    message = "BCa CI unavailable: all delete-one jackknife refits must succeed."
+    summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
+        args=SimpleNamespace(bootstrap_ci_width=None),
+        ordered_keys=["sample"],
+        results_by_key={
+            "sample": {
+                "11": _fit_result(
+                    ds,
+                    ci_valid=False,
+                    ci_method_used="unavailable",
+                    ci_message=message,
+                )
+            }
+        },
+        failures_by_key={},
+        out_dir=tmp_path,
+        display_model_name=lambda name: name,
+    )
+
+    assert report_warnings == []
+    bootstrap_path = tmp_path / next(
+        path for path in entries[0].plots if "bootstrap_" in path
+    )
+    assert bootstrap_path.read_text(encoding="utf-8") == "complete distribution"
+    assert list(tmp_path.rglob("correlation.csv"))
+    assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0
+    assert all(np.isfinite(param.se) for param in entries[0].params)
+    assert summary_rows[0]["95 % CI"] == "N/A"
+    assert message in entries[0].warnings
+
+
+def test_bootstrap_reportability_rejects_nonfinite_or_mismatched_samples():
+    result = _fit_result(_dataset("sample"))
+    result.bootstrap.param_samples[0, 0] = np.nan
+
+    assert not report_pipeline._bootstrap_samples_reportable(result.bootstrap)
+
+    result = _fit_result(_dataset("sample"))
+    result.bootstrap.param_samples = result.bootstrap.param_samples[:-1]
+
+    assert not report_pipeline._bootstrap_samples_reportable(result.bootstrap)
+
+
+def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_histogram(
+    tmp_path,
+    monkeypatch,
+):
+    ds = _dataset("sample")
+    result = _fit_result(ds)
+    result.model = MODEL_SPECS["nb"]
+    result.params = np.array([7.0, 0.5], dtype=float)
+    result.param_names = ["delta_0", "slope"]
+    result.bootstrap.param_samples = result.bootstrap.param_samples[:, 1:]
+    result.bootstrap.logk_samples = np.empty((20, 0), dtype=float)
+
+    def unexpected_bootstrap_plot(*args):
+        raise AssertionError("a non-binding model has no K histogram")
+
+    monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
+    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", unexpected_bootstrap_plot)
+
+    summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
+        args=SimpleNamespace(bootstrap_ci_width=None),
+        ordered_keys=["sample"],
+        results_by_key={"sample": {"nb": result}},
+        failures_by_key={},
+        out_dir=tmp_path,
+        display_model_name=lambda name: name,
+    )
+
+    assert report_warnings == []
+    assert list(tmp_path.rglob("correlation.csv"))
+    assert all(np.isfinite(param.se) for param in entries[0].params)
+    assert entries[0].stats["Bootstrap SE (log10 K)"] == "N/A"
+    assert not any("bootstrap_" in path for path in entries[0].plots)
+    assert summary_rows[0]["Binding constant (M⁻¹)"] == "N/A"
+    assert summary_rows[0]["95 % CI"] == "N/A"
 
 
 def test_dataset_directory_tokens_are_case_insensitive_safe():

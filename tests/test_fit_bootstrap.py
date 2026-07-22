@@ -6,7 +6,6 @@ from scipy.optimize import OptimizeResult
 
 from nmr_bind_fit.fit import fit_models
 from nmr_bind_fit.fit_bootstrap import (
-    MIN_BOOTSTRAP_CI_SAMPLES,
     MIN_BOOTSTRAP_CI_SUCCESSES,
     _bootstrap_ci_requirement,
     _delete_dataset_row,
@@ -49,8 +48,8 @@ def _finite_predict_all(params, model, datasets, solver_failure_mode="fail-fast"
     return y_pred_list, [], residuals
 
 
-def test_bootstrap_minimum_sample_name_remains_compatible_with_stricter_contract():
-    assert MIN_BOOTSTRAP_CI_SAMPLES == MIN_BOOTSTRAP_CI_SUCCESSES == 20
+def test_bootstrap_ci_requirement_uses_full_success_contract():
+    assert MIN_BOOTSTRAP_CI_SUCCESSES == 20
     assert _bootstrap_ci_requirement(20) == 20
     assert _bootstrap_ci_requirement(100) == 100
 
@@ -335,7 +334,6 @@ def test_bootstrap_excludes_nonfinite_params():
     assert "1/2 refits succeeded" in out.ci_message
     assert np.isnan(out.ci_low).all()
     assert np.isnan(out.ci_high).all()
-    assert "Bootstrap CI omitted" in out.ci_warning
 
 
 def test_bootstrap_all_nonconverged_yields_no_samples():
@@ -517,4 +515,3 @@ def test_nonbinding_bootstrap_se_uses_same_minimum_success_contract():
     assert out.ci_valid is False
     assert out.ci_method_used == "unavailable"
     assert "Bootstrap uncertainty unavailable" in out.ci_message
-    assert out.ci_warning == out.ci_message

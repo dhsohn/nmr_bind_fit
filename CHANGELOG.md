@@ -42,6 +42,9 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Fixed
 
+- Withheld bootstrap standard errors, histograms, and correlation matrices when requested
+  draws are incomplete, censored, too few, or non-finite, while retaining complete raw
+  distributions when only method-specific BCa interval construction fails.
 - Isolated independent multi-dataset report artifacts so plots and bootstrap files cannot overwrite one another.
 - Rejected underdetermined, rank-deficient, severely ill-conditioned, low-sensitivity, or bound-limited fits using response-unit-invariant diagnostics instead of reporting non-identifiable binding constants.
 - Required sufficient successful bootstrap refits before reporting confidence intervals and replaced bootstrap-sample acceleration with explicitly labeled local-refit BCa jackknife estimates.
@@ -53,6 +56,10 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - Removed the optional `fit` positional command. Invoke `nmr_bind_fit --input ...`
   directly.
 - Removed the `--concentration-unit` flag, which only relabeled report text while the fit and `K` bounds used raw numeric values. Supply concentrations in molar (M) instead.
+- Removed unused private plot/report compatibility helpers and the undocumented
+  `MIN_BOOTSTRAP_CI_SAMPLES` and `BootstrapResult.ci_warning` aliases. Result
+  dataclasses now require the current diagnostic fields instead of preserving
+  older positional-constructor layouts.
 
 ## [0.1.0] - 2026-06-30
 

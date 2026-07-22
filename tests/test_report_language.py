@@ -147,6 +147,9 @@ def test_build_methods_sections_mentions_bca_when_selected():
     assert "95% profile-likelihood RSS window" in uq_section["content"]
     assert "at least 20 refits were requested" in uq_section["content"]
     assert "every requested pseudo-dataset yielded an uncensored acceptable refit" in uq_section["content"]
+    assert "selected interval method to succeed" in uq_section["content"]
+    assert "BCa-only failure" in uq_section["content"]
+    assert "complete raw-distribution summaries available" in uq_section["content"]
 
 
 def test_build_summary_row_uses_selected_ci_and_reports_logk_se():

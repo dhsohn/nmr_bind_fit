@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, NoReturn, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import brentq
@@ -35,7 +35,7 @@ class SolverStats:
     failed_indices: List[int] = field(default_factory=list)
 
 
-def _normalize_failure_mode(failure_mode: str) -> str:
+def _validate_failure_mode(failure_mode: str) -> str:
     if failure_mode not in {"fail-fast", "continue"}:
         raise ValueError("failure_mode must be one of: fail-fast, continue")
     return failure_mode
@@ -48,7 +48,7 @@ def _validate_positive_finite_constants(*values: float) -> Tuple[float, ...]:
     return constants
 
 
-def _validate_total_arrays(
+def _validate_total_concentration_arrays(
     h_tot: np.ndarray, g_tot: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
     h_arr = np.asarray(h_tot, dtype=float)
@@ -66,14 +66,15 @@ def _record_solver_success(stats: Optional[SolverStats]) -> None:
 
 
 def _raise_solver_failure(
-    stats: Optional[SolverStats], cause: Optional[BaseException] = None
-) -> None:
+    stats: Optional[SolverStats], original_error: Optional[BaseException] = None
+) -> NoReturn:
+    """Record a failed solve and raise a consistent solver error."""
     if stats is not None:
         stats.fail += 1
-    error = RuntimeError("Equilibrium solver failed.")
-    if cause is None:
-        raise error
-    raise error from cause
+
+    if original_error is not None:
+        raise RuntimeError("Equilibrium solver failed.") from original_error
+    raise RuntimeError("Equilibrium solver failed.")
 
 
 def _validate_point_inputs(
@@ -210,7 +211,7 @@ def _free_guest_tolerance_scale(g_tot: float, log_binding_capacity: float) -> fl
 
 def solve_11(h_tot: np.ndarray, g_tot: np.ndarray, k: float) -> SpeciesResult:
     """Closed-form 1:1 solution with scaled, cancellation-safe arithmetic."""
-    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
+    h_tot, g_tot = _validate_total_concentration_arrays(h_tot, g_tot)
     (k,) = _validate_positive_finite_constants(k)
     if (
         not np.all(np.isfinite(h_tot))
@@ -438,9 +439,9 @@ def solve_12(
     failure_mode: str = "fail-fast",
 ) -> SpeciesResult:
     """Solve 1:2 binding across all points; aborts on the first failure."""
-    mode = _normalize_failure_mode(failure_mode)
+    mode = _validate_failure_mode(failure_mode)
     k1, k2 = _validate_positive_finite_constants(k1, k2)
-    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
+    h_tot, g_tot = _validate_total_concentration_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)
@@ -475,9 +476,9 @@ def solve_21(
     failure_mode: str = "fail-fast",
 ) -> SpeciesResult:
     """Solve 2:1 binding across all points; aborts on the first failure."""
-    mode = _normalize_failure_mode(failure_mode)
+    mode = _validate_failure_mode(failure_mode)
     k1, k2 = _validate_positive_finite_constants(k1, k2)
-    h_tot, g_tot = _validate_total_arrays(h_tot, g_tot)
+    h_tot, g_tot = _validate_total_concentration_arrays(h_tot, g_tot)
     h = np.full_like(h_tot, np.nan)
     g = np.full_like(g_tot, np.nan)
     hg = np.full_like(h_tot, np.nan)

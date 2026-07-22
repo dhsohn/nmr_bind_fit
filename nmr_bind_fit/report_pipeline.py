@@ -22,7 +22,7 @@ from .plots import (
     plot_residuals,
 )
 from .report import DecisionEntry, ModelEntry, ParamEntry
-from .types import DatasetLike, FitResultLike, SpeciesLike
+from .types import BootstrapLike, DatasetLike, FitResultLike, SpeciesLike
 
 SUMMARY_LABELS = {
     "dataset": "Dataset",
@@ -103,6 +103,19 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
         return values[np.isfinite(values)]
     mask = np.all(np.isfinite(values), axis=1)
     return values[mask]
+
+
+def _bootstrap_samples_reportable(bootstrap: BootstrapLike) -> bool:
+    """Return whether the raw bootstrap distribution is complete and reportable."""
+    samples = np.asarray(bootstrap.param_samples, dtype=float)
+    return bool(
+        bootstrap.n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES
+        and bootstrap.n_success == bootstrap.n_boot
+        and samples.ndim == 2
+        and samples.shape[0] == bootstrap.n_success
+        and samples.size > 0
+        and np.all(np.isfinite(samples))
+    )
 
 
 def _as_int(value: object) -> int:
@@ -215,8 +228,7 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
     bootstrap_samples = None
     if (
         res.bootstrap is not None
-        and getattr(res.bootstrap, "ci_valid", True)
-        and res.bootstrap.param_samples.size > 0
+        and _bootstrap_samples_reportable(res.bootstrap)
     ):
         bootstrap_samples = res.bootstrap.param_samples
 
@@ -290,8 +302,9 @@ def _collect_plot_artifacts(
         ):
             plot_labels[path.relative_to(out_dir).as_posix()] = str(peak)
 
-    if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
-        samples = res.bootstrap.param_samples.copy()
+    bootstrap = res.bootstrap
+    if bootstrap is not None and _bootstrap_samples_reportable(bootstrap):
+        samples = bootstrap.param_samples.copy()
         for idx, name in enumerate(res.param_names):
             if name in {"logK", "logK1", "logK2"}:
                 samples[:, idx] = _safe_pow10(samples[:, idx])
@@ -305,36 +318,22 @@ def _collect_plot_artifacts(
             corr_path = model_dir / "correlation.csv"
             np.savetxt(corr_path, corr, delimiter=",", fmt="%.6g")
 
-    if res.bootstrap is not None and res.model.n_logk > 0:
-        k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
-        k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
-        boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
-        _append_png_plot_paths(plot_paths, boot_files, out_dir)
+        k_samples = _bootstrap_k_samples(res)
+        if k_samples.shape[0] > 1:
+            k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
+            boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
+            _append_png_plot_paths(plot_paths, boot_files, out_dir)
 
     return plot_paths, plot_labels
 
 
-def _collect_plot_paths(
-    res: FitResultLike,
-    model_name: str,
-    ds_label: str,
-    out_dir: Path,
-    dataset_dir_token: Optional[str] = None,
-) -> List[str]:
-    """Compatibility wrapper returning only relative PNG paths."""
-    plot_paths, _ = _collect_plot_artifacts(
-        res,
-        model_name,
-        ds_label,
-        out_dir,
-        dataset_dir_token,
-    )
-    return plot_paths
-
-
 def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
     # Return finite bootstrap K samples (linear scale) for warnings and summary.
-    if res.bootstrap is None or res.model.n_logk == 0 or res.bootstrap.param_samples.size == 0:
+    if (
+        res.bootstrap is None
+        or res.model.n_logk == 0
+        or not _bootstrap_samples_reportable(res.bootstrap)
+    ):
         return np.full((0, res.model.n_logk), np.nan)
     k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
     return _filter_finite_rows(k_samples)
@@ -345,13 +344,10 @@ def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
     if (
         res.bootstrap is None
         or res.model.n_logk == 0
-        or not getattr(res.bootstrap, "ci_valid", True)
+        or not _bootstrap_samples_reportable(res.bootstrap)
     ):
         return np.full((0, res.model.n_logk), np.nan)
-    samples = getattr(res.bootstrap, "logk_samples", np.full((0, res.model.n_logk), np.nan))
-    if samples.size == 0:
-        return np.full((0, res.model.n_logk), np.nan)
-    return _filter_finite_rows(samples)
+    return res.bootstrap.param_samples[:, : res.model.n_logk]
 
 
 def _bootstrap_logk_se_text(res: FitResultLike) -> str:
@@ -840,9 +836,11 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
         f"Each pseudo-dataset was fitted from the perturbed and full-data-optimum starts; a draw was "
         f"treated as censored if a non-identifiable solution was competitive within the "
         f"{BOOTSTRAP_COMPETITIVE_CONFIDENCE:.0%} profile-likelihood RSS window. "
-        f"A confidence interval was reported only when at least {MIN_BOOTSTRAP_CI_SUCCESSES} refits were "
-        "requested and every requested pseudo-dataset yielded an uncensored acceptable refit; otherwise "
-        "the interval and bootstrap-derived standard errors were reported as unavailable. "
+        f"Raw-distribution standard errors and diagnostic artifacts were reported only when at least "
+        f"{MIN_BOOTSTRAP_CI_SUCCESSES} refits were requested and every requested pseudo-dataset yielded "
+        "an uncensored acceptable refit; otherwise they were reported as unavailable. A confidence "
+        "interval additionally required the selected interval method to succeed, so a BCa-only failure "
+        "left complete raw-distribution summaries available while the interval remained unavailable. "
         f"{ci_desc}"
         if args.bootstrap > 0
         else "Bootstrap uncertainty was not evaluated in this analysis."
