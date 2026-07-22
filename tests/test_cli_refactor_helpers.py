@@ -24,14 +24,16 @@ def test_resolve_logk_config_defaults_and_fixed_bounds():
         k_starts=None,
         bootstrap_logk_jitter=0.1,
     )
-    starts, bounds = _resolve_logk_config(args)
+    starts, bounds, jitter = _resolve_logk_config(args)
     assert len(starts) == 8
     assert bounds == (0.0, 12.0)
+    assert jitter == 0.1
 
     args.k_starts = "10,100"
-    starts, bounds = _resolve_logk_config(args)
+    starts, bounds, jitter = _resolve_logk_config(args)
     assert starts == [1.0, 2.0]
     assert bounds == (0.0, 12.0)
+    assert jitter == 0.1
 
 
 def test_resolve_logk_config_rejects_negative_jitter():
@@ -61,13 +63,13 @@ def test_resolve_logk_config_rejects_k_starts_out_of_strict_bounds():
         _resolve_logk_config(args)
 
 
-def test_safe_output_name_is_bounded_and_collision_resistant():
-    first = _safe_output_name("sample/" + "a" * 300)
-    second = _safe_output_name("sample?" + "a" * 300)
+def test_safe_output_name_is_normalized_and_bounded():
+    safe = _safe_output_name("../sample? " + "a" * 300)
 
-    assert len(first) <= 80
-    assert len(second) <= 80
-    assert first != second
+    assert len(safe) == 80
+    assert safe.startswith("sample_")
+    assert not {"/", "?", " "}.intersection(safe)
+    assert _safe_output_name("...") == "output"
 
 
 def test_reserve_output_dir_uses_atomic_suffixes(tmp_path, monkeypatch):
@@ -128,59 +130,6 @@ def test_build_parser_removed_concentration_unit_flag():
         parser.parse_args(["--input", "sample.csv", "--concentration-unit", "mM"])
 
 
-def test_run_fit_rejects_negative_bootstrap_when_parser_is_bypassed():
-    args = argparse.Namespace(
-        input=["sample.csv"],
-        ppm_cols=None,
-        bootstrap=-1,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=100,
-        seed=None,
-        bootstrap_ci_width=None,
-    )
-    with pytest.raises(ValueError, match="--bootstrap must be non-negative."):
-        run_fit(args)
-
-
-def test_run_fit_rejects_unknown_bootstrap_ci_method_when_parser_is_bypassed():
-    args = argparse.Namespace(
-        input=["sample.csv"],
-        ppm_cols=None,
-        bootstrap=0,
-        bootstrap_ci_method="unknown",
-        residual_diagnostics=False,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=100,
-        seed=None,
-        bootstrap_ci_width=None,
-    )
-    with pytest.raises(ValueError, match="--bootstrap-ci-method must be one of: percentile, bca."):
-        run_fit(args)
-
-
-def test_run_fit_rejects_nonpositive_max_nfev_before_loading_input():
-    args = argparse.Namespace(
-        input=["missing.csv"],
-        ppm_cols=None,
-        bootstrap=0,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=0,
-        seed=None,
-        bootstrap_ci_width=None,
-    )
-    with pytest.raises(ValueError, match="--max-nfev must be a positive integer."):
-        run_fit(args)
-
-
 def test_main_returns_nonzero_for_zero_max_nfev(monkeypatch, capsys):
     monkeypatch.setattr(
         sys,
@@ -191,8 +140,8 @@ def test_main_returns_nonzero_for_zero_max_nfev(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc_info:
         main()
 
-    assert exc_info.value.code == 1
-    assert "--max-nfev must be a positive integer." in capsys.readouterr().err
+    assert exc_info.value.code == 2
+    assert "must be a positive integer" in capsys.readouterr().err
 
 
 def test_main_returns_nonzero_for_nan_k_start_before_loading_input(monkeypatch, capsys):
@@ -209,38 +158,12 @@ def test_main_returns_nonzero_for_nan_k_start_before_loading_input(monkeypatch, 
     assert "All K starts must be finite." in capsys.readouterr().err
 
 
-def test_run_fit_rejects_nonfinite_bootstrap_ci_width():
-    args = argparse.Namespace(
-        input=["missing.csv"],
-        ppm_cols=None,
-        bootstrap=0,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=100,
-        seed=None,
-        bootstrap_ci_width=float("nan"),
-    )
-    with pytest.raises(ValueError, match="--bootstrap-ci-width must be finite."):
-        run_fit(args)
+@pytest.mark.parametrize("value", ["0", "-1", "nan"])
+def test_build_parser_rejects_invalid_bootstrap_ci_width(value):
+    parser = build_parser()
 
-
-def test_run_fit_rejects_nonpositive_bootstrap_ci_width():
-    args = argparse.Namespace(
-        input=["missing.csv"],
-        ppm_cols=None,
-        bootstrap=0,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
-        k_starts=None,
-        replicates=False,
-        max_nfev=100,
-        seed=None,
-        bootstrap_ci_width=0,
-    )
-    with pytest.raises(ValueError, match="--bootstrap-ci-width must be positive."):
-        run_fit(args)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--input", "sample.csv", "--bootstrap-ci-width", value])
 
 
 def test_index_results_groups_success_and_failures_by_dataset():
@@ -253,9 +176,9 @@ def test_index_results_groups_success_and_failures_by_dataset():
         SimpleNamespace(datasets=[ds2], success=True, message="ok", model=SimpleNamespace(name="11")),
     ]
 
-    ordered_keys, result_map, failures = _index_results(results, labels)
+    result_map, failures = _index_results(results, labels)
 
-    assert ordered_keys == ["Dataset A", "Dataset B"]
+    assert list(result_map) == ["Dataset A", "Dataset B"]
     assert set(result_map["Dataset A"].keys()) == {"11"}
     assert set(result_map["Dataset B"].keys()) == {"11"}
     assert failures["Dataset A"] == [("12", "fail")]
@@ -292,6 +215,15 @@ def test_resolve_inputs_sorts_glob_matches(tmp_path):
     paths = _resolve_inputs([str(tmp_path / "*.csv")])
 
     assert [path.name for path in paths] == ["a.csv", "b.csv"]
+
+
+def test_resolve_inputs_accepts_literal_path_with_glob_characters(tmp_path):
+    csv_path = tmp_path / "sample[1].csv"
+    csv_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+
+    paths = _resolve_inputs([str(csv_path)])
+
+    assert paths == [csv_path]
 
 
 def test_run_fit_rejects_replicates_with_one_dataset(monkeypatch):

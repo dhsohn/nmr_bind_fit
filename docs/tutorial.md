@@ -43,7 +43,7 @@ PY
 ## 3. Run a single-file fit
 
 ```bash
-nmr_bind_fit --input examples/synthetic_11.csv
+nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 0
 ```
 
 This fits four candidate explanations to the same data:
@@ -53,7 +53,7 @@ This fits four candidate explanations to the same data:
 3. sequential 2:1 binding (`H + G <=> HG`; `H + HG <=> H2G`)
 4. non-binding linear drift
 
-The output directory is named with a timestamp and the input stem, for example `20260630_120000_000_synthetic_11/`.
+The output directory is named with a timestamp and the input stem, for example `20260630_120000_synthetic_11/`.
 
 ## 4. Read the output files
 

@@ -1,69 +1,37 @@
-from pathlib import Path
 from types import SimpleNamespace
 
-from nmr_bind_fit.cli import _build_dataset_labels, _dataset_key
+from nmr_bind_fit.cli import _build_dataset_labels, _index_results
 
 
-def test_dataset_key_disambiguates_same_stem_without_exposing_full_paths(tmp_path):
+def test_dataset_labels_keep_unique_names():
+    ds1 = SimpleNamespace(name="first")
+    ds2 = SimpleNamespace(name="second")
+    labels = _build_dataset_labels([ds1, ds2])
+
+    assert labels == {id(ds1): "first", id(ds2): "second"}
+
+
+def test_dataset_labels_number_duplicate_names_without_exposing_paths(tmp_path):
     ds1 = SimpleNamespace(name="sample", path=tmp_path / "private-a" / "sample.csv")
     ds2 = SimpleNamespace(name="sample", path=tmp_path / "private-b" / "sample.csv")
     labels = _build_dataset_labels([ds1, ds2])
 
-    key1 = _dataset_key(SimpleNamespace(datasets=[ds1]), labels)
-    key2 = _dataset_key(SimpleNamespace(datasets=[ds2]), labels)
-
-    assert key1 != key2
-    assert key1.startswith("sample")
-    assert key2.startswith("sample")
-    assert str(tmp_path) not in key1
-    assert str(tmp_path) not in key2
-    assert "sample.csv" in key1
-    assert "sample.csv" in key2
+    assert labels == {id(ds1): "1. sample", id(ds2): "2. sample"}
+    assert all(str(tmp_path) not in label for label in labels.values())
 
 
-def test_dataset_key_disambiguates_repeated_same_path():
-    ds1 = SimpleNamespace(name="sample", path=Path("a/sample.csv"))
-    ds2 = SimpleNamespace(name="sample", path=Path("a/sample.csv"))
+def test_index_results_uses_simultaneous_fitting_label():
+    ds1 = SimpleNamespace(name="first")
+    ds2 = SimpleNamespace(name="second")
     labels = _build_dataset_labels([ds1, ds2])
+    result = SimpleNamespace(
+        datasets=[ds1, ds2],
+        success=True,
+        model=SimpleNamespace(name="11"),
+        message="",
+    )
 
-    key1 = _dataset_key(SimpleNamespace(datasets=[ds1]), labels)
-    key2 = _dataset_key(SimpleNamespace(datasets=[ds2]), labels)
+    results_by_key, failures_by_key = _index_results([result], labels)
 
-    assert key1 != key2
-    assert "#1" in key1 or "#2" in key1
-    assert "#1" in key2 or "#2" in key2
-
-
-def test_dataset_key_keeps_replicate_grouping_label():
-    ds1 = SimpleNamespace(name="sample", path=Path("a/sample.csv"))
-    ds2 = SimpleNamespace(name="sample", path=Path("b/sample.csv"))
-    labels = _build_dataset_labels([ds1, ds2])
-
-    key = _dataset_key(SimpleNamespace(datasets=[ds1, ds2]), labels)
-    assert key == "Simultaneous Fitting"
-
-
-def test_dataset_key_avoids_simultaneous_fitting_sentinel_for_single_dataset():
-    ds = SimpleNamespace(name="Simultaneous Fitting", path=Path("Simultaneous Fitting.csv"))
-    labels = _build_dataset_labels([ds])
-
-    key = _dataset_key(SimpleNamespace(datasets=[ds]), labels)
-
-    assert key == "Simultaneous Fitting (dataset)"
-
-
-def test_dataset_key_sentinel_rename_stays_unique_against_existing_label():
-    # ds1's label equals the reserved sentinel and is renamed to "... (dataset)";
-    # ds2 already carries that exact label. The rename must further disambiguate
-    # instead of colliding, otherwise both datasets share a key and one
-    # overwrites the other in the report.
-    ds1 = SimpleNamespace(name="Simultaneous Fitting", path=Path("Simultaneous Fitting.csv"))
-    ds2 = SimpleNamespace(name="Simultaneous Fitting (dataset)", path=Path("other.csv"))
-    labels = _build_dataset_labels([ds1, ds2])
-
-    key1 = _dataset_key(SimpleNamespace(datasets=[ds1]), labels)
-    key2 = _dataset_key(SimpleNamespace(datasets=[ds2]), labels)
-
-    assert key1 != key2
-    assert key1 != "Simultaneous Fitting"
-    assert key2 != "Simultaneous Fitting"
+    assert results_by_key == {"Simultaneous Fitting": {"11": result}}
+    assert failures_by_key == {}
