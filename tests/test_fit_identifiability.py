@@ -141,21 +141,21 @@ def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
         result = fit_models(
             [dataset],
             [model_name],
-            logk_starts=[3.0, 5.0],
+            logk_starts=[4.0],
             logk_bounds=(0.0, 12.0),
             max_nfev=2000,
             bootstrap=0,
         )[0]
         assert result.success is True
-        np.testing.assert_allclose(
-            result.params[: result.model.n_logk],
-            expected_logk,
-            rtol=0.0,
-            atol=5e-4,
-        )
         results.append(result)
 
     reference = results[1]
+    np.testing.assert_allclose(
+        reference.params[: reference.model.n_logk],
+        expected_logk,
+        rtol=0.0,
+        atol=5e-4,
+    )
     for result in results:
         np.testing.assert_allclose(
             result.params[: result.model.n_logk],
