@@ -566,7 +566,7 @@ def _build_summary_row(
     ds_label: str,
     display_name: str,
 ) -> Dict[str, str]:
-    # Build one row for summary.csv.
+    # Build one row of the model comparison table.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
     k_str = _format_k_values(k_vals, res.model.n_logk)
@@ -588,7 +588,7 @@ def _build_summary_row(
 
 
 def _build_failure_summary_row(ds_label: str, display_name: str) -> Dict[str, str]:
-    # Keep failed candidates visible in summary.csv for auditability.
+    # Keep failed candidates visible in the comparison table for auditability.
     summary_base = {
         "dataset": ds_label,
         "model": display_name,

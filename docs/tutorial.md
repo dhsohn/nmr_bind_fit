@@ -59,7 +59,6 @@ The output directory is named with a timestamp and the input stem, for example `
 
 The most important outputs are:
 
-- `summary.csv`: model-level table with binding constants, confidence intervals when available, R², BIC, and AICc;
 - `report.html`: human-readable report with the provisional working model, methods text, plots, tables, and warnings;
 - `model_*/dataset_*/`: dataset-scoped isotherm plots, residual plots, bound-fraction plots, and bootstrap histograms when available.
 

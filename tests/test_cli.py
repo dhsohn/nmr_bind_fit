@@ -50,7 +50,7 @@ def test_run_fit_writes_report_artifacts(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
 
     out_dir = output_dirs[0]
-    assert (out_dir / "summary.csv").is_file()
+    assert not (out_dir / "summary.csv").exists()
     assert not (out_dir / "decision.txt").exists()
     assert (out_dir / "report.html").is_file()
 
@@ -102,16 +102,14 @@ def test_run_fit_replicates_bootstrap_and_continue_mode(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
 
     out_dir = output_dirs[0]
-    assert (out_dir / "summary.csv").is_file()
+    assert not (out_dir / "summary.csv").exists()
     assert not (out_dir / "decision.txt").exists()
     report_path = out_dir / "report.html"
     assert report_path.is_file()
 
-    # Replicate fits are reported under one shared key rather than per input.
-    summary = pd.read_csv(out_dir / "summary.csv")
-    assert set(summary["Dataset"]) == {"Simultaneous Fitting"}
-
     report_text = report_path.read_text(encoding="utf-8")
+    # Replicate fits are reported under one shared key rather than per input.
+    assert "Simultaneous Fitting" in report_text
     assert "fail-fast behavior" in report_text
     assert "dropped before fitting" in report_text
 
@@ -158,18 +156,17 @@ def test_run_fit_keeps_same_named_independent_inputs_and_artifacts_separate(tmp_
     assert len(output_dirs) == 1
     out_dir = output_dirs[0]
 
-    summary = pd.read_csv(out_dir / "summary.csv")
-    dataset_labels = list(dict.fromkeys(summary["Dataset"].tolist()))
-    assert len(dataset_labels) == 2
-    assert len(set(dataset_labels)) == 2
-    assert all(str(tmp_path) not in label for label in dataset_labels)
+    report_text = (out_dir / "report.html").read_text(encoding="utf-8")
+    # Same-named inputs get distinct numbered labels, and no input path leaks.
+    assert "1. sample" in report_text
+    assert "2. sample" in report_text
+    assert str(tmp_path) not in report_text
 
     dataset_dirs = sorted((out_dir / "model_nb").glob("dataset_*"))
     assert len(dataset_dirs) == 2
     assert len({path.name.casefold() for path in dataset_dirs}) == 2
     assert all(list(path.glob("*.png")) for path in dataset_dirs)
 
-    report_text = (out_dir / "report.html").read_text(encoding="utf-8")
     for png_path in (path for directory in dataset_dirs for path in directory.glob("*.png")):
         assert png_path.relative_to(out_dir).as_posix() in report_text
 

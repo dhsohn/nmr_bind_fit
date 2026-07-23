@@ -216,8 +216,8 @@ between candidates.
    added — a sign that K is weakly identified by the data.
 
 4. **Record the outcome.** All checks (ΔBIC, CI width, solver failures, penalty events, etc.)
-   are reported with their reasons in `report.html`; `summary.csv` carries the per-model
-   comparison values.
+   are reported with their reasons in `report.html`, alongside the per-model comparison
+   table.
 
 ### Bootstrap uncertainty quantification
 
@@ -323,7 +323,7 @@ the lowest BIC, and the model itself should be reconsidered.
 
 | Item | File | Content |
 |------|------|---------|
-| Model-comparison table (BIC, AICc, RMSE, R², …) | `summary.csv` | Per-model values of the §4 indices, including failed-candidate audit rows |
+| Model-comparison table (BIC, AICc, RMSE, R², …) | `report.html` | Per-model values of the §4 indices, including failed-candidate audit rows |
 | Combined report | `report.html` | Provisional working model and reasons, methods, plots, warnings (§5) |
 | Per-model diagnostics | `model_*/dataset_*/` | Dataset-scoped plots, bootstrap histograms, correlation matrix |
 
