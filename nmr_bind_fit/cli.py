@@ -31,7 +31,6 @@ MODEL_LABELS = {
 }
 
 DEFAULT_MODEL_NAMES = ["11", "12", "21", "nb"]
-STRICT_MISSING_POLICY = "drop-column"
 STRICT_SOLVER_FAILURE_MODE = "fail-fast"
 STRICT_K_MIN = 1e0
 STRICT_K_MAX = 1e12
@@ -185,11 +184,7 @@ def run_fit(args: argparse.Namespace) -> None:
 
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
-    datasets = load_datasets(
-        paths,
-        ppm_cols=args.ppm_cols,
-        missing_policy=STRICT_MISSING_POLICY,
-    )
+    datasets = load_datasets(paths, ppm_cols=args.ppm_cols)
     if args.replicates and len(datasets) < 2:
         raise ValueError("--replicates requires at least two input datasets.")
     dataset_labels = _build_dataset_labels(datasets)

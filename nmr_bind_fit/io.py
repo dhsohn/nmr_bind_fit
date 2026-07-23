@@ -181,44 +181,12 @@ def _drop_incomplete_ppm_columns(
     return ppm_view.loc[:, kept_ppm].copy(), kept_ppm, dropped_ppm
 
 
-def _apply_missing_policy(
-    data: pd.DataFrame,
-    ppm_cols: Sequence[str],
-    missing_policy: str,
-) -> tuple[pd.DataFrame, list[str], list[str]]:
-    if missing_policy == "drop-column":
-        return _drop_incomplete_ppm_columns(data, ppm_cols)
-    if missing_policy == "mask":
-        kept_ppm = list(ppm_cols)
-        if not kept_ppm:
-            raise ValueError("No ppm columns remain after applying missing-value policy.")
-        ppm_view = data.loc[:, kept_ppm].apply(pd.to_numeric, errors="coerce")
-        ppm_array = ppm_view.to_numpy(dtype=float, copy=True)
-        ppm_array[~np.isfinite(ppm_array)] = np.nan
-        return pd.DataFrame(ppm_array, columns=kept_ppm, index=data.index), kept_ppm, []
-    raise ValueError("missing_policy must be one of: drop-column, mask")
-
-
 def _validate_concentration_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> None:
     # Validate concentration arrays prior to model fitting.
     if not np.all(np.isfinite(h_tot)) or np.any(h_tot <= 0):
         raise ValueError("Host concentration values must be positive and finite.")
     if not np.all(np.isfinite(g_tot)) or np.any(g_tot < 0):
         raise ValueError("Guest concentration values must be non-negative and finite.")
-
-
-def _validate_ppm_array(y: np.ndarray, ppm_cols: Sequence[str]) -> None:
-    """Ensure every retained peak has at least one finite observation."""
-    if y.ndim != 2 or y.shape[0] == 0 or y.shape[1] == 0:
-        raise ValueError("No ppm observations remain after input filtering.")
-    finite = np.isfinite(y)
-    if not np.any(finite):
-        raise ValueError("No finite ppm observations remain after input filtering.")
-    empty_cols = [col for col, has_value in zip(ppm_cols, np.any(finite, axis=0)) if not has_value]
-    if empty_cols:
-        raise ValueError(
-            "ppm columns contain no finite observations: " + ", ".join(map(str, empty_cols))
-        )
 
 
 def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
@@ -230,7 +198,6 @@ def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
 def load_dataset(
     path: Path,
     ppm_cols: Sequence[str] | None = None,
-    missing_policy: str = "drop-column",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
     path = Path(path)
@@ -248,7 +215,7 @@ def load_dataset(
         raise ValueError("No rows remain after dropping rows with missing required concentrations.")
     data = _coerce_numeric_columns(data, [host_col, guest_col, *ppm_cols])
 
-    ppm_data, ppm_cols, dropped_ppm = _apply_missing_policy(data, ppm_cols, missing_policy)
+    ppm_data, ppm_cols, dropped_ppm = _drop_incomplete_ppm_columns(data, ppm_cols)
     use_cols = [host_col, guest_col] + ppm_cols
     data = data.loc[:, use_cols].copy()
 
@@ -257,9 +224,10 @@ def load_dataset(
     g_tot = np.asarray(data.loc[:, guest_col], dtype=float)
     _validate_concentration_arrays(h_tot, g_tot)
 
-    # Extract ppm values.
+    # Every retained ppm column is fully finite: _drop_incomplete_ppm_columns
+    # drops any column holding a missing or non-finite value, and raises when
+    # none survive.
     y = np.asarray(ppm_data, dtype=float)
-    _validate_ppm_array(y, ppm_cols)
     x = _compute_equivalents(h_tot, g_tot)
 
     name = path.stem
@@ -280,7 +248,6 @@ def load_dataset(
 def load_datasets(
     paths: Sequence[Path],
     ppm_cols: str | None,
-    missing_policy: str = "drop-column",
 ) -> list[Dataset]:
     """Load multiple datasets."""
     # Reuse column parsing for all input paths.
@@ -288,10 +255,6 @@ def load_datasets(
     datasets = []
     for path in paths:
         datasets.append(
-            load_dataset(
-                path,
-                ppm_cols=ppm_cols_list,
-                missing_policy=missing_policy,
-            )
+            load_dataset(path, ppm_cols=ppm_cols_list)
         )
     return datasets

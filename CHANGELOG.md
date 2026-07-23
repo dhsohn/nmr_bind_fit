@@ -76,6 +76,12 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Removed
 
+- Removed the `missing_policy` parameter of `load_dataset` and `load_datasets`, together with
+  its `mask` scheme. Only `drop-column` was ever reachable: the CLI hard-coded it, the option
+  was undocumented, and `mask` had no consumer outside its own tests. A ppm column holding a
+  missing or non-finite value is dropped, and a file whose columns are all dropped is rejected.
+  With `mask` gone, `_validate_ppm_array` became unreachable — every retained column is finite
+  by construction — and went with it.
 - Removed the `nmr_bind_fit.fit_bootstrap` module and everything specific to bootstrap
   resampling: `BootstrapResult`, BCa intervals and their delete-one jackknife refits, the
   residual, parametric and case resampling schemes, the censored-draw and

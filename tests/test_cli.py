@@ -373,7 +373,7 @@ def test_run_fit_rejects_replicates_with_one_dataset(monkeypatch):
     monkeypatch.setattr(
         cli_module,
         "load_datasets",
-        lambda _paths, ppm_cols, missing_policy: [
+        lambda _paths, ppm_cols: [
             SimpleNamespace(name="one", path=Path("one.csv"))
         ],
     )
