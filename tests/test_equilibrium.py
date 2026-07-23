@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import nmr_bind_fit.equilibrium as equilibrium
+from nmr_bind_fit import equilibrium
 from nmr_bind_fit.equilibrium import (
     SolverStats,
     solve_11,

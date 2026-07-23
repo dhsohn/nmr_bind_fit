@@ -1,15 +1,19 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional, Sequence
 
 import numpy as np
 import pytest
 from scipy.optimize import OptimizeResult
+from scipy.stats import t as student_t
 
-import nmr_bind_fit.fit as fit
+from nmr_bind_fit import fit
 from nmr_bind_fit.fit import _param_names_multi, fit_models
 from nmr_bind_fit.fit_criteria import information_criteria
 from nmr_bind_fit.fit_optimizer import param_bounds, select_best_multistart
+from nmr_bind_fit.fit_uncertainty import CONFIDENCE_LEVEL, parameter_uncertainty
 from nmr_bind_fit.io import Dataset, load_dataset
 from nmr_bind_fit.models import (
     MODEL_SPECS,
@@ -36,7 +40,7 @@ def _named_dataset(
     g_tot: np.ndarray,
     y: np.ndarray,
     *,
-    path: Optional[str] = None,
+    path: str | None = None,
 ) -> Dataset:
     return Dataset(
         name=name,
@@ -64,13 +68,11 @@ def test_binding_fit_rejects_dataset_without_positive_guest():
         ["11"],
         logk_starts=[1.0, 4.0, 9.0],
         logk_bounds=(0.0, 12.0),
-        bootstrap=20,
-        seed=1,
     )[0]
 
     assert result.success is False
     assert "without positive guest concentrations" in result.message
-    assert result.bootstrap is None
+    assert result.uncertainty is None
     assert result.logk_bounds == (0.0, 12.0)
 
 
@@ -82,7 +84,7 @@ def test_fit_rejects_nonpositive_residual_degrees_of_freedom():
         np.array([[7.0], [7.2]]),
     )
 
-    result = fit_models([ds], ["11"], logk_starts=[4.0], bootstrap=0)[0]
+    result = fit_models([ds], ["11"], logk_starts=[4.0])[0]
 
     assert result.success is False
     assert "positive residual degrees of freedom are required" in result.message
@@ -100,7 +102,7 @@ def test_fit_rejects_rank_deficient_positive_guest_design():
         (7.0 + np.linspace(-0.01, 0.01, n)).reshape(-1, 1),
     )
 
-    result = fit_models([ds], ["11"], logk_starts=[4.0], bootstrap=0)[0]
+    result = fit_models([ds], ["11"], logk_starts=[4.0])[0]
 
     assert result.success is False
     assert "Jacobian rank" in result.message
@@ -124,7 +126,6 @@ def test_fit_rejects_practically_flat_high_affinity_solution(start):
         ["11"],
         logk_starts=[start],
         logk_bounds=(0.0, 12.0),
-        bootstrap=0,
     )[0]
 
     assert result.success is False
@@ -165,7 +166,6 @@ def test_fit_and_identifiability_are_invariant_to_response_unit_rescaling(
             logk_starts=[4.0],
             logk_bounds=(0.0, 12.0),
             max_nfev=2000,
-            bootstrap=0,
         )[0]
         assert result.success is True
         results.append(result)
@@ -205,7 +205,6 @@ def test_nonbinding_control_is_selected_without_forcing_a_binding_model():
         logk_starts=[4.0],
         logk_bounds=(0.0, 12.0),
         max_nfev=200,
-        bootstrap=0,
     )
 
     successful = [result for result in results if result.success and np.isfinite(result.bic)]
@@ -223,7 +222,7 @@ def test_masked_endpoint_uses_finite_peak_endpoints_for_initialization():
         np.array([[np.nan], [7.1], [7.2], [7.3], [7.4]]),
     )
 
-    result = fit_models([ds], ["nb"], logk_starts=[4.0], bootstrap=0)[0]
+    result = fit_models([ds], ["nb"], logk_starts=[4.0])[0]
 
     assert result.success is True
     assert result.jacobian_rank == result.p
@@ -253,7 +252,7 @@ def test_programmatic_api_rejects_nonfinite_starts_before_model_selection():
     ds = _named_dataset("sample", h_tot, g_tot, y)
 
     with pytest.raises(ValueError, match="logk_starts must contain only finite values"):
-        fit_models([ds], ["11", "nb"], logk_starts=[float("nan")], bootstrap=0)
+        fit_models([ds], ["11", "nb"], logk_starts=[float("nan")])
 
 
 def test_programmatic_invalid_dataset_shape_returns_failed_result():
@@ -268,7 +267,7 @@ def test_programmatic_invalid_dataset_shape_returns_failed_result():
         dropped_peaks=[],
     )
 
-    result = fit_models([ds], ["11"], logk_starts=[4.0], bootstrap=0)[0]
+    result = fit_models([ds], ["11"], logk_starts=[4.0])[0]
 
     assert result.success is False
     assert "must contain at least one point and one peak" in result.message
@@ -457,11 +456,7 @@ def test_fit_models_records_failure_and_continues_single_dataset(monkeypatch):
         logk_starts=[1.0],
         replicates=False,
         max_nfev=100,
-        bootstrap=0,
-        bootstrap_method="residual",
-        seed=0,
         logk_bounds=None,
-        logk_jitter=0.0,
     )
 
     assert len(results) == 2
@@ -502,11 +497,7 @@ def test_fit_models_records_failure_and_continues_replicates(monkeypatch):
         logk_starts=[1.0],
         replicates=True,
         max_nfev=100,
-        bootstrap=0,
-        bootstrap_method="residual",
-        seed=0,
         logk_bounds=None,
-        logk_jitter=0.0,
     )
 
     assert len(results) == 2
@@ -535,11 +526,7 @@ def test_fit_models_propagates_unexpected_exception(monkeypatch):
             logk_starts=[1.0],
             replicates=False,
             max_nfev=100,
-            bootstrap=0,
-            bootstrap_method="residual",
-            seed=0,
             logk_bounds=None,
-            logk_jitter=0.0,
         )
 
 
@@ -559,7 +546,6 @@ def test_fit_model_reports_residual_diagnostics_when_enabled():
         "nb",
         logk_starts=[1.0],
         max_nfev=100,
-        bootstrap=0,
         residual_diagnostics=True,
     )
 
@@ -593,9 +579,7 @@ def test_fit_models_captures_all_masked_peak_column():
         logk_starts=[1.0],
         replicates=False,
         max_nfev=100,
-        bootstrap=0,
         logk_bounds=(0.0, 12.0),
-        logk_jitter=0.0,
     )
 
     assert len(results) == 1
@@ -815,7 +799,7 @@ def test_predict_shape_11():
     model = MODEL_SPECS["11"]
     logk = np.array([4.0])
     delta = np.array([[7.0, 7.5], [8.0, 8.2]])
-    y_pred, species = predict_dataset(model, ds, logk, delta)
+    y_pred, _species = predict_dataset(model, ds, logk, delta)
     assert y_pred.shape == y.shape
 
 
@@ -916,3 +900,119 @@ def test_residual_diagnostics_can_suppress_durbin_watson_for_pooled_input():
     out = residual_diagnostics(residuals, include_durbin_watson=False)
 
     assert "durbin_watson" not in out
+
+
+def test_standard_errors_match_the_closed_form_least_squares_covariance():
+    # A straight-line design whose covariance can be worked out by hand:
+    # X'X = [[4, 6], [6, 14]], det 20, so cov = s2 * [[14, -6], [-6, 4]] / 20
+    # with s2 = RSS/dof = 4/2 = 2.
+    jac = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0]])
+    fun = np.array([1.0, -1.0, 1.0, -1.0])
+    params = np.array([3.0, 0.5])
+
+    out = parameter_uncertainty(params, OptimizeResult(jac=jac, fun=fun), n_logk=1)
+
+    np.testing.assert_allclose(out.param_se, [np.sqrt(1.4), np.sqrt(0.4)])
+    # Correlation of the design, independent of the residual scale.
+    expected_corr = -6.0 / np.sqrt(4.0 * 14.0)
+    np.testing.assert_allclose(out.correlation[0, 1], expected_corr)
+    np.testing.assert_allclose(np.diag(out.correlation), [1.0, 1.0])
+
+
+def test_interval_uses_the_student_t_quantile_for_the_residual_dof():
+    jac = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0]])
+    fun = np.array([1.0, -1.0, 1.0, -1.0])
+    params = np.array([3.0, 0.5])
+
+    out = parameter_uncertainty(params, OptimizeResult(jac=jac, fun=fun), n_logk=1)
+
+    dof = 2
+    critical = float(student_t.ppf(0.5 + CONFIDENCE_LEVEL / 2.0, dof))
+    # A normal quantile would be 1.96; the small-sample t quantile is much wider.
+    assert critical > 4.0
+    np.testing.assert_allclose(out.logk_ci_low, [3.0 - critical * np.sqrt(1.4)])
+    np.testing.assert_allclose(out.logk_ci_high, [3.0 + critical * np.sqrt(1.4)])
+
+
+def test_perfect_fit_reports_zero_error_and_undefined_correlation():
+    # Zero residual is degenerate but honest: no spread, so no correlation.
+    jac = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0]])
+    fun = np.zeros(4)
+    params = np.array([3.0, 0.5])
+
+    out = parameter_uncertainty(params, OptimizeResult(jac=jac, fun=fun), n_logk=1)
+
+    np.testing.assert_allclose(out.param_se, [0.0, 0.0])
+    np.testing.assert_allclose(out.logk_ci_low, [3.0])
+    np.testing.assert_allclose(out.logk_ci_high, [3.0])
+    assert not np.all(np.isfinite(out.correlation))
+
+
+def test_only_the_binding_constants_get_intervals():
+    jac = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0]])
+    fun = np.array([1.0, -1.0, 1.0, -1.0])
+    params = np.array([3.0, 0.5])
+
+    out = parameter_uncertainty(params, OptimizeResult(jac=jac, fun=fun), n_logk=0)
+
+    assert out.param_se.shape == (2,)
+    assert out.logk_ci_low.shape == (0,)
+    assert out.logk_ci_high.shape == (0,)
+
+
+def test_fit_models_attaches_uncertainty_that_brackets_the_estimate():
+    # End-to-end wiring: a real fit must carry a usable interval, so a
+    # regression that drops the uncertainty call cannot pass silently.
+    dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_11.csv")
+    rng = np.random.default_rng(5)
+    dataset.y = dataset.y + rng.normal(0.0, 0.005, size=dataset.y.shape)
+
+    result = fit_models(
+        [dataset],
+        ["11"],
+        logk_starts=[3.0, 4.0, 5.0],
+        logk_bounds=(0.0, 12.0),
+    )[0]
+
+    assert result.success
+    assert result.uncertainty is not None
+    assert result.uncertainty.param_se.shape == (result.p,)
+    assert np.all(result.uncertainty.param_se > 0.0)
+    logk = float(result.params[0])
+    assert result.uncertainty.logk_ci_low[0] < logk < result.uncertainty.logk_ci_high[0]
+    assert result.uncertainty.correlation.shape == (result.p, result.p)
+
+
+def test_noisier_data_widens_the_reported_interval():
+    base = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_11.csv")
+    widths = []
+    for sigma in (0.002, 0.02):
+        dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_11.csv")
+        rng = np.random.default_rng(11)
+        dataset.y = base.y + rng.normal(0.0, sigma, size=base.y.shape)
+        result = fit_models(
+            [dataset],
+            ["11"],
+            logk_starts=[3.0, 4.0, 5.0],
+            logk_bounds=(0.0, 12.0),
+        )[0]
+        assert result.success
+        widths.append(
+            float(result.uncertainty.logk_ci_high[0] - result.uncertainty.logk_ci_low[0])
+        )
+
+    assert widths[1] > widths[0]
+
+
+def test_failed_fit_carries_no_uncertainty():
+    dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_nonbinding.csv")
+
+    result = fit_models(
+        [dataset],
+        ["11"],
+        logk_starts=[4.0],
+        logk_bounds=(0.0, 12.0),
+    )[0]
+
+    assert not result.success
+    assert result.uncertainty is None

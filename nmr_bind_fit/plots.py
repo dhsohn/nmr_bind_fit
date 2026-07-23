@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
 
 import matplotlib
 import numpy as np
@@ -41,7 +40,6 @@ matplotlib.rcParams.update(
 _CLR_DATA = "#2b2d42"
 _CLR_FIT = "#d90429"
 _CLR_ZERO = "#94a3b8"
-_CLR_HIST = "#334155"
 
 
 def _peak_file_token(index: int) -> str:
@@ -123,7 +121,7 @@ def _prepare_isotherm_curve(
     ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     # Compute smooth model curve values on a dense equivalents grid.
     grid_ds = _grid_dataset(ds)
     y_grid, _ = predict_dataset(model, grid_ds, logk, delta)
@@ -148,10 +146,10 @@ def plot_isotherms(
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Plot data points alongside the fitted curve for each peak.
     out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
+    files: list[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
     for i in range(len(ds.y_cols)):
@@ -178,10 +176,10 @@ def plot_residuals(
     ds: Dataset,
     residuals: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
+    files: list[Path] = []
     for i in range(len(ds.y_cols)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
@@ -199,45 +197,13 @@ def plot_residuals(
     return files
 
 
-def plot_bootstrap_hist(
-    samples: np.ndarray,
-    names: List[str],
-    out_dir: Path,
-    title: str = "bootstrap K",
-) -> List[Path]:
-    # Draw bootstrap histograms for K (or K1/K2) samples.
-    out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
-    if samples.size == 0:
-        return files
-    for i, name in enumerate(names):
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
-                edgecolor="white", linewidth=0.5)
-        if name == "K":
-            xlabel = r"$K$ (M$^{-1}$)"
-        elif name.startswith("K") and name[1:].isdigit():
-            xlabel = rf"$K_{name[1:]}$ (M$^{{-1}}$)"
-        else:
-            xlabel = f"{name} (M$^{{-1}}$)"
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Count")
-        _style_axes(ax)
-        fig.tight_layout()
-        png_path = out_dir / f"bootstrap_{name}.png"
-        pdf_path = out_dir / f"bootstrap_{name}.pdf"
-        _save_figure(fig, png_path, pdf_path)
-        files.extend([png_path, pdf_path])
-    return files
-
-
 def plot_fraction_bound(
     model: ModelSpec,
     ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Skip non-binding models since they do not define fraction bound.
     if not model.is_binding:
         return []

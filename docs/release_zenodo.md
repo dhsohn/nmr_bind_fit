@@ -23,7 +23,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev,excel]"
 python -m pytest -q
-nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 20 --seed 1
+nmr_bind_fit --input examples/synthetic_11.csv
 python -m build
 python -m pip check
 ```

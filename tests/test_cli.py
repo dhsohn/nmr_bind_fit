@@ -34,8 +34,6 @@ def test_run_fit_writes_report_artifacts(tmp_path, monkeypatch):
         [
             "--input",
             str(data_path),
-            "--bootstrap",
-            "0",
             "--k-starts",
             "10",
             "--max-nfev",
@@ -55,7 +53,7 @@ def test_run_fit_writes_report_artifacts(tmp_path, monkeypatch):
     assert (out_dir / "report.html").is_file()
 
 
-def test_run_fit_replicates_bootstrap_and_continue_mode(tmp_path, monkeypatch):
+def test_run_fit_replicates_and_continue_mode(tmp_path, monkeypatch):
     data_path_1 = tmp_path / "sample1.csv"
     data_path_2 = tmp_path / "sample2.csv"
 
@@ -84,10 +82,6 @@ def test_run_fit_replicates_bootstrap_and_continue_mode(tmp_path, monkeypatch):
             str(data_path_1),
             str(data_path_2),
             "--replicates",
-            "--bootstrap",
-            "2",
-            "--seed",
-            "0",
             "--k-starts",
             "10",
             "--max-nfev",
@@ -136,8 +130,6 @@ def test_run_fit_keeps_same_named_independent_inputs_and_artifacts_separate(tmp_
         [
             "--input",
             *(str(input_dir / "sample.csv") for input_dir in input_dirs),
-            "--bootstrap",
-            "0",
             "--k-starts",
             "10",
             "--max-nfev",
@@ -186,8 +178,6 @@ def test_run_fit_rejects_out_of_bounds_k_starts_before_fitting(tmp_path, monkeyp
         [
             "--input",
             str(data_path),
-            "--bootstrap",
-            "0",
             "--k-starts",
             "1e13",
         ]
@@ -204,34 +194,21 @@ def test_run_fit_rejects_out_of_bounds_k_starts_before_fitting(tmp_path, monkeyp
 def test_resolve_logk_config_defaults_and_fixed_bounds():
     args = argparse.Namespace(
         k_starts=None,
-        bootstrap_logk_jitter=0.1,
     )
-    starts, bounds, jitter = _resolve_logk_config(args)
+    starts, bounds = _resolve_logk_config(args)
     assert starts
     assert all(bounds[0] <= start <= bounds[1] for start in starts)
     assert bounds == (0.0, 12.0)
-    assert jitter == 0.1
 
     args.k_starts = "10,100"
-    starts, bounds, jitter = _resolve_logk_config(args)
+    starts, bounds = _resolve_logk_config(args)
     assert starts == [1.0, 2.0]
     assert bounds == (0.0, 12.0)
-    assert jitter == 0.1
-
-
-def test_resolve_logk_config_rejects_negative_jitter():
-    args = argparse.Namespace(
-        k_starts="10,100",
-        bootstrap_logk_jitter=-0.1,
-    )
-    with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be non-negative."):
-        _resolve_logk_config(args)
 
 
 def test_resolve_logk_config_rejects_empty_k_starts_list():
     args = argparse.Namespace(
         k_starts=",",
-        bootstrap_logk_jitter=0.1,
     )
     with pytest.raises(ValueError, match="--k-starts must include at least one positive value."):
         _resolve_logk_config(args)
@@ -240,7 +217,6 @@ def test_resolve_logk_config_rejects_empty_k_starts_list():
 def test_resolve_logk_config_rejects_k_starts_out_of_strict_bounds():
     args = argparse.Namespace(
         k_starts="10,1e13",
-        bootstrap_logk_jitter=0.1,
     )
     with pytest.raises(ValueError, match=r"All K starts must be within \[1e\+00, 1e\+12\]\."):
         _resolve_logk_config(args)
@@ -272,34 +248,15 @@ def test_reserve_output_dir_uses_atomic_suffixes(tmp_path, monkeypatch):
 def test_resolve_logk_config_rejects_nonfinite_k_starts(k_starts):
     args = argparse.Namespace(
         k_starts=k_starts,
-        bootstrap_logk_jitter=0.1,
     )
     with pytest.raises(ValueError, match="All K starts must be finite."):
         _resolve_logk_config(args)
 
 
-@pytest.mark.parametrize("jitter", [float("nan"), float("inf")])
-def test_resolve_logk_config_rejects_nonfinite_jitter(jitter):
-    args = argparse.Namespace(
-        k_starts="10,100",
-        bootstrap_logk_jitter=jitter,
-    )
-    with pytest.raises(ValueError, match="--bootstrap-logk-jitter must be finite."):
-        _resolve_logk_config(args)
-
-
-def test_build_parser_rejects_negative_bootstrap(capsys):
-    parser = build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--input", "sample.csv", "--bootstrap", "-1"])
-    err = capsys.readouterr().err
-    assert "--bootstrap must be non-negative." in err
-
-
 def test_build_parser_sets_default_flags():
     parser = build_parser()
-    args = parser.parse_args(["--input", "sample.csv", "--bootstrap", "0"])
-    assert args.bootstrap_ci_method == "percentile"
+    args = parser.parse_args(["--input", "sample.csv"])
+    assert args.ci_width is None
     assert args.residual_diagnostics is False
 
 
@@ -321,11 +278,11 @@ def test_main_exits_nonzero_with_a_message_for_invalid_options(monkeypatch, caps
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan"])
-def test_build_parser_rejects_invalid_bootstrap_ci_width(value):
+def test_build_parser_rejects_invalid_ci_width(value):
     parser = build_parser()
 
     with pytest.raises(SystemExit):
-        parser.parse_args(["--input", "sample.csv", "--bootstrap-ci-width", value])
+        parser.parse_args(["--input", "sample.csv", "--ci-width", value])
 
 
 def test_index_results_groups_success_and_failures_by_dataset():
@@ -404,18 +361,13 @@ def test_resolve_inputs_prefers_literal_path_over_glob_metacharacter_match(tmp_p
 
 def test_run_fit_rejects_replicates_with_one_dataset(monkeypatch):
     args = SimpleNamespace(
-        bootstrap=0,
-        bootstrap_ci_method="percentile",
         residual_diagnostics=False,
         input=["one.csv"],
         ppm_cols=None,
         k_starts="10",
         max_nfev=100,
-        bootstrap_method="residual",
-        seed=None,
         replicates=True,
-        bootstrap_logk_jitter=0.1,
-        bootstrap_ci_width=None,
+        ci_width=None,
     )
     monkeypatch.setattr(cli_module, "_resolve_inputs", lambda _patterns: [Path("one.csv")])
     monkeypatch.setattr(
@@ -465,8 +417,6 @@ def test_run_fit_fails_without_creating_reports_when_every_model_fails(tmp_path,
         [
             "--input",
             str(data_path),
-            "--bootstrap",
-            "0",
             "--k-starts",
             "10",
             "--max-nfev",

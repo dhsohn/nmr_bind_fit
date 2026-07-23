@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import itertools
-from typing import Callable, List, Optional, Sequence, Tuple, Type
+from collections.abc import Sequence
+from typing import Callable
 
 import numpy as np
 from scipy.optimize import OptimizeResult, least_squares
@@ -31,12 +32,12 @@ def _peak_response_scale(values: np.ndarray) -> float:
 
 def _identifiability_scales(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     parameter_count: int,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Build row and parameter scales for a dimensionless fit Jacobian."""
-    row_scales: List[float] = []
-    parameter_scales: List[float] = [1.0] * model.n_logk
+    row_scales: list[float] = []
+    parameter_scales: list[float] = [1.0] * model.n_logk
     for ds in datasets:
         y = np.asarray(ds.y, dtype=float)
         if y.ndim != 2:
@@ -59,9 +60,9 @@ def _identifiability_scales(
     return row_array, parameter_array
 
 
-def _optimization_residual_scale(datasets: List[Dataset]) -> float:
+def _optimization_residual_scale(datasets: list[Dataset]) -> float:
     """Return one global response scale without changing relative residual weights."""
-    scales: List[float] = []
+    scales: list[float] = []
     for ds in datasets:
         y = np.asarray(ds.y, dtype=float)
         if y.ndim != 2:
@@ -77,9 +78,9 @@ def _optimization_residual_scale(datasets: List[Dataset]) -> float:
 def _scaled_jacobian(
     result: OptimizeResult,
     parameter_count: int,
-    model: Optional[ModelSpec] = None,
-    datasets: Optional[List[Dataset]] = None,
-) -> Optional[np.ndarray]:
+    model: ModelSpec | None = None,
+    datasets: list[Dataset] | None = None,
+) -> np.ndarray | None:
     jacobian = getattr(result, "jac", None)
     if jacobian is None:
         return None
@@ -107,9 +108,9 @@ def _scaled_jacobian(
 def jacobian_rank_and_condition(
     result: OptimizeResult,
     parameter_count: int,
-    model: Optional[ModelSpec] = None,
-    datasets: Optional[List[Dataset]] = None,
-) -> Tuple[int, float]:
+    model: ModelSpec | None = None,
+    datasets: list[Dataset] | None = None,
+) -> tuple[int, float]:
     """Return rank and condition number of the dimensionless fit Jacobian."""
     values = _scaled_jacobian(result, parameter_count, model, datasets)
     if values is None:
@@ -128,8 +129,8 @@ def jacobian_logk_rms_sensitivity(
     result: OptimizeResult,
     parameter_count: int,
     n_logk: int,
-    model: Optional[ModelSpec] = None,
-    datasets: Optional[List[Dataset]] = None,
+    model: ModelSpec | None = None,
+    datasets: list[Dataset] | None = None,
 ) -> float:
     """Return the minimum dimensionless RMS sensitivity among logK columns."""
     if n_logk == 0:
@@ -147,8 +148,8 @@ def optimizer_result_is_identifiable(
     result: OptimizeResult,
     parameter_count: int,
     n_logk: int,
-    model: Optional[ModelSpec] = None,
-    datasets: Optional[List[Dataset]] = None,
+    model: ModelSpec | None = None,
+    datasets: list[Dataset] | None = None,
 ) -> bool:
     """Require a full-rank, well-conditioned fit away from logK bounds."""
     if getattr(result, "jac", None) is None:
@@ -178,8 +179,8 @@ def optimizer_result_is_identifiable(
 def param_bounds(
     params0: np.ndarray,
     model: ModelSpec,
-    logk_bounds: Optional[Tuple[float, float]],
-) -> Tuple[np.ndarray, np.ndarray]:
+    logk_bounds: tuple[float, float] | None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Build lower/upper parameter bounds, constraining only the logK entries."""
     if logk_bounds is None or model.n_logk == 0:
         return np.full_like(params0, -np.inf), np.full_like(params0, np.inf)
@@ -192,18 +193,18 @@ def param_bounds(
 
 def fit_with_initial(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     params0: np.ndarray,
     residual_vector_fn: Callable[..., np.ndarray],
     max_nfev: int,
-    bounds: Tuple[np.ndarray, np.ndarray],
+    bounds: tuple[np.ndarray, np.ndarray],
     solver_failure_mode: str = "fail-fast",
-) -> Tuple[np.ndarray, OptimizeResult]:
+) -> tuple[np.ndarray, OptimizeResult]:
     """Run a single bounded least-squares fit from one initial guess."""
     penalty_counter = {"count": 0}
     residual_scale = _optimization_residual_scale(datasets)
 
-    def residual_fn(current_params: np.ndarray, current_model: ModelSpec, current_datasets: List[Dataset]) -> np.ndarray:
+    def residual_fn(current_params: np.ndarray, current_model: ModelSpec, current_datasets: list[Dataset]) -> np.ndarray:
         residuals = residual_vector_fn(
             current_params,
             current_model,
@@ -222,16 +223,16 @@ def fit_with_initial(
         x_scale="jac",
         bounds=bounds,
     )
-    setattr(res, "penalty_count", int(penalty_counter.get("count", 0)))
-    setattr(res, "residual_scale", residual_scale)
+    res.penalty_count = int(penalty_counter.get("count", 0))
+    res.residual_scale = residual_scale
     return res.x, res
 
 
 def build_logk_grid(
     model: ModelSpec,
     logk_starts: Sequence[float],
-    logk_bounds: Optional[Tuple[float, float]],
-) -> List[Tuple[float, ...]]:
+    logk_bounds: tuple[float, float] | None,
+) -> list[tuple[float, ...]]:
     """Build the multistart grid of logK starting points within bounds."""
     if model.n_logk == 0:
         return [()]
@@ -245,16 +246,16 @@ def build_logk_grid(
 
 def select_best_multistart(
     model: ModelSpec,
-    datasets: List[Dataset],
-    logk_grid: Sequence[Tuple[float, ...]],
+    datasets: list[Dataset],
+    logk_grid: Sequence[tuple[float, ...]],
     max_nfev: int,
-    logk_bounds: Optional[Tuple[float, float]],
-    build_initial_params_fn: Callable[[ModelSpec, List[Dataset], Sequence[float]], np.ndarray],
-    fit_with_initial_fn: Callable[..., Tuple[np.ndarray, OptimizeResult]],
-    param_bounds_fn: Callable[[np.ndarray, ModelSpec, Optional[Tuple[float, float]]], Tuple[np.ndarray, np.ndarray]],
-    numeric_exceptions: Tuple[Type[BaseException], ...],
+    logk_bounds: tuple[float, float] | None,
+    build_initial_params_fn: Callable[[ModelSpec, list[Dataset], Sequence[float]], np.ndarray],
+    fit_with_initial_fn: Callable[..., tuple[np.ndarray, OptimizeResult]],
+    param_bounds_fn: Callable[[np.ndarray, ModelSpec, tuple[float, float] | None], tuple[np.ndarray, np.ndarray]],
+    numeric_exceptions: tuple[type[BaseException], ...],
     solver_failure_mode: str = "fail-fast",
-) -> Tuple[Optional[np.ndarray], Optional[OptimizeResult]]:
+) -> tuple[np.ndarray | None, OptimizeResult | None]:
     """Fit from every grid start, preferring converged fits over failed starts."""
     best_success_params = None
     best_success_res = None

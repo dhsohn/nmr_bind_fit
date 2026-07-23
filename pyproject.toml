@@ -22,7 +22,7 @@ keywords = [
     "supramolecular chemistry",
     "host-guest chemistry",
     "model comparison",
-    "bootstrap",
+    "uncertainty quantification",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

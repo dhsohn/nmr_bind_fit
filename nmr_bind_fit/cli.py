@@ -7,9 +7,9 @@ import glob
 import re
 import sys
 from collections import Counter
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence
 
 import numpy as np
 
@@ -38,17 +38,6 @@ STRICT_K_MAX = 1e12
 SIMULTANEOUS_FIT_LABEL = "Simultaneous Fitting"
 
 
-def _non_negative_int(value: str) -> int:
-    # Argparse type converter that rejects negative integers.
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("--bootstrap must be an integer.") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("--bootstrap must be non-negative.")
-    return parsed
-
-
 def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -69,7 +58,7 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
-def _parse_k_starts(value: Optional[str]) -> list[float]:
+def _parse_k_starts(value: str | None) -> list[float]:
     # Parse comma-separated starts or default to log-spaced values.
     if value is None:
         return [10**i for i in range(1, 9)]
@@ -77,16 +66,6 @@ def _parse_k_starts(value: Optional[str]) -> list[float]:
         return [float(v.strip()) for v in value.split(",") if v.strip()]
     except ValueError as exc:
         raise ValueError("--k-starts must be a comma-separated list of numeric values.") from exc
-
-
-def _validate_finite_number(value: float, message: str) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(message) from exc
-    if not np.isfinite(parsed):
-        raise ValueError(message)
-    return parsed
 
 
 def _resolve_inputs(patterns: list[str]) -> list[Path]:
@@ -128,7 +107,8 @@ def _safe_output_name(name: str) -> str:
 
 
 def _auto_output_dir(paths: list[Path]) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Local wall-clock time, kept timezone-aware so the stamp is unambiguous.
+    timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S")
     base = paths[0].stem if len(paths) == 1 else "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 
@@ -158,7 +138,7 @@ def _build_dataset_labels(datasets: Sequence[Dataset]) -> dict[int, str]:
 
 def _resolve_logk_config(
     args: argparse.Namespace,
-) -> tuple[list[float], tuple[float, float], float]:
+) -> tuple[list[float], tuple[float, float]]:
     k_starts = _parse_k_starts(args.k_starts)
     if not k_starts:
         raise ValueError("--k-starts must include at least one positive value.")
@@ -168,15 +148,9 @@ def _resolve_logk_config(
         raise ValueError("All K starts must be positive.")
     if any(v < STRICT_K_MIN or v > STRICT_K_MAX for v in k_starts):
         raise ValueError(f"All K starts must be within [{STRICT_K_MIN:.0e}, {STRICT_K_MAX:.0e}].")
-    jitter = _validate_finite_number(
-        args.bootstrap_logk_jitter,
-        "--bootstrap-logk-jitter must be finite.",
-    )
-    if jitter < 0:
-        raise ValueError("--bootstrap-logk-jitter must be non-negative.")
     logk_starts = [float(np.log10(v)) for v in k_starts]
     logk_bounds = (float(np.log10(STRICT_K_MIN)), float(np.log10(STRICT_K_MAX)))
-    return logk_starts, logk_bounds, jitter
+    return logk_starts, logk_bounds
 
 
 def _index_results(
@@ -207,7 +181,7 @@ def _display_model_name(name: str) -> str:
 
 
 def run_fit(args: argparse.Namespace) -> None:
-    logk_starts, logk_bounds, logk_jitter = _resolve_logk_config(args)
+    logk_starts, logk_bounds = _resolve_logk_config(args)
 
     # Resolve input patterns and load datasets from disk.
     paths = _resolve_inputs(args.input)
@@ -227,12 +201,7 @@ def run_fit(args: argparse.Namespace) -> None:
         logk_starts=logk_starts,
         replicates=args.replicates,
         max_nfev=args.max_nfev,
-        bootstrap=args.bootstrap,
-        bootstrap_method=args.bootstrap_method,
-        bootstrap_ci_method=args.bootstrap_ci_method,
-        seed=args.seed,
         logk_bounds=logk_bounds,
-        logk_jitter=logk_jitter,
         solver_failure_mode=STRICT_SOLVER_FAILURE_MODE,
         residual_diagnostics=args.residual_diagnostics,
     )
@@ -289,20 +258,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nmr_bind_fit")
     parser.add_argument("--input", nargs="+", required=True, help="Input CSV/XLSX files")
     parser.add_argument("--ppm-cols", default=None, help="Comma-separated ppm columns")
-    parser.add_argument("--bootstrap", type=_non_negative_int, default=1000, help="Bootstrap iterations")
-    parser.add_argument("--bootstrap-method", choices=["residual", "points", "parametric"], default="residual")
-    parser.add_argument(
-        "--bootstrap-ci-method",
-        choices=["percentile", "bca"],
-        default="percentile",
-        help="Bootstrap CI method (default: percentile)",
-    )
-    parser.add_argument(
-        "--bootstrap-logk-jitter",
-        type=float,
-        default=0.1,
-        help="Standard deviation for logK jitter per bootstrap refit (log10 units)",
-    )
     parser.add_argument("--k-starts", default=None, help="Comma-separated K starts")
     parser.add_argument(
         "--replicates",
@@ -310,17 +265,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fit replicate inputs with shared binding constants",
     )
     parser.add_argument("--max-nfev", type=_positive_int, default=5000, help="Max optimizer evaluations")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument(
         "--residual-diagnostics",
         action="store_true",
         help="Compute informational residual diagnostics (Shapiro-Wilk, Durbin-Watson)",
     )
     parser.add_argument(
-        "--bootstrap-ci-width",
+        "--ci-width",
         type=_positive_float,
         default=None,
-        help="Warn if bootstrap K CI width exceeds this threshold",
+        help="Warn if the K confidence-interval width exceeds this threshold",
     )
     return parser
 

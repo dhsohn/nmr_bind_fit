@@ -4,22 +4,18 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Callable, cast
 
 import numpy as np
 
 from .equilibrium import SpeciesResult
 from .fit import FitResult
-from .fit_bootstrap import (
-    BOOTSTRAP_COMPETITIVE_CONFIDENCE,
-    MIN_BOOTSTRAP_CI_SUCCESSES,
-    BootstrapResult,
-)
+from .fit_uncertainty import CONFIDENCE_LEVEL
 from .io import Dataset
 from .models import ModelSpec, split_params_multi
 from .plots import (
-    plot_bootstrap_hist,
     plot_fraction_bound,
     plot_isotherms,
     plot_residuals,
@@ -31,7 +27,7 @@ SUMMARY_LABELS = {
     "model": "Model",
     "status": "Status",
     "K": "Binding constant (M⁻¹)",
-    "bootstrap_K_CI": "95 % CI",
+    "k_ci": "95 % CI",
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
@@ -51,9 +47,7 @@ STATS_LABELS = {
     "BIC": "Bayesian Information Criterion",
     "AICc": "Corrected Akaike Information Criterion",
     "penalty_events": "Optimization penalty events",
-    "bootstrap_logK_SE": "Bootstrap SE (log10 K)",
-    "bootstrap_success": "Successful bootstrap refits",
-    "bootstrap_ci_method": "Bootstrap CI method used",
+    "logk_se": "Standard error (log10 K)",
     "solver_points": "Equilibrium solver points",
     "solver_fail": "Equilibrium solver failures",
     "residual_n": "Residual count",
@@ -79,46 +73,6 @@ def _safe_pow10(values: np.ndarray) -> np.ndarray:
     return np.exp(clipped * np.log(10.0))
 
 
-def _safe_std(values: np.ndarray) -> float:
-    # Scale before std to reduce catastrophic cancellation.
-    vals = values[np.isfinite(values)]
-    if vals.size <= 1:
-        return float("nan")
-    scale = np.max(np.abs(vals))
-    if not np.isfinite(scale) or scale == 0:
-        return 0.0
-    scaled = vals / scale
-    return float(np.std(scaled, ddof=1) * scale)
-
-
-def _append_png_plot_paths(plot_paths: List[str], paths: Sequence[Path], out_dir: Path) -> None:
-    for path in paths:
-        if path.suffix.lower() == ".png":
-            plot_paths.append(path.relative_to(out_dir).as_posix())
-
-
-def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
-    # Drop rows with any non-finite values.
-    if values.ndim == 1:
-        return values[np.isfinite(values)]
-    mask = np.all(np.isfinite(values), axis=1)
-    return values[mask]
-
-
-def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
-    """Return whether the raw bootstrap distribution is complete and reportable.
-
-    Only the reporting policy is decided here. The samples are finite and
-    counted by construction: ``bootstrap_params`` rejects non-finite parameters
-    before accepting a draw, and appends a row and increments ``n_success``
-    together.
-    """
-    return bool(
-        bootstrap.n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES
-        and bootstrap.n_success == bootstrap.n_boot
-    )
-
-
 def _safe_path_token(value: str) -> str:
     # Sanitize and bound free-form labels before using them as path components.
     # Callers prefix an ordinal, so this does not have to keep truncated labels
@@ -128,7 +82,7 @@ def _safe_path_token(value: str) -> str:
     return safe[:80].rstrip("._-") or "dataset"
 
 
-def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
+def _dataset_dir_tokens(labels: Sequence[str]) -> dict[str, str]:
     # Always include the ordinal so labels that differ only by case remain
     # distinct on the case-insensitive filesystems common on macOS and Windows.
     return {
@@ -137,9 +91,9 @@ def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
     }
 
 
-def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
+def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> list[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
-    labels: List[str] = []
+    labels: list[str] = []
     for idx, ds in enumerate(datasets, start=1):
         base = str(ds.name or f"dataset_{idx}")
         path = ds.path
@@ -153,7 +107,7 @@ def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
 
 def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
     # Format dropped ppm columns for report warnings.
-    items: List[str] = []
+    items: list[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
         dropped_peaks = ds.dropped_peaks
@@ -170,7 +124,7 @@ def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
 
 def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     # Format concentration rows dropped before fitting for report warnings.
-    items: List[str] = []
+    items: list[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
         dropped_rows = int(ds.dropped_rows)
@@ -184,7 +138,7 @@ def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, int]]:
+def _accumulate_solver_stats(species_list: list[SpeciesResult]) -> dict[str, int] | None:
     # Combine the per-point solver counts the report can show. A clean solve
     # reports nothing, so only the totals behind a failure are accumulated.
     totals = {"solver_points": 0, "solver_fail": 0}
@@ -201,30 +155,23 @@ def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict
     return totals
 
 
-def _build_param_entries(res: FitResult) -> List[ParamEntry]:
-    # Convert fitted parameters into report entries and optional bootstrap SE.
-    bootstrap_samples = None
-    if (
-        res.bootstrap is not None
-        and _bootstrap_samples_reportable(res.bootstrap)
-    ):
-        bootstrap_samples = res.bootstrap.param_samples
+def _build_param_entries(res: FitResult) -> list[ParamEntry]:
+    # Convert fitted parameters into report entries with asymptotic standard errors.
+    param_se = res.uncertainty.param_se if res.uncertainty is not None else None
 
     params = []
     for i, name in enumerate(res.param_names):
         value = float(res.params[i])
-        se = float("nan")
-        if bootstrap_samples is not None and bootstrap_samples.shape[0] > 1:
-            sample_col = bootstrap_samples[:, i]
-            if name in {"logK", "logK1", "logK2"}:
-                sample_col = _safe_pow10(sample_col)
-            se = _safe_std(sample_col)
+        se = float(param_se[i]) if param_se is not None else float("nan")
         if name in {"logK", "logK1", "logK2"}:
+            k_value = float(_safe_pow10(np.array(value)))
+            # Delta method: K = 10**logK, so SE(K) = K * ln(10) * SE(logK).
+            k_se = k_value * float(np.log(10.0)) * se if np.isfinite(se) else float("nan")
             params.append(
                 ParamEntry(
                     name=name.replace("logK", "K"),
-                    value=float(_safe_pow10(np.array(value))),
-                    se=se,
+                    value=k_value,
+                    se=k_se,
                 )
             )
         else:
@@ -243,8 +190,8 @@ def _collect_plot_artifacts(
     model_name: str,
     ds_label: str,
     out_dir: Path,
-    dataset_dir_token: Optional[str] = None,
-) -> Tuple[List[str], Dict[str, str]]:
+    dataset_dir_token: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
     # Write model plots and return relative PNG paths plus display labels.
     model_dir = out_dir / f"model_{_safe_path_token(model_name)}"
     if ds_label != "Simultaneous Fitting":
@@ -254,8 +201,8 @@ def _collect_plot_artifacts(
         model_dir = model_dir / f"dataset_{_safe_path_token(ds_label)}"
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_paths: List[str] = []
-    plot_labels: Dict[str, str] = {}
+    plot_paths: list[str] = []
+    plot_labels: dict[str, str] = {}
     replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
     model_spec = cast(ModelSpec, res.model)
     logk, deltas = split_params_multi(res.params, model_spec, res.datasets)
@@ -280,79 +227,41 @@ def _collect_plot_artifacts(
         ):
             plot_labels[path.relative_to(out_dir).as_posix()] = str(peak)
 
-    bootstrap = res.bootstrap
-    if bootstrap is not None and _bootstrap_samples_reportable(bootstrap):
-        samples = bootstrap.param_samples.copy()
-        for idx, name in enumerate(res.param_names):
-            if name in {"logK", "logK1", "logK2"}:
-                samples[:, idx] = _safe_pow10(samples[:, idx])
-        data = _filter_finite_rows(samples)
-        if data.shape[0] > 1:
-            scale = np.nanmax(np.abs(data), axis=0)
-            scale[~np.isfinite(scale) | (scale == 0)] = 1.0
-            scaled = data / scale
-            with np.errstate(invalid="ignore", divide="ignore"):
-                corr = np.corrcoef(scaled, rowvar=False)
-            corr_path = model_dir / "correlation.csv"
-            np.savetxt(corr_path, corr, delimiter=",", fmt="%.6g")
-
-        k_samples = _bootstrap_k_samples(res)
-        if k_samples.shape[0] > 1:
-            k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
-            boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
-            _append_png_plot_paths(plot_paths, boot_files, out_dir)
+    uncertainty = res.uncertainty
+    if uncertainty is not None and np.all(np.isfinite(uncertainty.correlation)):
+        # The correlation matrix comes straight from the fit covariance, in the
+        # fitted-parameter basis. A perfect fit has zero standard errors, which
+        # leaves the correlation undefined and nothing worth writing.
+        corr_path = model_dir / "correlation.csv"
+        np.savetxt(corr_path, uncertainty.correlation, delimiter=",", fmt="%.6g")
 
     return plot_paths, plot_labels
 
 
-def _bootstrap_k_samples(res: FitResult) -> np.ndarray:
-    # Return finite bootstrap K samples (linear scale) for warnings and summary.
-    if (
-        res.bootstrap is None
-        or res.model.n_logk == 0
-        or not _bootstrap_samples_reportable(res.bootstrap)
-    ):
-        return np.full((0, res.model.n_logk), np.nan)
-    k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
-    return _filter_finite_rows(k_samples)
-
-
-def _bootstrap_logk_samples(res: FitResult) -> np.ndarray:
-    # Return finite bootstrap logK samples for SE reporting.
-    if (
-        res.bootstrap is None
-        or res.model.n_logk == 0
-        or not _bootstrap_samples_reportable(res.bootstrap)
-    ):
-        return np.full((0, res.model.n_logk), np.nan)
-    return res.bootstrap.param_samples[:, : res.model.n_logk]
-
-
-def _bootstrap_logk_se_text(res: FitResult) -> str:
-    # Format bootstrap SE in log10(K) space.
-    samples = _bootstrap_logk_samples(res)
-    if samples.shape[0] <= 1:
+def _logk_se_text(res: FitResult) -> str:
+    # Format the asymptotic standard error in log10(K) space.
+    if res.uncertainty is None or res.model.n_logk == 0:
         return "N/A"
-    se_vals = [_safe_std(samples[:, i]) for i in range(samples.shape[1])]
+    se_vals = np.asarray(res.uncertainty.param_se[: res.model.n_logk], dtype=float)
+    if not np.all(np.isfinite(se_vals)):
+        return "N/A"
     return ";".join(f"{value:.6g}" for value in se_vals)
 
 
-def _bootstrap_k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
-    # Return selected bootstrap CI in linear K space.
-    if (
-        res.bootstrap is None
-        or res.model.n_logk == 0
-        or not res.bootstrap.ci_valid
-    ):
-        return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
-    low_log = np.asarray(res.bootstrap.ci_low, dtype=float)
-    high_log = np.asarray(res.bootstrap.ci_high, dtype=float)
-    if low_log.shape != (res.model.n_logk,) or high_log.shape != (res.model.n_logk,):
-        return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
-    return _safe_pow10(low_log), _safe_pow10(high_log)
+def _k_ci(res: FitResult) -> tuple[np.ndarray, np.ndarray]:
+    # Return the log10(K) confidence interval mapped into linear K space.
+    if res.uncertainty is None or res.model.n_logk == 0:
+        return (
+            np.full((res.model.n_logk,), np.nan),
+            np.full((res.model.n_logk,), np.nan),
+        )
+    return (
+        _safe_pow10(np.asarray(res.uncertainty.logk_ci_low, dtype=float)),
+        _safe_pow10(np.asarray(res.uncertainty.logk_ci_high, dtype=float)),
+    )
 
 
-def _logk_names(n_logk: int) -> List[str]:
+def _logk_names(n_logk: int) -> list[str]:
     if n_logk == 1:
         return ["K"]
     return [f"K{i + 1}" for i in range(n_logk)]
@@ -383,7 +292,7 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
     return "; ".join(intervals)
 
 
-def _logk_bound_warnings(res: FitResult) -> List[str]:
+def _logk_bound_warnings(res: FitResult) -> list[str]:
     if res.model.n_logk == 0:
         return []
     # Compare against the bounds the fit actually used; when they are unknown
@@ -395,7 +304,7 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     low, high = float(bounds[0]), float(bounds[1])
     logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
     names = _logk_names(res.model.n_logk)
-    warnings: List[str] = []
+    warnings: list[str] = []
     for name, value in zip(names, logk_vals):
         if not np.isfinite(value):
             continue
@@ -406,7 +315,7 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
+def _solver_stats_for_result(res: FitResult) -> dict[str, int] | None:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
@@ -416,8 +325,8 @@ def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
 def _build_model_warnings(
     args: argparse.Namespace,
     res: FitResult,
-    solver_stats: Optional[Dict[str, int]],
-) -> List[str]:
+    solver_stats: dict[str, int] | None,
+) -> list[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
     datasets = res.datasets
@@ -446,21 +355,13 @@ def _build_model_warnings(
 
     warnings.extend(_logk_bound_warnings(res))
 
-    k_ci_low, k_ci_high = _bootstrap_k_ci(res)
-    if args.bootstrap_ci_width is not None and k_ci_low.size > 0:
-        if np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)):
-            warnings.append("bootstrap CI too wide")
-
-    if res.bootstrap is not None:
-        n_boot = int(res.bootstrap.n_boot)
-        n_success = int(res.bootstrap.n_success)
-        if n_boot > 0:
-            n_fail = n_boot - n_success
-            if n_fail > 0:
-                warnings.append(f"bootstrap failures: {n_fail} of {n_boot} iterations")
-        if not res.bootstrap.ci_valid:
-            ci_message = str(res.bootstrap.ci_message).strip()
-            warnings.append(ci_message or "bootstrap confidence interval is unavailable")
+    k_ci_low, k_ci_high = _k_ci(res)
+    if (
+        args.ci_width is not None
+        and k_ci_low.size > 0
+        and np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.ci_width))
+    ):
+        warnings.append("K confidence interval is wider than the requested threshold")
 
     penalty_count = int(res.penalty_count)
     if penalty_count > 0:
@@ -487,7 +388,7 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, int]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResult, solver_stats: dict[str, int] | None) -> dict[str, str]:
     """Build the stats block for one model card.
 
     Only reported fits reach this point, and reporting a fit already means it
@@ -510,11 +411,8 @@ def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, int]]) ->
     stats_base["dof"] = str(res.dof)
     if res.penalty_count > 0:
         stats_base["penalty_events"] = str(res.penalty_count)
-    if res.bootstrap is not None:
-        stats_base["bootstrap_logK_SE"] = _bootstrap_logk_se_text(res)
-        stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
-        if res.bootstrap.ci_method_used:
-            stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
+    if res.uncertainty is not None and res.model.n_logk > 0:
+        stats_base["logk_se"] = _logk_se_text(res)
     if solver_stats is not None and solver_stats["solver_fail"] > 0:
         # A clean per-point solve is the norm; the counts only inform a failure.
         stats_base["solver_points"] = str(solver_stats["solver_points"])
@@ -536,21 +434,21 @@ def _build_summary_row(
     res: FitResult,
     ds_label: str,
     display_name: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     # Build one row of the model comparison table.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
     k_str = _format_k_values(k_vals, res.model.n_logk)
 
-    k_ci_low, k_ci_high = _bootstrap_k_ci(res)
-    boot_k_ci = _format_k_ci(k_ci_low, k_ci_high, res.model.n_logk)
+    k_ci_low, k_ci_high = _k_ci(res)
+    k_ci_text = _format_k_ci(k_ci_low, k_ci_high, res.model.n_logk)
 
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
         "status": "success",
         "K": k_str,
-        "bootstrap_K_CI": boot_k_ci,
+        "k_ci": k_ci_text,
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
@@ -558,14 +456,14 @@ def _build_summary_row(
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
 
-def _build_failure_summary_row(ds_label: str, display_name: str) -> Dict[str, str]:
+def _build_failure_summary_row(ds_label: str, display_name: str) -> dict[str, str]:
     # Keep failed candidates visible in the comparison table for auditability.
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
         "status": "failed",
         "K": "N/A",
-        "bootstrap_K_CI": "N/A",
+        "k_ci": "N/A",
         "R2": "N/A",
         "BIC": "N/A",
         "AICc": "N/A",
@@ -580,8 +478,8 @@ def _build_model_entry(
     res: FitResult,
     out_dir: Path,
     display_model_name: Callable[[str], str],
-    dataset_dir_token: Optional[str] = None,
-) -> Tuple[ModelEntry, Dict[str, str]]:
+    dataset_dir_token: str | None = None,
+) -> tuple[ModelEntry, dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
@@ -610,20 +508,20 @@ def _build_model_entry(
 
 def build_report_artifacts(
     args: argparse.Namespace,
-    ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResult]],
-    failures_by_key: Dict[str, List[Tuple[str, str]]],
+    ordered_keys: list[str],
+    results_by_key: dict[str, dict[str, FitResult]],
+    failures_by_key: dict[str, list[tuple[str, str]]],
     out_dir: Path,
     display_model_name: Callable[[str], str],
-) -> Tuple[List[Dict[str, str]], List[ModelEntry], List[str]]:
+) -> tuple[list[dict[str, str]], list[ModelEntry], list[str]]:
     # Convert fit results into summary rows, model entries, and top-level warnings.
-    summary_rows: List[Dict[str, str]] = []
-    model_entries: List[ModelEntry] = []
-    report_warnings: List[str] = []
+    summary_rows: list[dict[str, str]] = []
+    model_entries: list[ModelEntry] = []
+    report_warnings: list[str] = []
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
+        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
@@ -648,9 +546,9 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> List[Dict[str, str]]:
+def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> list[dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
-    sections: List[Dict[str, str]] = []
+    sections: list[dict[str, str]] = []
     # K is reported in M⁻¹ (molar inputs).
     k_unit = "M⁻¹"
 
@@ -740,61 +638,24 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     )
 
     # 5. Uncertainty Quantification
-    method_desc = {
-        "residual": (
-            "Residual resampling: fitted residuals were mean-centered per peak column and "
-            "resampled with replacement across titration points, then added back to the "
-            "fitted values to generate pseudo-datasets."
-        ),
-        "parametric": (
-            "Parametric resampling: Gaussian noise was generated independently for each "
-            "peak column using the column-wise residual standard deviation (ddof = 1), then "
-            "added to the fitted values. This per-column variance estimate allows for modest "
-            "heteroscedasticity across peaks while the model-comparison criteria (BIC/AICc) "
-            "use a single pooled variance; the two serve different inferential purposes "
-            "(uncertainty quantification vs. model ranking) and are therefore not inconsistent."
-        ),
-        "points": (
-            "Case (points) resampling: entire titration-point rows (concentrations and "
-            "observed shifts) were resampled with replacement, preserving the covariate "
-            "structure within each row."
-        ),
-    }
-    bootstrap_ci_method = str(getattr(args, "bootstrap_ci_method", "percentile")).strip().lower()
-    if bootstrap_ci_method == "bca":
-        ci_desc = (
-            "The 95% confidence interval was derived from BCa-style adjusted bootstrap quantiles for the "
-            "local warm-start refit estimator, with the acceleration term estimated from leave-one-out "
-            "jackknife fits initialized at the full-data optimum. This avoids claiming a full multistart "
-            "BCa estimator for potentially multimodal objectives."
-        )
-    else:
-        ci_desc = (
-            "The 95% confidence interval was derived from the 2.5th and 97.5th percentiles of the "
-            "bootstrap distribution."
-        )
-    bootstrap_note = (
-        f"Bootstrap uncertainty was evaluated using {args.bootstrap} iterations with "
-        f"{args.bootstrap_method} resampling. "
-        f"{method_desc.get(args.bootstrap_method, '')} "
-        f"Bootstrap refits used a small log₁₀(K) start perturbation "
-        f"(σ = {args.bootstrap_logk_jitter:.3g}) to explore the objective surface near the optimum. "
-        f"Each pseudo-dataset was fitted from the perturbed and full-data-optimum starts; a draw was "
-        f"treated as censored if a non-identifiable solution was competitive within the "
-        f"{BOOTSTRAP_COMPETITIVE_CONFIDENCE:.0%} profile-likelihood RSS window. "
-        f"Raw-distribution standard errors and diagnostic artifacts were reported only when at least "
-        f"{MIN_BOOTSTRAP_CI_SUCCESSES} refits were requested and every requested pseudo-dataset yielded "
-        "an uncensored acceptable refit; otherwise they were reported as unavailable. A confidence "
-        "interval additionally required the selected interval method to succeed, so a BCa-only failure "
-        "left complete raw-distribution summaries available while the interval remained unavailable. "
-        f"{ci_desc}"
-        if args.bootstrap > 0
-        else "Bootstrap uncertainty was not evaluated in this analysis."
+    uncertainty_note = (
+        "Parameter uncertainty was estimated from the asymptotic covariance matrix of the "
+        "converged fit, cov = (RSS / dof) · (JᵀJ)⁻¹, where J is the Jacobian at the optimum and "
+        "dof is the residual degrees of freedom. Standard errors are the square roots of its "
+        f"diagonal, and the {CONFIDENCE_LEVEL:.0%} confidence interval for each log₁₀(K) is "
+        "the estimate plus or minus the Student-t quantile for that dof times its standard error. "
+        "Intervals are reported in log₁₀(K) and converted to K for display, so they are asymmetric "
+        "about K; the standard error quoted for K itself uses the delta method, "
+        "SE(K) = K · ln(10) · SE(log₁₀K). Parameter correlations are taken from the same "
+        "covariance matrix. This is the standard large-sample approximation for nonlinear least "
+        "squares and assumes the model is locally linear near the optimum, which the reported "
+        "fits already satisfy through the rank, conditioning, and sensitivity gates described "
+        "above."
     )
     sections.append(
         {
             "title": "Uncertainty Quantification",
-            "content": bootstrap_note,
+            "content": uncertainty_note,
         }
     )
 
@@ -809,51 +670,48 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[Dataset]) ->
 
 def build_methods_sections(
     args: argparse.Namespace, datasets: Sequence[Dataset]
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
     return _compose_methods_sections(args, datasets)
 
 
 def build_decisions(
     args: argparse.Namespace,
-    ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResult]],
+    ordered_keys: list[str],
+    results_by_key: dict[str, dict[str, FitResult]],
     display_model_name: Callable[[str], str],
-) -> List[DecisionEntry]:
+) -> list[DecisionEntry]:
     """Rank each dataset's candidates and record why the leader was chosen.
 
     Datasets with no finitely ranked candidate yield no entry; the reason is
     already reported through the warnings shown alongside them.
     """
-    decision_entries: List[DecisionEntry] = []
+    decision_entries: list[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
+        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         if not bic_sorted:
             continue
 
         best = bic_sorted[0]
         reasons = [
-            f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
+            (f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
             f"(BIC={best.bic:.6g}). This ranking indicates relative support only and should be interpreted with "
-            "chemical plausibility and spectral behavior"
+            "chemical plausibility and spectral behavior")
         ]
         if len(bic_sorted) > 1:
             delta_bic = float(bic_sorted[1].bic - best.bic)
             if np.isfinite(delta_bic) and delta_bic < 2.0:
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
-        if best.bootstrap is not None and not best.bootstrap.ci_valid:
-            ci_message = str(best.bootstrap.ci_message).strip()
-            reasons.append(ci_message or "Bootstrap uncertainty is unavailable for the selected model.")
-        if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
-            k_ci_low, k_ci_high = _bootstrap_k_ci(best)
+        if args.ci_width is not None and best.model.n_logk > 0:
+            k_ci_low, k_ci_high = _k_ci(best)
             if k_ci_low.size > 0 and np.any(
                 np.isfinite(k_ci_low)
                 & np.isfinite(k_ci_high)
-                & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)
+                & ((k_ci_high - k_ci_low) > args.ci_width)
             ):
-                reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
+                reasons.append("The K confidence interval is wider than the requested threshold")
         decision_entries.append(
             DecisionEntry(
                 dataset=key,

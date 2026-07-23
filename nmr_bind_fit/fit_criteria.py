@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -12,7 +12,7 @@ from .stats import aicc_from_loglik, bic_from_loglik, gaussian_loglik
 def information_criteria(
     residuals: Sequence[np.ndarray],
     n_model_params: int,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     stacked = np.concatenate([res.ravel() for res in residuals]) if residuals else np.array([], dtype=float)
     loglik, n_obs, n_variance_params = gaussian_loglik(stacked)
     n_ic_params = n_model_params + n_variance_params
