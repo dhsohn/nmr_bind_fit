@@ -154,7 +154,7 @@ def _residual_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -181,7 +181,7 @@ def _parametric_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -199,7 +199,7 @@ def _points_bootstrap(
         y=ds.y[idx],
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -228,7 +228,7 @@ def _delete_dataset_row(ds: Dataset, row: int) -> Dataset:
         y=np.delete(ds.y, row, axis=0),
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 

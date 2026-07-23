@@ -88,6 +88,8 @@ def _fit_result(
         dof=0,
         jacobian_rank=2,
         jacobian_condition=123.0,
+        jacobian_logk_sensitivity=0.5,
+        logk_bounds=None,
     )
 
 

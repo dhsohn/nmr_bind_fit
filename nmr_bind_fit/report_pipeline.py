@@ -188,7 +188,7 @@ def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     items: List[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
-        dropped_rows = int(getattr(ds, "dropped_rows", 0))
+        dropped_rows = int(ds.dropped_rows)
         if dropped_rows > 0:
             if multi:
                 items.append(f"{ds.name}: {dropped_rows}")
@@ -367,17 +367,11 @@ def _bootstrap_k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
     if (
         res.bootstrap is None
         or res.model.n_logk == 0
-        or not getattr(res.bootstrap, "ci_valid", True)
+        or not res.bootstrap.ci_valid
     ):
         return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
-    low_log = np.asarray(
-        getattr(res.bootstrap, "ci_low", np.full((res.model.n_logk,), np.nan)),
-        dtype=float,
-    )
-    high_log = np.asarray(
-        getattr(res.bootstrap, "ci_high", np.full((res.model.n_logk,), np.nan)),
-        dtype=float,
-    )
+    low_log = np.asarray(res.bootstrap.ci_low, dtype=float)
+    high_log = np.asarray(res.bootstrap.ci_high, dtype=float)
     if low_log.shape != (res.model.n_logk,) or high_log.shape != (res.model.n_logk,):
         return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
     return _safe_pow10(low_log), _safe_pow10(high_log)
@@ -415,12 +409,12 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
 
 
 def _logk_bound_warnings(res: FitResult) -> List[str]:
-    if res.model.n_logk == 0 or not hasattr(res, "params"):
+    if res.model.n_logk == 0:
         return []
     # Compare against the bounds the fit actually used; when they are unknown
     # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
     # valid estimate such as K=1 or K=1e12 would be misleading.
-    bounds = getattr(res, "logk_bounds", None)
+    bounds = res.logk_bounds
     if bounds is None:
         return []
     low, high = float(bounds[0]), float(bounds[1])
@@ -441,8 +435,6 @@ def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
-    if not hasattr(res, "species"):
-        return None
     solver_stats = _accumulate_solver_stats(res.species)
     if solver_stats is None:
         return {
@@ -461,7 +453,7 @@ def _build_model_warnings(
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
-    datasets = getattr(res, "datasets", [])
+    datasets = res.datasets
 
     dropped_peaks = _format_dropped_peaks(datasets)
     if dropped_peaks != "None":
@@ -472,15 +464,15 @@ def _build_model_warnings(
         warnings.append(f"Dropped rows with missing required concentrations: {dropped_rows}")
 
     if not np.isfinite(res.bic):
-        if getattr(res, "n", 0) <= getattr(res, "p", 0) + 1:
+        if res.n <= res.p + 1:
             warnings.append(
                 "BIC/AICc unavailable: finite observations are not greater than fitted parameters plus variance"
             )
-        elif np.isfinite(getattr(res, "rss", np.nan)) and res.rss <= 0:
+        elif np.isfinite(res.rss) and res.rss <= 0:
             warnings.append("BIC/AICc unavailable: residual variance is zero")
         else:
             warnings.append("BIC/AICc unavailable for this fit")
-    elif not np.isfinite(getattr(res, "aicc", float("nan"))):
+    elif not np.isfinite(res.aicc):
         warnings.append(
             "AICc unavailable: too few observations for the small-sample correction; BIC is still reported"
         )
@@ -493,17 +485,17 @@ def _build_model_warnings(
             warnings.append("bootstrap CI too wide")
 
     if res.bootstrap is not None:
-        n_boot = int(getattr(res.bootstrap, "n_boot", 0))
-        n_success = int(getattr(res.bootstrap, "n_success", 0))
+        n_boot = int(res.bootstrap.n_boot)
+        n_success = int(res.bootstrap.n_success)
         if n_boot > 0:
             n_fail = n_boot - n_success
             if n_fail > 0:
                 warnings.append(f"bootstrap failures: {n_fail} of {n_boot} iterations")
-        if not getattr(res.bootstrap, "ci_valid", True):
-            ci_message = str(getattr(res.bootstrap, "ci_message", "")).strip()
+        if not res.bootstrap.ci_valid:
+            ci_message = str(res.bootstrap.ci_message).strip()
             warnings.append(ci_message or "bootstrap confidence interval is unavailable")
 
-    penalty_count = int(getattr(res, "penalty_count", 0))
+    penalty_count = int(res.penalty_count)
     if penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {penalty_count}")
 
@@ -513,7 +505,7 @@ def _build_model_warnings(
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
-    for ds, species in zip(datasets, getattr(res, "species", [])):
+    for ds, species in zip(datasets, res.species):
         stats = species.solver_stats
         if stats is None:
             continue
@@ -530,7 +522,7 @@ def _build_model_warnings(
 
 def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
     # Build stats block for report tables.
-    r2_per_peak = getattr(res, "r2_per_peak", [])
+    r2_per_peak = res.r2_per_peak
     r2_per_peak_text = (
         ";".join(f"{value:.6g}" for value in r2_per_peak)
         if r2_per_peak
@@ -546,24 +538,17 @@ def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]])
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
         "penalty_events": str(res.penalty_count),
     }
-    for attr in ("n", "p", "dof", "jacobian_rank"):
-        value = getattr(res, attr, None)
-        if value is not None:
-            stats_base[attr] = str(value)
-    jacobian_condition = getattr(res, "jacobian_condition", None)
-    if jacobian_condition is not None:
-        stats_base["jacobian_condition"] = f"{float(jacobian_condition):.6g}"
-    jacobian_logk_sensitivity = getattr(res, "jacobian_logk_sensitivity", None)
-    if jacobian_logk_sensitivity is not None and np.isfinite(jacobian_logk_sensitivity):
-        stats_base["jacobian_logk_sensitivity"] = f"{float(jacobian_logk_sensitivity):.6g}"
+    stats_base["n"] = str(res.n)
+    stats_base["p"] = str(res.p)
+    stats_base["dof"] = str(res.dof)
+    stats_base["jacobian_rank"] = str(res.jacobian_rank)
+    stats_base["jacobian_condition"] = f"{float(res.jacobian_condition):.6g}"
+    if np.isfinite(res.jacobian_logk_sensitivity):
+        stats_base["jacobian_logk_sensitivity"] = f"{float(res.jacobian_logk_sensitivity):.6g}"
     if res.bootstrap is not None:
-        n_success = getattr(res.bootstrap, "n_success", None)
-        n_boot = getattr(res.bootstrap, "n_boot", None)
-        if n_success is not None and n_boot is not None:
-            stats_base["bootstrap_success"] = f"{n_success} / {n_boot}"
-        ci_method_used = getattr(res.bootstrap, "ci_method_used", None)
-        if ci_method_used:
-            stats_base["bootstrap_ci_method"] = str(ci_method_used)
+        stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
+        if res.bootstrap.ci_method_used:
+            stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
     if solver_stats is not None:
         stats_base.update(
             {
@@ -573,7 +558,7 @@ def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]])
                 "solver_method": str(solver_stats["solver_method"]),
             }
         )
-    diagnostics = getattr(res, "residual_diagnostics", {})
+    diagnostics = res.residual_diagnostics
     if diagnostics:
         if "residual_n" in diagnostics:
             stats_base["residual_n"] = f"{diagnostics['residual_n']:.0f}"
@@ -923,8 +908,8 @@ def build_decisions(
             if np.isfinite(delta_bic) and delta_bic < 2.0:
                 decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
-        if best.bootstrap is not None and not getattr(best.bootstrap, "ci_valid", True):
-            ci_message = str(getattr(best.bootstrap, "ci_message", "")).strip()
+        if best.bootstrap is not None and not best.bootstrap.ci_valid:
+            ci_message = str(best.bootstrap.ci_message).strip()
             warning = ci_message or "Bootstrap uncertainty is unavailable for the selected model."
             decisions.append(f"- {warning}")
             reasons.append(warning)
