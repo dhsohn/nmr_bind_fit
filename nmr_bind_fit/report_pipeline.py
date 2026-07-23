@@ -35,7 +35,6 @@ SUMMARY_LABELS = {
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
-    "notes": "Notes",
 }
 
 LOGK_BOUND_ATOL = 1e-7
@@ -45,9 +44,6 @@ STATS_LABELS = {
     "n": "Observations (n)",
     "p": "Fitted parameters (p)",
     "dof": "Residual degrees of freedom",
-    "jacobian_rank": "Jacobian rank",
-    "jacobian_condition": "Jacobian condition number",
-    "jacobian_logk_sensitivity": "Minimum dimensionless logK RMS sensitivity",
     "R2": "Coefficient of determination (mean per-peak)",
     "R2_per_peak": "R² per peak",
     "RSS": "Residual sum of squares",
@@ -58,6 +54,8 @@ STATS_LABELS = {
     "bootstrap_logK_SE": "Bootstrap SE (log10 K)",
     "bootstrap_success": "Successful bootstrap refits",
     "bootstrap_ci_method": "Bootstrap CI method used",
+    "solver_points": "Equilibrium solver points",
+    "solver_fail": "Equilibrium solver failures",
     "residual_n": "Residual count",
     "shapiro_stat": "Shapiro-Wilk statistic",
     "shapiro_p": "Shapiro-Wilk p-value",
@@ -119,17 +117,6 @@ def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
         bootstrap.n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES
         and bootstrap.n_success == bootstrap.n_boot
     )
-
-
-def _as_int(value: object) -> int:
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
 
 
 def _safe_path_token(value: str) -> str:
@@ -197,14 +184,10 @@ def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, object]]:
-    # Combine solver statistics across species lists.
-    totals = {
-        "solver_points": 0,
-        "solver_success": 0,
-        "solver_fail": 0,
-        "solver_method": set(),
-    }
+def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, int]]:
+    # Combine the per-point solver counts the report can show. A clean solve
+    # reports nothing, so only the totals behind a failure are accumulated.
+    totals = {"solver_points": 0, "solver_fail": 0}
     found = False
     for species in species_list:
         stats = species.solver_stats
@@ -212,15 +195,9 @@ def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict
             continue
         found = True
         totals["solver_points"] += int(stats.points)
-        totals["solver_success"] += int(stats.success)
         totals["solver_fail"] += int(stats.fail)
-        method = stats.method
-        if method:
-            totals["solver_method"].add(str(method))
     if not found:
         return None
-    methods = totals["solver_method"]
-    totals["solver_method"] = ", ".join(sorted(methods)) if methods else "N/A"
     return totals
 
 
@@ -429,25 +406,17 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, object]]:
+def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
-    solver_stats = _accumulate_solver_stats(res.species)
-    if solver_stats is None:
-        return {
-            "solver_points": "N/A",
-            "solver_success": "N/A",
-            "solver_fail": "N/A",
-            "solver_method": "N/A",
-        }
-    return solver_stats
+    return _accumulate_solver_stats(res.species)
 
 
 def _build_model_warnings(
     args: argparse.Namespace,
     res: FitResult,
-    solver_stats: Optional[Dict[str, object]],
+    solver_stats: Optional[Dict[str, int]],
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
@@ -497,9 +466,9 @@ def _build_model_warnings(
     if penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {penalty_count}")
 
-    if solver_stats is not None and solver_stats.get("solver_fail", 0) not in {"N/A", None}:
-        n_fail = _as_int(solver_stats.get("solver_fail", 0))
-        n_points = _as_int(solver_stats.get("solver_points", 0))
+    if solver_stats is not None:
+        n_fail = solver_stats["solver_fail"]
+        n_points = solver_stats["solver_points"]
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
@@ -518,44 +487,38 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
-    # Build stats block for report tables.
-    r2_per_peak = res.r2_per_peak
-    r2_per_peak_text = (
-        ";".join(f"{value:.6g}" for value in r2_per_peak)
-        if r2_per_peak
-        else "N/A"
-    )
+def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, int]]) -> Dict[str, str]:
+    """Build the stats block for one model card.
+
+    Only reported fits reach this point, and reporting a fit already means it
+    passed the identifiability gate, so the rank, condition number and logK
+    sensitivity behind that gate would always read as passing values. The
+    thresholds are stated once in the methods text instead. Counters that are
+    only meaningful when something went wrong are included only then.
+    """
     stats_base = {
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
-        "R2_per_peak": r2_per_peak_text,
-        "bootstrap_logK_SE": _bootstrap_logk_se_text(res),
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
-        "penalty_events": str(res.penalty_count),
     }
+    if len(res.r2_per_peak) > 1:
+        stats_base["R2_per_peak"] = ";".join(f"{value:.6g}" for value in res.r2_per_peak)
     stats_base["n"] = str(res.n)
     stats_base["p"] = str(res.p)
     stats_base["dof"] = str(res.dof)
-    stats_base["jacobian_rank"] = str(res.jacobian_rank)
-    stats_base["jacobian_condition"] = f"{float(res.jacobian_condition):.6g}"
-    if np.isfinite(res.jacobian_logk_sensitivity):
-        stats_base["jacobian_logk_sensitivity"] = f"{float(res.jacobian_logk_sensitivity):.6g}"
+    if res.penalty_count > 0:
+        stats_base["penalty_events"] = str(res.penalty_count)
     if res.bootstrap is not None:
+        stats_base["bootstrap_logK_SE"] = _bootstrap_logk_se_text(res)
         stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
         if res.bootstrap.ci_method_used:
             stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
-    if solver_stats is not None:
-        stats_base.update(
-            {
-                "solver_points": str(solver_stats["solver_points"]),
-                "solver_success": str(solver_stats["solver_success"]),
-                "solver_fail": str(solver_stats["solver_fail"]),
-                "solver_method": str(solver_stats["solver_method"]),
-            }
-        )
+    if solver_stats is not None and solver_stats["solver_fail"] > 0:
+        # A clean per-point solve is the norm; the counts only inform a failure.
+        stats_base["solver_points"] = str(solver_stats["solver_points"])
+        stats_base["solver_fail"] = str(solver_stats["solver_fail"])
     diagnostics = res.residual_diagnostics
     if diagnostics:
         if "residual_n" in diagnostics:
@@ -573,9 +536,8 @@ def _build_summary_row(
     res: FitResult,
     ds_label: str,
     display_name: str,
-    warnings: Optional[Sequence[str]] = None,
 ) -> Dict[str, str]:
-    # Build one row for summary.csv.
+    # Build one row of the model comparison table.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
     k_str = _format_k_values(k_vals, res.model.n_logk)
@@ -592,13 +554,12 @@ def _build_summary_row(
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
-        "notes": "; ".join(str(warning) for warning in (warnings or [])),
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
 
-def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -> Dict[str, str]:
-    # Keep failed candidates visible in summary.csv for auditability.
+def _build_failure_summary_row(ds_label: str, display_name: str) -> Dict[str, str]:
+    # Keep failed candidates visible in the comparison table for auditability.
     summary_base = {
         "dataset": ds_label,
         "model": display_name,
@@ -608,7 +569,6 @@ def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -
         "R2": "N/A",
         "BIC": "N/A",
         "AICc": "N/A",
-        "notes": f"fit failed: {message}",
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
@@ -644,7 +604,7 @@ def _build_model_entry(
         warnings=warnings,
         plot_labels=plot_labels,
     )
-    summary_row = _build_summary_row(res, key, display_name, warnings)
+    summary_row = _build_summary_row(res, key, display_name)
     return model_entry, summary_row
 
 
@@ -669,7 +629,7 @@ def build_report_artifacts(
             report_warnings.append(
                 f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
             )
-            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name), message))
+            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name)))
         if not model_map:
             continue
         for model_name, res in model_map.items():
@@ -858,43 +818,22 @@ def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
     results_by_key: Dict[str, Dict[str, FitResult]],
-    failures_by_key: Dict[str, List[Tuple[str, str]]],
     display_model_name: Callable[[str], str],
-) -> Tuple[List[str], List[DecisionEntry]]:
-    # Build decision.txt lines and structured report decision entries.
-    decisions: List[str] = []
+) -> List[DecisionEntry]:
+    """Rank each dataset's candidates and record why the leader was chosen.
+
+    Datasets with no finitely ranked candidate yield no entry; the reason is
+    already reported through the warnings shown alongside them.
+    """
     decision_entries: List[DecisionEntry] = []
 
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
-        failures = failures_by_key.get(key, [])
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
-        decisions.append(f"Dataset: {key}")
-        model_warning_lines: List[str] = []
-        for model_name, res in model_map.items():
-            model_warnings = _build_model_warnings(args, res, _solver_stats_for_result(res))
-            for warning in model_warnings:
-                model_warning_lines.append(f"- {display_model_name(model_name)}: {warning}")
-        if failures or model_warning_lines:
-            decisions.append("Warnings:")
-            for model_name, message in failures:
-                decisions.append(
-                    f"- excluded {display_model_name(model_name)} (fit failed: {message})"
-                )
-            decisions.extend(model_warning_lines)
         if not bic_sorted:
-            if model_map:
-                decisions.append("No model had a finite BIC for ranking; see warnings.")
-            else:
-                decisions.append("No successful model fits; see warnings.")
-            decisions.append("")
             continue
 
         best = bic_sorted[0]
-        best_display = display_model_name(best.model.name)
-        decisions.append(
-            f"Tentative working model among tested candidates: {best_display} (lowest BIC among candidates)"
-        )
         reasons = [
             f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
             f"(BIC={best.bic:.6g}). This ranking indicates relative support only and should be interpreted with "
@@ -902,15 +841,11 @@ def build_decisions(
         ]
         if len(bic_sorted) > 1:
             delta_bic = float(bic_sorted[1].bic - best.bic)
-            decisions.append(f"- delta BIC to next candidate: {delta_bic:.6g}")
             if np.isfinite(delta_bic) and delta_bic < 2.0:
-                decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
         if best.bootstrap is not None and not best.bootstrap.ci_valid:
             ci_message = str(best.bootstrap.ci_message).strip()
-            warning = ci_message or "Bootstrap uncertainty is unavailable for the selected model."
-            decisions.append(f"- {warning}")
-            reasons.append(warning)
+            reasons.append(ci_message or "Bootstrap uncertainty is unavailable for the selected model.")
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
             k_ci_low, k_ci_high = _bootstrap_k_ci(best)
             if k_ci_low.size > 0 and np.any(
@@ -918,15 +853,13 @@ def build_decisions(
                 & np.isfinite(k_ci_high)
                 & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)
             ):
-                decisions.append("- bootstrap CI too wide")
                 reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
-        decisions.append("")
         decision_entries.append(
             DecisionEntry(
                 dataset=key,
-                recommended_model=best_display,
+                recommended_model=display_model_name(best.model.name),
                 reasons=reasons,
             )
         )
 
-    return decisions, decision_entries
+    return decision_entries

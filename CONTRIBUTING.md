@@ -21,7 +21,7 @@ Please use GitHub issues for bug reports, reproducibility problems, and feature 
 - the command that was run;
 - the input format, with a minimal example if possible;
 - the Python version and operating system;
-- the generated `summary.csv`, `decision.txt`, or relevant traceback;
+- the generated `report.html`, or relevant traceback;
 - whether the data are synthetic/example data or real unpublished data.
 
 Please do not upload confidential spectra, unpublished chemical structures, or private experimental data unless you are allowed to share them publicly.

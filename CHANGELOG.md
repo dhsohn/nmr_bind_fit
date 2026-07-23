@@ -25,8 +25,15 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - Simplified internal typing and report artifacts without changing fitted results: the
   duplicated structural typing protocols were replaced by the concrete result dataclasses,
   the optimizer penalty-scale fallback collapses to a single degenerate-data branch, and
-  isotherm/residual plot files use position-based names (`peak-0001`). `summary.csv` keeps
-  neutralizing spreadsheet-formula cells, since a dataset label comes from the input filename.
+  isotherm/residual plot files use position-based names (`peak-0001`).
+- Slimmed the HTML report. The table of contents is gone, per-model statistics are a compact
+  table rather than a tile grid, and the stylesheet is a fraction of its former size. Model
+  cards no longer repeat the Jacobian rank, condition number and log₁₀(K) sensitivity, because
+  a reported fit has by definition cleared the identifiability gate those describe and the
+  thresholds are already stated in the methods text; optimization penalty counts, equilibrium
+  solver counts and per-peak R² now appear only when they carry information. Equilibrium solver
+  counts are also labelled instead of showing their internal key names. The executive summary,
+  methods sections, warnings, model comparison table and figures are unchanged.
 - Dropped guards that re-checked what their callers already guarantee: bootstrap
   raw-distribution reporting now decides only the policy (enough draws requested, all of them
   successful), and directory tokens and HTML anchors are sanitized and bounded without a hash
@@ -34,7 +41,7 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
   decisions are unchanged; only the generated names for very long labels differ.
 - Hardened model fitting and reporting guardrails: invalid multivalent binding constants
   are rejected, weak-binding solver brackets include the physical root, failed candidates
-  remain visible in `summary.csv`, and model selection now ranks only finite-BIC fits.
+  remain visible in the model comparison table, and model selection now ranks only finite-BIC fits.
 - Bootstrap confidence intervals now require every requested pseudo-dataset to yield an
   uncensored acceptable refit after comparing jittered and full-data-optimum starts. A
   statistically competitive bound-limited or otherwise non-identifiable solution censors the
@@ -63,6 +70,12 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Removed
 
+- Removed `summary.csv` from the output directory. Its model comparison table is rendered in
+  `report.html` from the same rows, so a run now writes `report.html` and the per-model plot
+  directories. The spreadsheet-formula cell escaping went with it, having nothing left to guard.
+- Removed `decision.txt` from the output directory. The recommended provisional working model
+  and the reasons behind it are reported in the executive summary of `report.html`, which is
+  built from the same decision entries.
 - Removed the optional `fit` positional command. Invoke `nmr_bind_fit --input ...`
   directly.
 - Removed the `--concentration-unit` flag, which only relabeled report text while the fit and `K` bounds used raw numeric values. Supply concentrations in molar (M) instead.

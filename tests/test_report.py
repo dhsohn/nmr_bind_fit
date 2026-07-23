@@ -1,5 +1,4 @@
 import argparse
-import csv
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +11,7 @@ import nmr_bind_fit.report_pipeline as report_pipeline
 from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.models import MODEL_SPECS
 from nmr_bind_fit.plots import plot_residuals
-from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs, write_summary_csv
+from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs
 from nmr_bind_fit.report_html_renderer import (
     _fig_caption,
     _FigCounter,
@@ -156,8 +155,11 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert entries[0].stats["Observations (n)"] == "3"
     assert entries[0].stats["Fitted parameters (p)"] == "3"
     assert entries[0].stats["Residual degrees of freedom"] == "0"
-    assert entries[0].stats["Jacobian rank"] == "2"
-    assert entries[0].stats["Jacobian condition number"] == "123"
+    # Reporting a fit already means it cleared the identifiability gate, so the
+    # rank and condition number behind that gate are not repeated per model.
+    assert not any("Jacobian" in label for label in entries[0].stats)
+    # Counters that only matter on failure stay out of a clean card.
+    assert "Optimization penalty events" not in entries[0].stats
     assert entries[0].stats["Successful bootstrap refits"] == "20 / 20"
     assert entries[0].stats["Bootstrap CI method used"] == "percentile"
     assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0
@@ -376,42 +378,6 @@ def test_html_slug_is_attribute_safe_and_bounded():
     assert "=" not in slug
 
 
-def test_write_summary_csv_rejects_empty_rows_explicitly(tmp_path):
-    output_path = tmp_path / "summary.csv"
-
-    with pytest.raises(ValueError, match="without at least one successful fit result"):
-        write_summary_csv([], output_path)
-
-    assert not output_path.exists()
-
-
-def test_write_summary_csv_neutralizes_formulas_but_preserves_numeric_negatives(tmp_path):
-    # A dataset label is the input file stem, so an input named "=cmd.csv" puts
-    # that text straight into the first column and a spreadsheet would evaluate
-    # it. Negative and exponent-form statistics must survive unchanged.
-    output_path = tmp_path / "summary.csv"
-    rows = [
-        {
-            "Dataset": '=HYPERLINK("https://example.invalid", "sample")',
-            "Model": "@malicious-name",
-            "BIC": "-12.5",
-            "AICc": "-1.25e-3",
-            "Notes": " \t+FORMULA(1)",
-        }
-    ]
-
-    write_summary_csv(rows, output_path)
-
-    with output_path.open(newline="", encoding="utf-8") as handle:
-        written = next(csv.DictReader(handle))
-
-    assert written["Dataset"].startswith("'=HYPERLINK")
-    assert written["Model"] == "'@malicious-name"
-    assert written["BIC"] == "-12.5"
-    assert written["AICc"] == "-1.25e-3"
-    assert written["Notes"] == "' \t+FORMULA(1)"
-
-
 def _result(**overrides):
     # A complete FitResult-shaped stand-in; override only what a test exercises.
     base = dict(
@@ -450,21 +416,18 @@ def test_build_decisions_uses_provisional_language():
             "12": _result(model=SimpleNamespace(name="12", n_logk=2), bic=10.9),
         }
     }
-    failures_by_key = {}
-
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key,
         display_model_name=lambda name: name,
     )
 
-    assert any("Tentative working model among tested candidates" in line for line in decisions)
-    assert any("delta BIC to next candidate" in line for line in decisions)
-    assert any("model selection as provisional" in line for line in decisions)
     assert len(entries) == 1
+    assert entries[0].recommended_model == "11"
     assert "relative support only" in entries[0].reasons[0]
+    # The two candidates are 0.9 apart, so discrimination is flagged as weak.
+    assert any("discrimination is weak" in reason for reason in entries[0].reasons)
 
 
 def test_decision_paragraphs_use_provisional_working_model_language():
@@ -475,20 +438,6 @@ def test_decision_paragraphs_use_provisional_working_model_language():
     assert len(paragraphs) == 1
     assert "provisional working model" in paragraphs[0]
     assert "best supported" not in paragraphs[0]
-
-
-def test_build_decisions_uses_fit_failed_wording_for_exclusions():
-    args = argparse.Namespace(bootstrap_ci_width=None)
-    decisions, entries = build_decisions(
-        args,
-        ordered_keys=["dataset_a"],
-        results_by_key={"dataset_a": {}},
-        failures_by_key={"dataset_a": [("11", "ModelFitError: forced model crash")]},
-        display_model_name=lambda name: name,
-    )
-
-    assert len(entries) == 0
-    assert any("fit failed: ModelFitError: forced model crash" in line for line in decisions)
 
 
 def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
@@ -504,15 +453,13 @@ def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
         ),
     )
 
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys=["dataset_a"],
         results_by_key={"dataset_a": {"11": result}},
-        failures_by_key={},
         display_model_name=lambda name: name,
     )
 
-    assert any("1/1000 refits succeeded" in line for line in decisions)
     assert any("1/1000 refits succeeded" in reason for reason in entries[0].reasons)
 
 
@@ -528,7 +475,7 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
 
     assert len(summary_rows) == 1
     assert summary_rows[0]["Status"] == "failed"
-    assert "fit failed: ModelFitError: forced model crash" in summary_rows[0]["Notes"]
+    assert "Notes" not in summary_rows[0]
     assert model_entries == []
     assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]
 
@@ -663,14 +610,12 @@ def _pinned_k_result(logk_bounds):
     )
 
 
-def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
+def test_bound_pinned_k_is_reported_in_warnings():
     res = _pinned_k_result((0.0, 12.0))
 
     warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
-    row = _build_summary_row(res, "sample", "11", warnings)
 
     assert any("upper log10(K) bound" in warning for warning in warnings)
-    assert "upper log10(K) bound" in row["Notes"]
 
 
 def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
@@ -713,11 +658,9 @@ def test_aicc_only_unavailable_is_explained_in_warnings():
     )
 
     warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
-    row = _build_summary_row(res, "sample", "11", warnings)
 
     assert any("AICc unavailable: too few observations" in warning for warning in warnings)
     assert not any("BIC/AICc unavailable" in warning for warning in warnings)
-    assert "AICc unavailable" in row["Notes"]
 
 
 def test_build_decisions_excludes_nonfinite_bic_from_ranking():
@@ -729,13 +672,13 @@ def test_build_decisions_excludes_nonfinite_bic_from_ranking():
         }
     }
 
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key={},
         display_model_name=lambda name: name,
     )
 
+    # No finitely ranked candidate yields no recommendation; the reason reaches
+    # the reader through the warnings shown alongside the dataset.
     assert entries == []
-    assert any("No model had a finite BIC" in line for line in decisions)
