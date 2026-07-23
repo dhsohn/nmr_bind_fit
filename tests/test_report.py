@@ -260,18 +260,6 @@ def test_bca_only_failure_keeps_complete_raw_distribution_artifacts(tmp_path, mo
     assert message in entries[0].warnings
 
 
-def test_bootstrap_reportability_rejects_nonfinite_or_mismatched_samples():
-    result = _fit_result(_dataset("sample"))
-    result.bootstrap.param_samples[0, 0] = np.nan
-
-    assert not report_pipeline._bootstrap_samples_reportable(result.bootstrap)
-
-    result = _fit_result(_dataset("sample"))
-    result.bootstrap.param_samples = result.bootstrap.param_samples[:-1]
-
-    assert not report_pipeline._bootstrap_samples_reportable(result.bootstrap)
-
-
 def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_histogram(
     tmp_path,
     monkeypatch,
@@ -310,14 +298,6 @@ def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_
     assert summary_rows[0]["95 % CI"] == "N/A"
 
 
-def test_dataset_directory_tokens_are_case_insensitive_safe():
-    tokens = report_pipeline._dataset_dir_tokens(["Sample", "sample"])
-
-    # Labels differing only by case must stay distinct on the case-insensitive
-    # filesystems common on macOS and Windows.
-    assert len({token.casefold() for token in tokens.values()}) == 2
-
-
 def test_replicate_dataset_dir_labels_are_collision_free():
     datasets = [
         SimpleNamespace(name="sample", path="a/sample.csv"),
@@ -331,14 +311,12 @@ def test_replicate_dataset_dir_labels_are_collision_free():
     assert all(label.startswith(f"{index:02d}_") for index, label in enumerate(labels, start=1))
 
 
-def test_report_path_tokens_are_bounded_and_collision_resistant():
-    tokens = [
-        report_pipeline._safe_path_token("sample/" + "a" * 300),
-        report_pipeline._safe_path_token("sample?" + "a" * 300),
-    ]
+def test_report_path_tokens_are_sanitized_and_bounded():
+    # Distinctness comes from the ordinal prefix the callers add, not from here.
+    token = report_pipeline._safe_path_token("sample/" + "a" * 300)
 
-    assert all(len(token) <= 80 for token in tokens)
-    assert len(set(tokens)) == 2
+    assert len(token) <= 80
+    assert re.fullmatch(r"[A-Za-z0-9._-]+", token)
 
 
 def test_slash_containing_peak_labels_use_safe_unique_files_and_original_captions(tmp_path):

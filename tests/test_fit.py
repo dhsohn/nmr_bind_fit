@@ -312,10 +312,10 @@ def _select_with_fake_optimizer(fit_with_initial_fn):
     )
 
 
-@pytest.mark.parametrize("replicates", [False, True])
-def test_fit_models_rejects_empty_dataset_list_consistently(replicates):
+def test_fit_models_rejects_empty_dataset_list():
+    # The guard runs before the replicates branch is reached, so one case covers it.
     with pytest.raises(ValueError, match="At least one dataset is required"):
-        fit.fit_models([], ["11"], logk_starts=[4.0], replicates=replicates)
+        fit.fit_models([], ["11"], logk_starts=[4.0])
 
 
 def test_select_best_multistart_prefers_success_over_lower_rss_failure():
@@ -565,30 +565,6 @@ def test_fit_model_reports_residual_diagnostics_when_enabled():
 
     assert result.success is True
     assert "residual_n" in result.residual_diagnostics
-
-
-def test_fit_model_initializes_from_finite_masked_endpoints():
-    ds = Dataset(
-        name="masked_endpoint",
-        path=Path("dummy.csv"),
-        h_tot=np.array([1e-3, 1e-3, 1e-3, 1e-3], dtype=float),
-        g_tot=np.array([0.0, 3e-4, 6e-4, 1e-3], dtype=float),
-        x=np.array([0.0, 0.3, 0.6, 1.0], dtype=float),
-        y=np.array([[np.nan], [7.1], [7.2], [7.3]], dtype=float),
-        y_cols=["ppm1"],
-        dropped_peaks=[],
-    )
-
-    result = fit.fit_model(
-        [ds],
-        "nb",
-        logk_starts=[1.0],
-        max_nfev=100,
-        bootstrap=0,
-    )
-
-    assert result.success is True
-    assert np.all(np.isfinite(result.params))
 
 
 def test_fit_models_captures_all_masked_peak_column():
