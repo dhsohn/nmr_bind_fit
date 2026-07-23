@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Callable, cast
 
 import numpy as np
 
@@ -81,7 +82,7 @@ def _safe_path_token(value: str) -> str:
     return safe[:80].rstrip("._-") or "dataset"
 
 
-def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
+def _dataset_dir_tokens(labels: Sequence[str]) -> dict[str, str]:
     # Always include the ordinal so labels that differ only by case remain
     # distinct on the case-insensitive filesystems common on macOS and Windows.
     return {
@@ -90,9 +91,9 @@ def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
     }
 
 
-def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
+def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> list[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
-    labels: List[str] = []
+    labels: list[str] = []
     for idx, ds in enumerate(datasets, start=1):
         base = str(ds.name or f"dataset_{idx}")
         path = ds.path
@@ -106,7 +107,7 @@ def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
 
 def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
     # Format dropped ppm columns for report warnings.
-    items: List[str] = []
+    items: list[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
         dropped_peaks = ds.dropped_peaks
@@ -123,7 +124,7 @@ def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
 
 def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     # Format concentration rows dropped before fitting for report warnings.
-    items: List[str] = []
+    items: list[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
         dropped_rows = int(ds.dropped_rows)
@@ -137,7 +138,7 @@ def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, int]]:
+def _accumulate_solver_stats(species_list: list[SpeciesResult]) -> dict[str, int] | None:
     # Combine the per-point solver counts the report can show. A clean solve
     # reports nothing, so only the totals behind a failure are accumulated.
     totals = {"solver_points": 0, "solver_fail": 0}
@@ -154,7 +155,7 @@ def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict
     return totals
 
 
-def _build_param_entries(res: FitResult) -> List[ParamEntry]:
+def _build_param_entries(res: FitResult) -> list[ParamEntry]:
     # Convert fitted parameters into report entries with asymptotic standard errors.
     param_se = res.uncertainty.param_se if res.uncertainty is not None else None
 
@@ -189,8 +190,8 @@ def _collect_plot_artifacts(
     model_name: str,
     ds_label: str,
     out_dir: Path,
-    dataset_dir_token: Optional[str] = None,
-) -> Tuple[List[str], Dict[str, str]]:
+    dataset_dir_token: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
     # Write model plots and return relative PNG paths plus display labels.
     model_dir = out_dir / f"model_{_safe_path_token(model_name)}"
     if ds_label != "Simultaneous Fitting":
@@ -200,8 +201,8 @@ def _collect_plot_artifacts(
         model_dir = model_dir / f"dataset_{_safe_path_token(ds_label)}"
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_paths: List[str] = []
-    plot_labels: Dict[str, str] = {}
+    plot_paths: list[str] = []
+    plot_labels: dict[str, str] = {}
     replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
     model_spec = cast(ModelSpec, res.model)
     logk, deltas = split_params_multi(res.params, model_spec, res.datasets)
@@ -247,7 +248,7 @@ def _logk_se_text(res: FitResult) -> str:
     return ";".join(f"{value:.6g}" for value in se_vals)
 
 
-def _k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
+def _k_ci(res: FitResult) -> tuple[np.ndarray, np.ndarray]:
     # Return the log10(K) confidence interval mapped into linear K space.
     if res.uncertainty is None or res.model.n_logk == 0:
         return (
@@ -260,7 +261,7 @@ def _k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
     )
 
 
-def _logk_names(n_logk: int) -> List[str]:
+def _logk_names(n_logk: int) -> list[str]:
     if n_logk == 1:
         return ["K"]
     return [f"K{i + 1}" for i in range(n_logk)]
@@ -291,7 +292,7 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
     return "; ".join(intervals)
 
 
-def _logk_bound_warnings(res: FitResult) -> List[str]:
+def _logk_bound_warnings(res: FitResult) -> list[str]:
     if res.model.n_logk == 0:
         return []
     # Compare against the bounds the fit actually used; when they are unknown
@@ -303,7 +304,7 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     low, high = float(bounds[0]), float(bounds[1])
     logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
     names = _logk_names(res.model.n_logk)
-    warnings: List[str] = []
+    warnings: list[str] = []
     for name, value in zip(names, logk_vals):
         if not np.isfinite(value):
             continue
@@ -314,7 +315,7 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
+def _solver_stats_for_result(res: FitResult) -> dict[str, int] | None:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
@@ -324,8 +325,8 @@ def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
 def _build_model_warnings(
     args: argparse.Namespace,
     res: FitResult,
-    solver_stats: Optional[Dict[str, int]],
-) -> List[str]:
+    solver_stats: dict[str, int] | None,
+) -> list[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
     datasets = res.datasets
@@ -355,9 +356,12 @@ def _build_model_warnings(
     warnings.extend(_logk_bound_warnings(res))
 
     k_ci_low, k_ci_high = _k_ci(res)
-    if args.ci_width is not None and k_ci_low.size > 0:
-        if np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.ci_width)):
-            warnings.append("K confidence interval is wider than the requested threshold")
+    if (
+        args.ci_width is not None
+        and k_ci_low.size > 0
+        and np.any(np.isfinite(k_ci_low) & np.isfinite(k_ci_high) & ((k_ci_high - k_ci_low) > args.ci_width))
+    ):
+        warnings.append("K confidence interval is wider than the requested threshold")
 
     penalty_count = int(res.penalty_count)
     if penalty_count > 0:
@@ -384,7 +388,7 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, int]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResult, solver_stats: dict[str, int] | None) -> dict[str, str]:
     """Build the stats block for one model card.
 
     Only reported fits reach this point, and reporting a fit already means it
@@ -430,7 +434,7 @@ def _build_summary_row(
     res: FitResult,
     ds_label: str,
     display_name: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     # Build one row of the model comparison table.
     logk_vals = res.params[: res.model.n_logk]
     k_vals = _safe_pow10(logk_vals)
@@ -452,7 +456,7 @@ def _build_summary_row(
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
 
-def _build_failure_summary_row(ds_label: str, display_name: str) -> Dict[str, str]:
+def _build_failure_summary_row(ds_label: str, display_name: str) -> dict[str, str]:
     # Keep failed candidates visible in the comparison table for auditability.
     summary_base = {
         "dataset": ds_label,
@@ -474,8 +478,8 @@ def _build_model_entry(
     res: FitResult,
     out_dir: Path,
     display_model_name: Callable[[str], str],
-    dataset_dir_token: Optional[str] = None,
-) -> Tuple[ModelEntry, Dict[str, str]]:
+    dataset_dir_token: str | None = None,
+) -> tuple[ModelEntry, dict[str, str]]:
     # Build one report model section and its matching summary row.
     display_name = display_model_name(model_name)
     params = _build_param_entries(res)
@@ -504,20 +508,20 @@ def _build_model_entry(
 
 def build_report_artifacts(
     args: argparse.Namespace,
-    ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResult]],
-    failures_by_key: Dict[str, List[Tuple[str, str]]],
+    ordered_keys: list[str],
+    results_by_key: dict[str, dict[str, FitResult]],
+    failures_by_key: dict[str, list[tuple[str, str]]],
     out_dir: Path,
     display_model_name: Callable[[str], str],
-) -> Tuple[List[Dict[str, str]], List[ModelEntry], List[str]]:
+) -> tuple[list[dict[str, str]], list[ModelEntry], list[str]]:
     # Convert fit results into summary rows, model entries, and top-level warnings.
-    summary_rows: List[Dict[str, str]] = []
-    model_entries: List[ModelEntry] = []
-    report_warnings: List[str] = []
+    summary_rows: list[dict[str, str]] = []
+    model_entries: list[ModelEntry] = []
+    report_warnings: list[str] = []
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
+        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
@@ -542,9 +546,9 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> List[Dict[str, str]]:
+def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> list[dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
-    sections: List[Dict[str, str]] = []
+    sections: list[dict[str, str]] = []
     # K is reported in M⁻¹ (molar inputs).
     k_unit = "M⁻¹"
 
@@ -666,35 +670,35 @@ def build_methods_text(args: argparse.Namespace, datasets: Sequence[Dataset]) ->
 
 def build_methods_sections(
     args: argparse.Namespace, datasets: Sequence[Dataset]
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
     return _compose_methods_sections(args, datasets)
 
 
 def build_decisions(
     args: argparse.Namespace,
-    ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResult]],
+    ordered_keys: list[str],
+    results_by_key: dict[str, dict[str, FitResult]],
     display_model_name: Callable[[str], str],
-) -> List[DecisionEntry]:
+) -> list[DecisionEntry]:
     """Rank each dataset's candidates and record why the leader was chosen.
 
     Datasets with no finitely ranked candidate yield no entry; the reason is
     already reported through the warnings shown alongside them.
     """
-    decision_entries: List[DecisionEntry] = []
+    decision_entries: list[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
+        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         if not bic_sorted:
             continue
 
         best = bic_sorted[0]
         reasons = [
-            f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
+            (f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
             f"(BIC={best.bic:.6g}). This ranking indicates relative support only and should be interpreted with "
-            "chemical plausibility and spectral behavior"
+            "chemical plausibility and spectral behavior")
         ]
         if len(bic_sorted) > 1:
             delta_bic = float(bic_sorted[1].bic - best.bic)

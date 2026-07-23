@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,8 +20,8 @@ class Dataset:
     g_tot: np.ndarray
     x: np.ndarray
     y: np.ndarray
-    y_cols: List[str]
-    dropped_peaks: List[str]
+    y_cols: list[str]
+    dropped_peaks: list[str]
     dropped_rows: int = 0
 
     @property
@@ -42,13 +42,13 @@ def _norm_col(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
-def _find_ppm_columns(columns: Sequence[str]) -> List[str]:
+def _find_ppm_columns(columns: Sequence[str]) -> list[str]:
     # Infer ppm columns by name when they are not explicitly supplied.
     ppm_cols = [c for c in columns if "ppm" in _norm_col(str(c))]
     return ppm_cols
 
 
-def _split_cols(value: Optional[str]) -> Optional[List[str]]:
+def _split_cols(value: str | None) -> list[str] | None:
     # Parse a comma-separated list into clean column names.
     if value is None:
         return None
@@ -89,13 +89,13 @@ def _validate_input_file(path: Path) -> None:
 
 def _resolve_concentration_columns(
     columns: Sequence[str],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     if REQUIRED_HOST_COL not in columns or REQUIRED_GUEST_COL not in columns:
         raise ValueError("Required concentration columns not found. Expected columns: [H]t, [G]t.")
     return REQUIRED_HOST_COL, REQUIRED_GUEST_COL
 
 
-def _resolve_ppm_cols(columns: Sequence[str], ppm_cols: Optional[Sequence[str]]) -> List[str]:
+def _resolve_ppm_cols(columns: Sequence[str], ppm_cols: Sequence[str] | None) -> list[str]:
     # Determine ppm columns, either by explicit list or name heuristic.
     if ppm_cols is None:
         cols = _find_ppm_columns(columns)
@@ -152,18 +152,18 @@ def _drop_missing_required(
     data: pd.DataFrame,
     host_col: str,
     guest_col: str,
-) -> Tuple[pd.DataFrame, int]:
+) -> tuple[pd.DataFrame, int]:
     # Drop rows missing required concentration values.
     required_cols = [host_col, guest_col]
-    before = int(len(data))
+    before = len(data)
     dropped = data.dropna(axis=0, how="any", subset=required_cols)
-    return dropped, before - int(len(dropped))
+    return dropped, before - len(dropped)
 
 
 def _drop_incomplete_ppm_columns(
     data: pd.DataFrame,
     ppm_cols: Sequence[str],
-) -> Tuple[pd.DataFrame, List[str], List[str]]:
+) -> tuple[pd.DataFrame, list[str], list[str]]:
     # Remove ppm columns containing any missing value.
     ppm_cols_list = list(ppm_cols)
     ppm_view = data.loc[:, ppm_cols_list]
@@ -185,7 +185,7 @@ def _apply_missing_policy(
     data: pd.DataFrame,
     ppm_cols: Sequence[str],
     missing_policy: str,
-) -> Tuple[pd.DataFrame, List[str], List[str]]:
+) -> tuple[pd.DataFrame, list[str], list[str]]:
     if missing_policy == "drop-column":
         return _drop_incomplete_ppm_columns(data, ppm_cols)
     if missing_policy == "mask":
@@ -229,7 +229,7 @@ def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
 
 def load_dataset(
     path: Path,
-    ppm_cols: Optional[Sequence[str]] = None,
+    ppm_cols: Sequence[str] | None = None,
     missing_policy: str = "drop-column",
 ) -> Dataset:
     """Load a single dataset from CSV or XLSX."""
@@ -279,9 +279,9 @@ def load_dataset(
 
 def load_datasets(
     paths: Sequence[Path],
-    ppm_cols: Optional[str],
+    ppm_cols: str | None,
     missing_policy: str = "drop-column",
-) -> List[Dataset]:
+) -> list[Dataset]:
     """Load multiple datasets."""
     # Reuse column parsing for all input paths.
     ppm_cols_list = _split_cols(ppm_cols)

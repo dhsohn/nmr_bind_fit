@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, List, NoReturn, Optional, Tuple
+from typing import Callable, NoReturn
 
 import numpy as np
 from scipy.optimize import brentq
@@ -21,9 +21,9 @@ class SpeciesResult:
     h: np.ndarray
     g: np.ndarray
     hg: np.ndarray
-    hg2: Optional[np.ndarray] = None
-    h2g: Optional[np.ndarray] = None
-    solver_stats: Optional["SolverStats"] = None
+    hg2: np.ndarray | None = None
+    h2g: np.ndarray | None = None
+    solver_stats: SolverStats | None = None
 
 
 @dataclass
@@ -32,7 +32,7 @@ class SolverStats:
     success: int = 0
     fail: int = 0
     method: str = "brentq"
-    failed_indices: List[int] = field(default_factory=list)
+    failed_indices: list[int] = field(default_factory=list)
 
 
 def _validate_failure_mode(failure_mode: str) -> str:
@@ -41,7 +41,7 @@ def _validate_failure_mode(failure_mode: str) -> str:
     return failure_mode
 
 
-def _validate_positive_finite_constants(*values: float) -> Tuple[float, ...]:
+def _validate_positive_finite_constants(*values: float) -> tuple[float, ...]:
     constants = tuple(float(value) for value in values)
     if any((not math.isfinite(value)) or value <= 0.0 for value in constants):
         raise ValueError("Binding constants must be positive and finite.")
@@ -50,7 +50,7 @@ def _validate_positive_finite_constants(*values: float) -> Tuple[float, ...]:
 
 def _validate_total_concentration_arrays(
     h_tot: np.ndarray, g_tot: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     h_arr = np.asarray(h_tot, dtype=float)
     g_arr = np.asarray(g_tot, dtype=float)
     if h_arr.shape != g_arr.shape:
@@ -60,13 +60,13 @@ def _validate_total_concentration_arrays(
     return h_arr, g_arr
 
 
-def _record_solver_success(stats: Optional[SolverStats]) -> None:
+def _record_solver_success(stats: SolverStats | None) -> None:
     if stats is not None:
         stats.success += 1
 
 
 def _raise_solver_failure(
-    stats: Optional[SolverStats], original_error: Optional[BaseException] = None
+    stats: SolverStats | None, original_error: BaseException | None = None
 ) -> NoReturn:
     """Record a failed solve and raise a consistent solver error."""
     if stats is not None:
@@ -82,8 +82,8 @@ def _validate_point_inputs(
     g_tot: float,
     k1: float,
     k2: float,
-    stats: Optional[SolverStats],
-) -> Tuple[float, float, float, float]:
+    stats: SolverStats | None,
+) -> tuple[float, float, float, float]:
     try:
         values = tuple(float(value) for value in (h_tot, g_tot, k1, k2))
     except (TypeError, ValueError) as exc:
@@ -104,8 +104,8 @@ def _validate_point_inputs(
 def _solve_free_guest_root(
     residual: Callable[[float], float],
     g_tot: float,
-    stats: Optional[SolverStats],
-    tolerance_scale: Optional[float] = None,
+    stats: SolverStats | None,
+    tolerance_scale: float | None = None,
 ) -> float:
     """Solve within the physical free-guest interval, including endpoint roots."""
     lower = 0.0
@@ -115,9 +115,7 @@ def _solve_free_guest_root(
     xtol = max(smallest, _ROOT_XTOL_REL * max(smallest, scale))
     maxiter = _ROOT_MAXITER
     if upper > lower and xtol > 0.0:
-        bisection_steps = int(
-            math.ceil(max(0.0, (math.log(upper - lower) - math.log(xtol)) / math.log(2.0)))
-        )
+        bisection_steps = math.ceil(max(0.0, (math.log(upper - lower) - math.log(xtol)) / math.log(2.0)))
         maxiter = max(
             maxiter,
             _ROOT_ITER_SAFETY_FACTOR * bisection_steps + _ROOT_ITER_SAFETY_MARGIN,
@@ -157,7 +155,7 @@ def _solve_free_guest_root(
 def _solve_extreme_free_guest_log_root(
     log_residual: Callable[[float], float],
     g_tot: float,
-    stats: Optional[SolverStats],
+    stats: SolverStats | None,
 ) -> float:
     """Solve a subnormal or unrepresentable free-guest root in log space."""
     log_smallest = math.log(float(np.nextafter(0.0, 1.0)))
@@ -285,8 +283,8 @@ def _logsumexp(values: np.ndarray) -> float:
 def _scale_species_from_logs(
     log_species: np.ndarray,
     h_tot: float,
-    stoich: Tuple[float, ...],
-) -> Tuple[float, ...]:
+    stoich: tuple[float, ...],
+) -> tuple[float, ...]:
     """Scale log-populations so that weighted host total matches h_tot."""
     # Rescale log-populations so stoichiometric totals match the host mass balance.
     if h_tot <= 0 or not math.isfinite(h_tot):
@@ -305,8 +303,8 @@ def solve_12_point(
     g_tot: float,
     k1: float,
     k2: float,
-    stats: Optional[SolverStats] = None,
-) -> Tuple[float, float, float, float]:
+    stats: SolverStats | None = None,
+) -> tuple[float, float, float, float]:
     """Solve 1:2 binding for a single point via free-guest root finding."""
     h_tot, g_tot, k1, k2 = _validate_point_inputs(h_tot, g_tot, k1, k2, stats)
     if h_tot == 0.0 and g_tot == 0.0:
@@ -320,14 +318,14 @@ def solve_12_point(
     logk2 = _log_or_neg_inf(k2)
     log_h_tot = _log_or_neg_inf(h_tot)
 
-    def species_from_logg(logg: float) -> Tuple[float, float, float]:
+    def species_from_logg(logg: float) -> tuple[float, float, float]:
         log_species = np.array(
             [0.0, logk1 + logg, logk1 + logk2 + 2.0 * logg],
             dtype=float,
         )
         return _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 1.0))
 
-    def species_from_g(g: float) -> Tuple[float, float, float]:
+    def species_from_g(g: float) -> tuple[float, float, float]:
         return species_from_logg(_log_or_neg_inf(g))
 
     def residual(g: float) -> float:
@@ -362,8 +360,8 @@ def solve_21_point(
     g_tot: float,
     k1: float,
     k2: float,
-    stats: Optional[SolverStats] = None,
-) -> Tuple[float, float, float, float]:
+    stats: SolverStats | None = None,
+) -> tuple[float, float, float, float]:
     """Solve 2:1 binding for a single point via free-guest root finding."""
     h_tot, g_tot, k1, k2 = _validate_point_inputs(h_tot, g_tot, k1, k2, stats)
     if h_tot == 0.0 and g_tot == 0.0:
@@ -393,7 +391,7 @@ def solve_21_point(
             return log_h_tot
         return _log_h_from_logg(math.log(g))
 
-    def species_from_logg(logg: float) -> Tuple[float, float, float]:
+    def species_from_logg(logg: float) -> tuple[float, float, float]:
         logh = _log_h_from_logg(logg)
         log_species = np.array(
             [logh, logk1 + logh + logg, logk1 + logk2 + 2.0 * logh + logg],
@@ -401,7 +399,7 @@ def solve_21_point(
         )
         return _scale_species_from_logs(log_species, h_tot, (1.0, 1.0, 2.0))
 
-    def species_from_g(g: float) -> Tuple[float, float, float]:
+    def species_from_g(g: float) -> tuple[float, float, float]:
         return species_from_logg(_log_or_neg_inf(g))
 
     def residual(g: float) -> float:

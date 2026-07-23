@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
 
 import matplotlib
 import numpy as np
@@ -122,7 +121,7 @@ def _prepare_isotherm_curve(
     ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     # Compute smooth model curve values on a dense equivalents grid.
     grid_ds = _grid_dataset(ds)
     y_grid, _ = predict_dataset(model, grid_ds, logk, delta)
@@ -147,10 +146,10 @@ def plot_isotherms(
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Plot data points alongside the fitted curve for each peak.
     out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
+    files: list[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
     for i in range(len(ds.y_cols)):
@@ -177,10 +176,10 @@ def plot_residuals(
     ds: Dataset,
     residuals: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
+    files: list[Path] = []
     for i in range(len(ds.y_cols)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
@@ -204,7 +203,7 @@ def plot_fraction_bound(
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
-) -> List[Path]:
+) -> list[Path]:
     # Skip non-binding models since they do not define fraction bound.
     if not model.is_binding:
         return []

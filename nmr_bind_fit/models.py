@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
 
 import numpy as np
 
@@ -16,7 +16,7 @@ class ModelSpec:
     name: str
     n_logk: int
     n_delta_per_peak: int
-    species_labels: List[str]
+    species_labels: list[str]
     is_binding: bool
 
 
@@ -57,7 +57,7 @@ def split_params_multi(
     params: np.ndarray,
     model: ModelSpec,
     datasets: Sequence[Dataset],
-) -> Tuple[np.ndarray, List[np.ndarray]]:
+) -> tuple[np.ndarray, list[np.ndarray]]:
     # Walk the parameter vector across datasets for replicate fits.
     params = np.asarray(params, dtype=float)
     logk = params[: model.n_logk]
@@ -123,7 +123,7 @@ def predict_dataset(
     logk: np.ndarray,
     delta: np.ndarray,
     solver_failure_mode: str = "fail-fast",
-) -> Tuple[np.ndarray, SpeciesResult]:
+) -> tuple[np.ndarray, SpeciesResult]:
     """Return predicted shifts and species populations for one dataset."""
     h_tot = dataset.h_tot
     g_tot = dataset.g_tot

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
-
 import numpy as np
 from scipy.stats import shapiro
 
 
 def gaussian_loglik(
     residuals: np.ndarray,
-) -> Tuple[float, int, int]:
+) -> tuple[float, int, int]:
     """Gaussian log-likelihood with one shared residual variance."""
     res = np.asarray(residuals, dtype=float)
     # Estimate one variance term from all finite residuals.
@@ -49,7 +47,7 @@ def residual_diagnostics(
     *,
     shapiro_max_n: int = 5000,
     include_durbin_watson: bool = True,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute informational residual diagnostics (normality, autocorrelation).
 
     These are reporting aids, not acceptance tests. The Durbin-Watson statistic
@@ -59,7 +57,7 @@ def residual_diagnostics(
     """
     res = np.asarray(residuals, dtype=float)
     flat = res[np.isfinite(res)]
-    result: Dict[str, float] = {}
+    result: dict[str, float] = {}
     if flat.size == 0:
         return result
 

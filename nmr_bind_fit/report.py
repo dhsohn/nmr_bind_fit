@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
 
 from .report_html_renderer import write_report_html as _write_report_html_impl
 
@@ -21,18 +21,18 @@ class ParamEntry:
 class ModelEntry:
     dataset: str
     model: str
-    stats: Dict[str, str]
-    params: List[ParamEntry]
-    plots: List[str]
-    warnings: List[str]
-    plot_labels: Dict[str, str] = field(default_factory=dict)
+    stats: dict[str, str]
+    params: list[ParamEntry]
+    plots: list[str]
+    warnings: list[str]
+    plot_labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class DecisionEntry:
     dataset: str
     recommended_model: str
-    reasons: List[str]
+    reasons: list[str]
 
 
 def _rationale_text(reasons: Sequence[str]) -> str:
@@ -41,15 +41,14 @@ def _rationale_text(reasons: Sequence[str]) -> str:
         text = reason.strip()
         if not text:
             continue
-        if text.endswith("."):
-            text = text[:-1]
+        text = text.removesuffix(".")
         cleaned.append(text)
     if not cleaned:
         return "No supporting criteria were recorded."
     return ". ".join(cleaned) + "."
 
 
-def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
+def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> list[str]:
     paragraphs = []
     for entry in entries:
         rationale = _rationale_text(entry.reasons)
@@ -69,14 +68,14 @@ def _decision_paragraphs(entries: Sequence[DecisionEntry]) -> List[str]:
 
 
 def write_report_html(
-    summary_rows: Sequence[Dict[str, str]],
+    summary_rows: Sequence[dict[str, str]],
     model_entries: Sequence[ModelEntry],
-    decision_entries: Optional[Sequence[DecisionEntry]],
-    methods_text: Optional[str],
-    warnings: Optional[Sequence[str]],
+    decision_entries: Sequence[DecisionEntry] | None,
+    methods_text: str | None,
+    warnings: Sequence[str] | None,
     output_path: Path,
     *,
-    methods_sections: Optional[Sequence[Dict[str, str]]] = None,
+    methods_sections: Sequence[dict[str, str]] | None = None,
 ) -> None:
     _write_report_html_impl(
         summary_rows=summary_rows,

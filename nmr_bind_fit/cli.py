@@ -7,9 +7,9 @@ import glob
 import re
 import sys
 from collections import Counter
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence
 
 import numpy as np
 
@@ -58,7 +58,7 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
-def _parse_k_starts(value: Optional[str]) -> list[float]:
+def _parse_k_starts(value: str | None) -> list[float]:
     # Parse comma-separated starts or default to log-spaced values.
     if value is None:
         return [10**i for i in range(1, 9)]
@@ -107,7 +107,8 @@ def _safe_output_name(name: str) -> str:
 
 
 def _auto_output_dir(paths: list[Path]) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Local wall-clock time, kept timezone-aware so the stamp is unambiguous.
+    timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S")
     base = paths[0].stem if len(paths) == 1 else "replicates"
     return Path(f"{timestamp}_{_safe_output_name(base)}")
 

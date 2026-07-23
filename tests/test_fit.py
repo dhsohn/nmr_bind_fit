@@ -1,13 +1,15 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional, Sequence
 
 import numpy as np
 import pytest
 from scipy.optimize import OptimizeResult
 from scipy.stats import t as student_t
 
-import nmr_bind_fit.fit as fit
+from nmr_bind_fit import fit
 from nmr_bind_fit.fit import _param_names_multi, fit_models
 from nmr_bind_fit.fit_criteria import information_criteria
 from nmr_bind_fit.fit_optimizer import param_bounds, select_best_multistart
@@ -38,7 +40,7 @@ def _named_dataset(
     g_tot: np.ndarray,
     y: np.ndarray,
     *,
-    path: Optional[str] = None,
+    path: str | None = None,
 ) -> Dataset:
     return Dataset(
         name=name,
@@ -797,7 +799,7 @@ def test_predict_shape_11():
     model = MODEL_SPECS["11"]
     logk = np.array([4.0])
     delta = np.array([[7.0, 7.5], [8.0, 8.2]])
-    y_pred, species = predict_dataset(model, ds, logk, delta)
+    y_pred, _species = predict_dataset(model, ds, logk, delta)
     assert y_pred.shape == y.shape
 
 

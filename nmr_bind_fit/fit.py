@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.optimize import OptimizeResult
@@ -28,15 +28,15 @@ from .stats import residual_diagnostics as _residual_diagnostics_impl
 @dataclass
 class FitResult:
     model: ModelSpec
-    datasets: List[Dataset]
+    datasets: list[Dataset]
     params: np.ndarray
-    param_names: List[str]
+    param_names: list[str]
     success: bool
     message: str
     rss: float
     rmse: float
     r2: float
-    r2_per_peak: List[float]
+    r2_per_peak: list[float]
     bic: float
     aicc: float
     n: int
@@ -45,13 +45,13 @@ class FitResult:
     jacobian_rank: int
     jacobian_condition: float
     jacobian_logk_sensitivity: float
-    y_pred: List[np.ndarray]
-    species: List
-    residuals: List[np.ndarray]
-    residual_diagnostics: Dict[str, float]
-    uncertainty: Optional[Uncertainty]
+    y_pred: list[np.ndarray]
+    species: list
+    residuals: list[np.ndarray]
+    residual_diagnostics: dict[str, float]
+    uncertainty: Uncertainty | None
     penalty_count: int
-    logk_bounds: Optional[Tuple[float, float]] = None
+    logk_bounds: tuple[float, float] | None = None
 
 
 class ModelFitError(RuntimeError):
@@ -105,10 +105,10 @@ def _init_delta(model: ModelSpec, dataset: Dataset) -> np.ndarray:
 
 def _build_initial_params(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     logk_values: Sequence[float],
 ) -> np.ndarray:
-    params: List[float] = []
+    params: list[float] = []
     params.extend(list(logk_values))
     for ds in datasets:
         delta = _init_delta(model, ds)
@@ -116,8 +116,8 @@ def _build_initial_params(
     return np.array(params, dtype=float)
 
 
-def _param_names_multi(model: ModelSpec, datasets: List[Dataset]) -> List[str]:
-    names: List[str] = []
+def _param_names_multi(model: ModelSpec, datasets: list[Dataset]) -> list[str]:
+    names: list[str] = []
     if model.n_logk == 1:
         names.append("logK")
     elif model.n_logk == 2:
@@ -133,9 +133,9 @@ def _param_names_multi(model: ModelSpec, datasets: List[Dataset]) -> List[str]:
 def _residual_vector(
     params: np.ndarray,
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     solver_failure_mode: str = "fail-fast",
-    penalty_counter: Optional[Dict[str, int]] = None,
+    penalty_counter: dict[str, int] | None = None,
 ) -> np.ndarray:
     logk, deltas = split_params_multi(params, model, datasets)
     residuals = []
@@ -188,9 +188,8 @@ def _residual_vector(
         residuals.append(ds_residual)
 
         failed_count = n_valid - int(np.count_nonzero(finite_mask))
-        if failed_count > 0:
-            if penalty_counter is not None:
-                penalty_counter["count"] = penalty_counter.get("count", 0) + 1
+        if failed_count > 0 and penalty_counter is not None:
+            penalty_counter["count"] = penalty_counter.get("count", 0) + 1
     if not residuals:
         return np.array([], dtype=float)
     return np.concatenate(residuals)
@@ -199,9 +198,9 @@ def _residual_vector(
 def _predict_all(
     params: np.ndarray,
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     solver_failure_mode: str = "fail-fast",
-) -> Tuple[List[np.ndarray], List, List[np.ndarray]]:
+) -> tuple[list[np.ndarray], list, list[np.ndarray]]:
     logk, deltas = split_params_multi(params, model, datasets)
     y_pred_list = []
     species_list = []
@@ -214,15 +213,15 @@ def _predict_all(
     return y_pred_list, species_list, residuals
 
 
-def _rss_value(residuals: List[np.ndarray]) -> float:
+def _rss_value(residuals: list[np.ndarray]) -> float:
     rss = 0.0
     for res in residuals:
         rss += float(np.nansum(res**2))
     return rss
 
 
-def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> Tuple[float, List[float]]:
-    r2_per_peak: List[float] = []
+def _r2_score(datasets: list[Dataset], y_pred_list: list[np.ndarray]) -> tuple[float, list[float]]:
+    r2_per_peak: list[float] = []
     for ds, y_pred in zip(datasets, y_pred_list):
         for peak_idx in range(ds.n_peaks):
             y_obs_col = ds.y[:, peak_idx]
@@ -244,12 +243,12 @@ def _r2_score(datasets: List[Dataset], y_pred_list: List[np.ndarray]) -> Tuple[f
 
 def _fit_with_initial(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     params0: np.ndarray,
     max_nfev: int,
-    bounds: Tuple[np.ndarray, np.ndarray],
+    bounds: tuple[np.ndarray, np.ndarray],
     solver_failure_mode: str = "fail-fast",
-) -> Tuple[np.ndarray, OptimizeResult]:
+) -> tuple[np.ndarray, OptimizeResult]:
     """Bind fit.py's residual-vector policy to the lower-level optimizer."""
     return _optimizer_fit_with_initial(
         model=model,
@@ -262,7 +261,7 @@ def _fit_with_initial(
     )
 
 
-def _total_observations(datasets: List[Dataset]) -> int:
+def _total_observations(datasets: list[Dataset]) -> int:
     total = 0
     for ds in datasets:
         try:
@@ -273,7 +272,7 @@ def _total_observations(datasets: List[Dataset]) -> int:
     return total
 
 
-def _validate_fit_design(model: ModelSpec, datasets: List[Dataset]) -> None:
+def _validate_fit_design(model: ModelSpec, datasets: list[Dataset]) -> None:
     """Reject datasets that cannot identify the requested parameterization."""
     if not datasets:
         raise ModelFitError("At least one dataset is required.")
@@ -327,7 +326,7 @@ def _validate_fit_options(
     model_names: Sequence[str],
     logk_starts: Sequence[float],
     max_nfev: int,
-    logk_bounds: Optional[Tuple[float, float]],
+    logk_bounds: tuple[float, float] | None,
     solver_failure_mode: str,
 ) -> None:
     if not model_names:
@@ -379,18 +378,18 @@ def _validate_fit_options(
 
 def _failed_fit_result(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     params: np.ndarray,
-    param_names: List[str],
+    param_names: list[str],
     message: str,
-    species: Optional[List] = None,
+    species: list | None = None,
     jacobian_rank: int = 0,
     jacobian_condition: float = float("inf"),
     jacobian_logk_sensitivity: float = float("nan"),
-    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_bounds: tuple[float, float] | None = None,
 ) -> FitResult:
     n = _total_observations(datasets)
-    p = int(len(params))
+    p = len(params)
     dof = int(n - p)
     return FitResult(
         model=model,
@@ -421,7 +420,7 @@ def _failed_fit_result(
     )
 
 
-def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[object]) -> str:
+def _nonfinite_prediction_message(datasets: list[Dataset], species_list: list[object]) -> str:
     fail_points = 0
     total_points = 0
     for ds, species in zip(datasets, species_list):
@@ -437,10 +436,10 @@ def _nonfinite_prediction_message(datasets: List[Dataset], species_list: List[ob
 
 def _build_successful_fit_result(
     model: ModelSpec,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     best_params: np.ndarray,
     best_res: OptimizeResult,
-    logk_bounds: Optional[Tuple[float, float]],
+    logk_bounds: tuple[float, float] | None,
     solver_failure_mode: str,
     compute_residual_diagnostics: bool,
 ) -> FitResult:
@@ -464,7 +463,7 @@ def _build_successful_fit_result(
 
     rss = _rss_value(residuals)
     n = _total_observations(datasets)
-    p = int(len(best_params))
+    p = len(best_params)
     dof = int(n - p)
     jacobian_rank, jacobian_condition = jacobian_rank_and_condition(
         best_res,
@@ -525,7 +524,7 @@ def _build_successful_fit_result(
     rmse = float(np.sqrt(rss / n)) if n > 0 else float("nan")
     r2, r2_per_peak = _r2_score(datasets, y_pred_list)
     bic, aicc = information_criteria(residuals, n_model_params=p)
-    diag: Dict[str, float] = {}
+    diag: dict[str, float] = {}
     if compute_residual_diagnostics:
         finite_residuals = []
         for res in residuals:
@@ -572,11 +571,11 @@ def _build_successful_fit_result(
 
 
 def fit_model(
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     model_name: str,
     logk_starts: Sequence[float],
     max_nfev: int = 5000,
-    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_bounds: tuple[float, float] | None = None,
     solver_failure_mode: str = "fail-fast",
     residual_diagnostics: bool = False,
 ) -> FitResult:
@@ -644,9 +643,9 @@ def fit_model(
 
 def _exception_failure_result(
     model_name: str,
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     exc: Exception,
-    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_bounds: tuple[float, float] | None = None,
 ) -> FitResult:
     model = MODEL_SPECS[model_name]
     n_delta = sum(len(ds.y_cols) * model.n_delta_per_peak for ds in datasets)
@@ -665,7 +664,7 @@ def _exception_failure_result(
 
 
 def _iter_fit_jobs(
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     model_names: Sequence[str],
     replicates: bool,
 ):
@@ -679,15 +678,15 @@ def _iter_fit_jobs(
 
 
 def fit_models(
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     model_names: Sequence[str],
     logk_starts: Sequence[float],
     replicates: bool = False,
     max_nfev: int = 5000,
-    logk_bounds: Optional[Tuple[float, float]] = None,
+    logk_bounds: tuple[float, float] | None = None,
     solver_failure_mode: str = "fail-fast",
     residual_diagnostics: bool = False,
-) -> List[FitResult]:
+) -> list[FitResult]:
     """Fit candidate models and return one :class:`FitResult` per fit job.
 
     This is the primary programmatic entry point (mirrored by the ``nmr_bind_fit``

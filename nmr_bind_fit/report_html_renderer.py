@@ -5,9 +5,10 @@ from __future__ import annotations
 import html
 import math
 import re
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable
 
 _NUMERIC_COLS = {
     "Binding constant",
@@ -98,7 +99,7 @@ def _slug(text: str) -> str:
     return safe[:60].rstrip("-_") or "section"
 
 
-def _plot_alt_text(plot_path: str, plot_label: Optional[str] = None) -> str:
+def _plot_alt_text(plot_path: str, plot_label: str | None = None) -> str:
     stem = Path(plot_path).stem
     if stem.startswith("isotherm_"):
         peak = plot_label or stem.removeprefix("isotherm_")
@@ -114,7 +115,7 @@ def _plot_alt_text(plot_path: str, plot_label: Optional[str] = None) -> str:
 def _fig_caption(
     fig_counter: _FigCounter,
     plot_path: str,
-    plot_label: Optional[str] = None,
+    plot_label: str | None = None,
 ) -> str:
     stem = Path(plot_path).stem
     n = fig_counter.next()
@@ -129,8 +130,8 @@ def _fig_caption(
     return f"<strong>Figure {n}.</strong> {html.escape(stem)}"
 
 
-def _best_models_map(decision_entries: Optional[Sequence[object]]) -> Dict[str, str]:
-    best_models: Dict[str, str] = {}
+def _best_models_map(decision_entries: Sequence[object] | None) -> dict[str, str]:
+    best_models: dict[str, str] = {}
     if decision_entries:
         for d in decision_entries:
             best_models[d.dataset] = d.recommended_model
@@ -138,8 +139,8 @@ def _best_models_map(decision_entries: Optional[Sequence[object]]) -> Dict[str, 
 
 
 def _render_exec_summary(
-    decision_entries: Optional[Sequence[object]],
-    decision_paragraphs_fn: Optional[Callable[[Sequence[object]], List[str]]],
+    decision_entries: Sequence[object] | None,
+    decision_paragraphs_fn: Callable[[Sequence[object]], list[str]] | None,
 ) -> str:
     if decision_paragraphs_fn is None:
         return ""
@@ -155,8 +156,8 @@ def _render_exec_summary(
 
 
 def _render_methods_block(
-    methods_text: Optional[str],
-    methods_sections: Optional[Sequence[Dict[str, str]]],
+    methods_text: str | None,
+    methods_sections: Sequence[dict[str, str]] | None,
 ) -> str:
     if methods_sections:
         parts = []
@@ -181,7 +182,7 @@ def _render_methods_block(
     return ""
 
 
-def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
+def _render_warnings_block(warnings: Sequence[str] | None) -> str:
     if not warnings:
         return ""
     items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
@@ -193,7 +194,7 @@ def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
     )
 
 
-def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: Dict[str, str]) -> str:
+def _render_summary_table(summary_rows: Sequence[dict[str, str]], best_models: dict[str, str]) -> str:
     if not summary_rows:
         return ""
     headers = list(summary_rows[0].keys())
@@ -218,7 +219,7 @@ def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: D
     )
 
 
-def _render_stats_table(stats: Dict[str, str]) -> str:
+def _render_stats_table(stats: dict[str, str]) -> str:
     rows = "".join(
         f"<tr><td>{html.escape(k)}</td>"
         f'<td class="num">{html.escape(str(v))}</td></tr>'
@@ -259,7 +260,7 @@ def _render_model_warning_block(warnings: Sequence[str]) -> str:
 def _render_plot_grid(
     plot_paths: Sequence[str],
     fig_counter: _FigCounter,
-    plot_labels: Optional[Dict[str, str]] = None,
+    plot_labels: dict[str, str] | None = None,
 ) -> str:
     if not plot_paths:
         return ""
@@ -277,7 +278,7 @@ def _render_plot_grid(
     return f'<div class="figure-grid">{"".join(fig_items)}</div>'
 
 
-def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: _FigCounter) -> str:
+def _render_model_card(entry: object, best_models: dict[str, str], fig_counter: _FigCounter) -> str:
     is_best = best_models.get(entry.dataset) == entry.model
     badge = '<span class="model-badge best">★ Best Model</span>' if is_best else ""
     slug = _slug(f"{entry.dataset}-{entry.model}")
@@ -312,9 +313,9 @@ def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: 
 
 def _render_model_sections(
     model_entries: Sequence[object],
-    best_models: Dict[str, str],
+    best_models: dict[str, str],
     fig_counter: _FigCounter,
-) -> List[str]:
+) -> list[str]:
     return [_render_model_card(entry, best_models, fig_counter) for entry in model_entries]
 
 
@@ -325,17 +326,18 @@ def _render_model_detail_heading(model_sections: Sequence[str]) -> str:
 
 
 def write_report_html(
-    summary_rows: Sequence[Dict[str, str]],
+    summary_rows: Sequence[dict[str, str]],
     model_entries: Sequence[object],
-    decision_entries: Optional[Sequence[object]],
-    methods_text: Optional[str],
-    warnings: Optional[Sequence[str]],
+    decision_entries: Sequence[object] | None,
+    methods_text: str | None,
+    warnings: Sequence[str] | None,
     output_path: Path,
     *,
-    methods_sections: Optional[Sequence[Dict[str, str]]] = None,
-    decision_paragraphs_fn: Optional[Callable[[Sequence[object]], List[str]]] = None,
+    methods_sections: Sequence[dict[str, str]] | None = None,
+    decision_paragraphs_fn: Callable[[Sequence[object]], list[str]] | None = None,
 ) -> None:
-    now = datetime.now()
+    # Local wall-clock time, kept timezone-aware so the stamp is unambiguous.
+    now = datetime.now(timezone.utc).astimezone()
     fig_counter = _FigCounter()
     best_models = _best_models_map(decision_entries)
     exec_html = _render_exec_summary(decision_entries, decision_paragraphs_fn)

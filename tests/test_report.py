@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import argparse
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from typing import List, Optional
 
 import numpy as np
 
-import nmr_bind_fit.report_pipeline as report_pipeline
+from nmr_bind_fit import report_pipeline
 from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.models import MODEL_SPECS
 from nmr_bind_fit.plots import plot_residuals
@@ -26,7 +27,7 @@ from nmr_bind_fit.report_pipeline import (
 )
 
 
-def _dataset(name: str, peak_names: Optional[List[str]] = None) -> Dataset:
+def _dataset(name: str, peak_names: list[str] | None = None) -> Dataset:
     peaks = peak_names or ["ppm_H1"]
     x = np.array([0.0, 0.5, 1.0], dtype=float)
     y = np.column_stack(
@@ -248,29 +249,29 @@ def test_html_slug_is_attribute_safe_and_bounded():
 
 def _result(**overrides):
     # A complete FitResult-shaped stand-in; override only what a test exercises.
-    base = dict(
-        model=SimpleNamespace(name="11", n_logk=1),
-        datasets=[],
-        params=np.array([2.0, 7.0, 7.5], dtype=float),
-        param_names=["logK", "H", "HG"],
-        uncertainty=None,
-        r2=0.9,
-        r2_per_peak=[0.9],
-        rss=1.0,
-        rmse=0.5,
-        bic=10.0,
-        aicc=11.0,
-        penalty_count=0,
-        species=[],
-        residual_diagnostics={},
-        n=10,
-        p=3,
-        dof=7,
-        jacobian_rank=3,
-        jacobian_condition=100.0,
-        jacobian_logk_sensitivity=0.5,
-        logk_bounds=None,
-    )
+    base = {
+        "model": SimpleNamespace(name="11", n_logk=1),
+        "datasets": [],
+        "params": np.array([2.0, 7.0, 7.5], dtype=float),
+        "param_names": ["logK", "H", "HG"],
+        "uncertainty": None,
+        "r2": 0.9,
+        "r2_per_peak": [0.9],
+        "rss": 1.0,
+        "rmse": 0.5,
+        "bic": 10.0,
+        "aicc": 11.0,
+        "penalty_count": 0,
+        "species": [],
+        "residual_diagnostics": {},
+        "n": 10,
+        "p": 3,
+        "dof": 7,
+        "jacobian_rank": 3,
+        "jacobian_condition": 100.0,
+        "jacobian_logk_sensitivity": 0.5,
+        "logk_bounds": None,
+    }
     base.update(overrides)
     return SimpleNamespace(**base)
 
