@@ -69,15 +69,8 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
         return 1.0
     scale = float(np.std(finite))
     if not np.isfinite(scale) or scale <= 0:
-        q75, q25 = np.percentile(finite, [75.0, 25.0])
-        scale = float((q75 - q25) / 1.349)
-    if not np.isfinite(scale) or scale <= 0:
-        span = float(np.max(finite) - np.min(finite))
-        scale = span
-    if not np.isfinite(scale) or scale <= 0:
+        # Degenerate constant data has no spread; fall back to its magnitude.
         scale = float(np.max(np.abs(finite))) * 1e-2
-    if not np.isfinite(scale) or scale <= 0:
-        scale = 1e-3
     return float(max(scale * 8.0, 1e-3))
 
 

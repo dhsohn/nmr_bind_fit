@@ -338,7 +338,7 @@ def test_slash_containing_peak_labels_use_safe_unique_files_and_original_caption
     assert len(png_files) == 2
     assert len({path.name for path in png_files}) == 2
     assert all(path.parent == tmp_path and path.is_file() for path in png_files)
-    assert all(re.fullmatch(r"residual_peak-\d{4}-[A-Za-z0-9_-]+\.png", path.name) for path in png_files)
+    assert all(re.fullmatch(r"residual_peak-\d{4}\.png", path.name) for path in png_files)
 
     counter = _FigCounter()
     captions = [

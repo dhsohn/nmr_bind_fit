@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import List, Tuple
 
@@ -14,7 +13,6 @@ import matplotlib.pyplot as plt
 
 from .io import Dataset
 from .models import ModelSpec, fraction_bound, predict_dataset
-from .types import DatasetLike
 
 # ── Publication-quality defaults ──────────────────────────────────────────────
 matplotlib.rcParams.update(
@@ -46,10 +44,9 @@ _CLR_ZERO = "#94a3b8"
 _CLR_HIST = "#334155"
 
 
-def _peak_file_token(peak: str, index: int) -> str:
-    """Return a bounded, collision-resistant filesystem token for a peak label."""
-    digest = hashlib.sha256(str(peak).encode("utf-8")).hexdigest()[:16]
-    return f"peak-{index:04d}-{digest}"
+def _peak_file_token(index: int) -> str:
+    """Return a bounded, unique filesystem token for a peak by column position."""
+    return f"peak-{index:04d}"
 
 
 def _style_axes(ax: plt.Axes) -> None:
@@ -61,7 +58,7 @@ def _style_axes(ax: plt.Axes) -> None:
     ax.tick_params(colors="#475569")
 
 
-def _grid_dataset(ds: DatasetLike, n: int = 200) -> DatasetLike:
+def _grid_dataset(ds: Dataset, n: int = 200) -> Dataset:
     # Create a dense grid of equivalents for smooth fit curves.
     eq_obs = np.asarray(ds.x, dtype=float)
     h_obs = np.asarray(ds.h_tot, dtype=float)
@@ -123,7 +120,7 @@ def _save_figure(fig: plt.Figure, png_path: Path, pdf_path: Path) -> None:
 
 def _prepare_isotherm_curve(
     model: ModelSpec,
-    ds: DatasetLike,
+    ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -136,7 +133,7 @@ def _prepare_isotherm_curve(
 
 def _prepare_fraction_bound_values(
     model: ModelSpec,
-    ds: DatasetLike,
+    ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
 ) -> np.ndarray:
@@ -147,7 +144,7 @@ def _prepare_fraction_bound_values(
 
 def plot_isotherms(
     model: ModelSpec,
-    ds: DatasetLike,
+    ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,
@@ -157,7 +154,7 @@ def plot_isotherms(
     files: List[Path] = []
 
     x_curve, y_curve = _prepare_isotherm_curve(model, ds, logk, delta)
-    for i, peak in enumerate(ds.y_cols):
+    for i in range(len(ds.y_cols)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.scatter(ds.x, ds.y[:, i], color=_CLR_DATA, s=28, zorder=3,
                    label="Observed", edgecolors="white", linewidths=0.4)
@@ -168,7 +165,7 @@ def plot_isotherms(
         ax.legend(frameon=False, loc="best")
         _style_axes(ax)
         fig.tight_layout()
-        peak_token = _peak_file_token(peak, i + 1)
+        peak_token = _peak_file_token(i + 1)
         png_path = out_dir / f"isotherm_{peak_token}.png"
         pdf_path = out_dir / f"isotherm_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -178,14 +175,14 @@ def plot_isotherms(
 
 def plot_residuals(
     model: ModelSpec,
-    ds: DatasetLike,
+    ds: Dataset,
     residuals: np.ndarray,
     out_dir: Path,
 ) -> List[Path]:
     # Plot residuals by peak with a zero baseline.
     out_dir.mkdir(parents=True, exist_ok=True)
     files: List[Path] = []
-    for i, peak in enumerate(ds.y_cols):
+    for i in range(len(ds.y_cols)):
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.axhline(0.0, color=_CLR_ZERO, linewidth=0.8, linestyle="--")
         ax.scatter(ds.x, residuals[:, i], color=_CLR_DATA, s=24, zorder=3,
@@ -194,7 +191,7 @@ def plot_residuals(
         ax.set_ylabel("Residual (ppm)")
         _style_axes(ax)
         fig.tight_layout()
-        peak_token = _peak_file_token(peak, i + 1)
+        peak_token = _peak_file_token(i + 1)
         png_path = out_dir / f"residual_{peak_token}.png"
         pdf_path = out_dir / f"residual_{peak_token}.pdf"
         _save_figure(fig, png_path, pdf_path)
@@ -236,7 +233,7 @@ def plot_bootstrap_hist(
 
 def plot_fraction_bound(
     model: ModelSpec,
-    ds: DatasetLike,
+    ds: Dataset,
     logk: np.ndarray,
     delta: np.ndarray,
     out_dir: Path,

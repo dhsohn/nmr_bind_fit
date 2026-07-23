@@ -13,8 +13,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from .fit import fit_models
-from .io import load_datasets
+from .fit import FitResult, fit_models
+from .io import Dataset, load_datasets
 from .report import write_decision_txt, write_report_html, write_summary_csv
 from .report_pipeline import (
     build_decisions,
@@ -22,7 +22,6 @@ from .report_pipeline import (
     build_methods_text,
     build_report_artifacts,
 )
-from .types import DatasetLike, FitResultLike
 
 MODEL_LABELS = {
     "11": "H : G = 1 : 1",
@@ -141,7 +140,7 @@ def _reserve_output_dir(paths: list[Path]) -> Path:
             suffix += 1
 
 
-def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> dict[int, str]:
+def _build_dataset_labels(datasets: Sequence[Dataset]) -> dict[int, str]:
     names = [dataset.name for dataset in datasets]
     if len(names) == len(set(names)):
         return {id(dataset): dataset.name for dataset in datasets}
@@ -175,13 +174,13 @@ def _resolve_logk_config(
 
 
 def _index_results(
-    results: Sequence[FitResultLike],
+    results: Sequence[FitResult],
     dataset_labels: dict[int, str],
 ) -> tuple[
-    dict[str, dict[str, FitResultLike]],
+    dict[str, dict[str, FitResult]],
     dict[str, list[tuple[str, str]]],
 ]:
-    results_by_key: dict[str, dict[str, FitResultLike]] = {}
+    results_by_key: dict[str, dict[str, FitResult]] = {}
     failures_by_key: dict[str, list[tuple[str, str]]] = {}
     for result in results:
         if len(result.datasets) > 1:

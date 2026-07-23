@@ -10,10 +10,14 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
+from .equilibrium import SpeciesResult
+from .fit import FitResult
 from .fit_bootstrap import (
     BOOTSTRAP_COMPETITIVE_CONFIDENCE,
     MIN_BOOTSTRAP_CI_SUCCESSES,
+    BootstrapResult,
 )
+from .io import Dataset
 from .models import ModelSpec, split_params_multi
 from .plots import (
     plot_bootstrap_hist,
@@ -22,7 +26,6 @@ from .plots import (
     plot_residuals,
 )
 from .report import DecisionEntry, ModelEntry, ParamEntry
-from .types import BootstrapLike, DatasetLike, FitResultLike, SpeciesLike
 
 SUMMARY_LABELS = {
     "dataset": "Dataset",
@@ -105,7 +108,7 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
     return values[mask]
 
 
-def _bootstrap_samples_reportable(bootstrap: BootstrapLike) -> bool:
+def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
     """Return whether the raw bootstrap distribution is complete and reportable."""
     samples = np.asarray(bootstrap.param_samples, dtype=float)
     return bool(
@@ -149,7 +152,7 @@ def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
     }
 
 
-def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
+def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
     labels: List[str] = []
     for idx, ds in enumerate(datasets, start=1):
@@ -163,7 +166,7 @@ def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
     return labels
 
 
-def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
+def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
     # Format dropped ppm columns for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
@@ -180,7 +183,7 @@ def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
     return "; ".join(items)
 
 
-def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
+def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     # Format concentration rows dropped before fitting for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
@@ -196,7 +199,7 @@ def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[str, object]]:
+def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, object]]:
     # Combine solver statistics across species lists.
     totals = {
         "solver_points": 0,
@@ -223,7 +226,7 @@ def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[s
     return totals
 
 
-def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
+def _build_param_entries(res: FitResult) -> List[ParamEntry]:
     # Convert fitted parameters into report entries and optional bootstrap SE.
     bootstrap_samples = None
     if (
@@ -261,7 +264,7 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
 
 
 def _collect_plot_artifacts(
-    res: FitResultLike,
+    res: FitResult,
     model_name: str,
     ds_label: str,
     out_dir: Path,
@@ -327,7 +330,7 @@ def _collect_plot_artifacts(
     return plot_paths, plot_labels
 
 
-def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
+def _bootstrap_k_samples(res: FitResult) -> np.ndarray:
     # Return finite bootstrap K samples (linear scale) for warnings and summary.
     if (
         res.bootstrap is None
@@ -339,7 +342,7 @@ def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
     return _filter_finite_rows(k_samples)
 
 
-def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
+def _bootstrap_logk_samples(res: FitResult) -> np.ndarray:
     # Return finite bootstrap logK samples for SE reporting.
     if (
         res.bootstrap is None
@@ -350,7 +353,7 @@ def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
     return res.bootstrap.param_samples[:, : res.model.n_logk]
 
 
-def _bootstrap_logk_se_text(res: FitResultLike) -> str:
+def _bootstrap_logk_se_text(res: FitResult) -> str:
     # Format bootstrap SE in log10(K) space.
     samples = _bootstrap_logk_samples(res)
     if samples.shape[0] <= 1:
@@ -359,7 +362,7 @@ def _bootstrap_logk_se_text(res: FitResultLike) -> str:
     return ";".join(f"{value:.6g}" for value in se_vals)
 
 
-def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
+def _bootstrap_k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
     # Return selected bootstrap CI in linear K space.
     if (
         res.bootstrap is None
@@ -411,7 +414,7 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
     return "; ".join(intervals)
 
 
-def _logk_bound_warnings(res: FitResultLike) -> List[str]:
+def _logk_bound_warnings(res: FitResult) -> List[str]:
     if res.model.n_logk == 0 or not hasattr(res, "params"):
         return []
     # Compare against the bounds the fit actually used; when they are unknown
@@ -434,7 +437,7 @@ def _logk_bound_warnings(res: FitResultLike) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
+def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
@@ -453,7 +456,7 @@ def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
 
 def _build_model_warnings(
     args: argparse.Namespace,
-    res: FitResultLike,
+    res: FitResult,
     solver_stats: Optional[Dict[str, object]],
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
@@ -525,7 +528,7 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
     # Build stats block for report tables.
     r2_per_peak = getattr(res, "r2_per_peak", [])
     r2_per_peak_text = (
@@ -584,7 +587,7 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
 
 
 def _build_summary_row(
-    res: FitResultLike,
+    res: FitResult,
     ds_label: str,
     display_name: str,
     warnings: Optional[Sequence[str]] = None,
@@ -631,7 +634,7 @@ def _build_model_entry(
     args: argparse.Namespace,
     key: str,
     model_name: str,
-    res: FitResultLike,
+    res: FitResult,
     out_dir: Path,
     display_model_name: Callable[[str], str],
     dataset_dir_token: Optional[str] = None,
@@ -665,7 +668,7 @@ def _build_model_entry(
 def build_report_artifacts(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResultLike]],
+    results_by_key: Dict[str, Dict[str, FitResult]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     out_dir: Path,
     display_model_name: Callable[[str], str],
@@ -677,7 +680,7 @@ def build_report_artifacts(
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
+        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
@@ -702,7 +705,7 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
+def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> List[Dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
     # K is reported in M⁻¹ (molar inputs).
@@ -855,14 +858,14 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     return sections
 
 
-def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> str:
+def build_methods_text(args: argparse.Namespace, datasets: Sequence[Dataset]) -> str:
     # Flatten structured methods sections into one text block.
     sections = _compose_methods_sections(args, datasets)
     return " ".join(section["content"] for section in sections)
 
 
 def build_methods_sections(
-    args: argparse.Namespace, datasets: Sequence[DatasetLike]
+    args: argparse.Namespace, datasets: Sequence[Dataset]
 ) -> List[Dict[str, str]]:
     """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
     return _compose_methods_sections(args, datasets)
@@ -871,7 +874,7 @@ def build_methods_sections(
 def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResultLike]],
+    results_by_key: Dict[str, Dict[str, FitResult]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     display_model_name: Callable[[str], str],
 ) -> Tuple[List[str], List[DecisionEntry]]:
@@ -880,7 +883,7 @@ def build_decisions(
     decision_entries: List[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
+        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")
