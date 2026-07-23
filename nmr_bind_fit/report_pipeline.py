@@ -10,10 +10,14 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
+from .equilibrium import SpeciesResult
+from .fit import FitResult
 from .fit_bootstrap import (
     BOOTSTRAP_COMPETITIVE_CONFIDENCE,
     MIN_BOOTSTRAP_CI_SUCCESSES,
+    BootstrapResult,
 )
+from .io import Dataset
 from .models import ModelSpec, split_params_multi
 from .plots import (
     plot_bootstrap_hist,
@@ -22,7 +26,6 @@ from .plots import (
     plot_residuals,
 )
 from .report import DecisionEntry, ModelEntry, ParamEntry
-from .types import DatasetLike, FitResultLike, SpeciesLike
 
 SUMMARY_LABELS = {
     "dataset": "Dataset",
@@ -105,6 +108,19 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
     return values[mask]
 
 
+def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
+    """Return whether the raw bootstrap distribution is complete and reportable."""
+    samples = np.asarray(bootstrap.param_samples, dtype=float)
+    return bool(
+        bootstrap.n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES
+        and bootstrap.n_success == bootstrap.n_boot
+        and samples.ndim == 2
+        and samples.shape[0] == bootstrap.n_success
+        and samples.size > 0
+        and np.all(np.isfinite(samples))
+    )
+
+
 def _as_int(value: object) -> int:
     if isinstance(value, (int, np.integer)):
         return int(value)
@@ -136,7 +152,7 @@ def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:
     }
 
 
-def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
+def _replicate_dataset_dir_labels(datasets: Sequence[Dataset]) -> List[str]:
     # Build deterministic, collision-free directory labels per replicate dataset.
     labels: List[str] = []
     for idx, ds in enumerate(datasets, start=1):
@@ -150,7 +166,7 @@ def _replicate_dataset_dir_labels(datasets: Sequence[DatasetLike]) -> List[str]:
     return labels
 
 
-def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
+def _format_dropped_peaks(datasets: Sequence[Dataset]) -> str:
     # Format dropped ppm columns for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
@@ -167,12 +183,12 @@ def _format_dropped_peaks(datasets: Sequence[DatasetLike]) -> str:
     return "; ".join(items)
 
 
-def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
+def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     # Format concentration rows dropped before fitting for report warnings.
     items: List[str] = []
     multi = len(datasets) > 1
     for ds in datasets:
-        dropped_rows = int(getattr(ds, "dropped_rows", 0))
+        dropped_rows = int(ds.dropped_rows)
         if dropped_rows > 0:
             if multi:
                 items.append(f"{ds.name}: {dropped_rows}")
@@ -183,7 +199,7 @@ def _format_dropped_rows(datasets: Sequence[DatasetLike]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[str, object]]:
+def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, object]]:
     # Combine solver statistics across species lists.
     totals = {
         "solver_points": 0,
@@ -210,13 +226,12 @@ def _accumulate_solver_stats(species_list: List[SpeciesLike]) -> Optional[Dict[s
     return totals
 
 
-def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
+def _build_param_entries(res: FitResult) -> List[ParamEntry]:
     # Convert fitted parameters into report entries and optional bootstrap SE.
     bootstrap_samples = None
     if (
         res.bootstrap is not None
-        and getattr(res.bootstrap, "ci_valid", True)
-        and res.bootstrap.param_samples.size > 0
+        and _bootstrap_samples_reportable(res.bootstrap)
     ):
         bootstrap_samples = res.bootstrap.param_samples
 
@@ -249,7 +264,7 @@ def _build_param_entries(res: FitResultLike) -> List[ParamEntry]:
 
 
 def _collect_plot_artifacts(
-    res: FitResultLike,
+    res: FitResult,
     model_name: str,
     ds_label: str,
     out_dir: Path,
@@ -290,8 +305,9 @@ def _collect_plot_artifacts(
         ):
             plot_labels[path.relative_to(out_dir).as_posix()] = str(peak)
 
-    if res.bootstrap is not None and res.bootstrap.param_samples.shape[0] > 1:
-        samples = res.bootstrap.param_samples.copy()
+    bootstrap = res.bootstrap
+    if bootstrap is not None and _bootstrap_samples_reportable(bootstrap):
+        samples = bootstrap.param_samples.copy()
         for idx, name in enumerate(res.param_names):
             if name in {"logK", "logK1", "logK2"}:
                 samples[:, idx] = _safe_pow10(samples[:, idx])
@@ -305,56 +321,39 @@ def _collect_plot_artifacts(
             corr_path = model_dir / "correlation.csv"
             np.savetxt(corr_path, corr, delimiter=",", fmt="%.6g")
 
-    if res.bootstrap is not None and res.model.n_logk > 0:
-        k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
-        k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
-        boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
-        _append_png_plot_paths(plot_paths, boot_files, out_dir)
+        k_samples = _bootstrap_k_samples(res)
+        if k_samples.shape[0] > 1:
+            k_names = ["K"] if res.model.n_logk == 1 else ["K1", "K2"]
+            boot_files = plot_bootstrap_hist(k_samples, k_names, model_dir)
+            _append_png_plot_paths(plot_paths, boot_files, out_dir)
 
     return plot_paths, plot_labels
 
 
-def _collect_plot_paths(
-    res: FitResultLike,
-    model_name: str,
-    ds_label: str,
-    out_dir: Path,
-    dataset_dir_token: Optional[str] = None,
-) -> List[str]:
-    """Compatibility wrapper returning only relative PNG paths."""
-    plot_paths, _ = _collect_plot_artifacts(
-        res,
-        model_name,
-        ds_label,
-        out_dir,
-        dataset_dir_token,
-    )
-    return plot_paths
-
-
-def _bootstrap_k_samples(res: FitResultLike) -> np.ndarray:
+def _bootstrap_k_samples(res: FitResult) -> np.ndarray:
     # Return finite bootstrap K samples (linear scale) for warnings and summary.
-    if res.bootstrap is None or res.model.n_logk == 0 or res.bootstrap.param_samples.size == 0:
+    if (
+        res.bootstrap is None
+        or res.model.n_logk == 0
+        or not _bootstrap_samples_reportable(res.bootstrap)
+    ):
         return np.full((0, res.model.n_logk), np.nan)
     k_samples = _safe_pow10(res.bootstrap.param_samples[:, : res.model.n_logk])
     return _filter_finite_rows(k_samples)
 
 
-def _bootstrap_logk_samples(res: FitResultLike) -> np.ndarray:
+def _bootstrap_logk_samples(res: FitResult) -> np.ndarray:
     # Return finite bootstrap logK samples for SE reporting.
     if (
         res.bootstrap is None
         or res.model.n_logk == 0
-        or not getattr(res.bootstrap, "ci_valid", True)
+        or not _bootstrap_samples_reportable(res.bootstrap)
     ):
         return np.full((0, res.model.n_logk), np.nan)
-    samples = getattr(res.bootstrap, "logk_samples", np.full((0, res.model.n_logk), np.nan))
-    if samples.size == 0:
-        return np.full((0, res.model.n_logk), np.nan)
-    return _filter_finite_rows(samples)
+    return res.bootstrap.param_samples[:, : res.model.n_logk]
 
 
-def _bootstrap_logk_se_text(res: FitResultLike) -> str:
+def _bootstrap_logk_se_text(res: FitResult) -> str:
     # Format bootstrap SE in log10(K) space.
     samples = _bootstrap_logk_samples(res)
     if samples.shape[0] <= 1:
@@ -363,22 +362,16 @@ def _bootstrap_logk_se_text(res: FitResultLike) -> str:
     return ";".join(f"{value:.6g}" for value in se_vals)
 
 
-def _bootstrap_k_ci(res: FitResultLike) -> Tuple[np.ndarray, np.ndarray]:
+def _bootstrap_k_ci(res: FitResult) -> Tuple[np.ndarray, np.ndarray]:
     # Return selected bootstrap CI in linear K space.
     if (
         res.bootstrap is None
         or res.model.n_logk == 0
-        or not getattr(res.bootstrap, "ci_valid", True)
+        or not res.bootstrap.ci_valid
     ):
         return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
-    low_log = np.asarray(
-        getattr(res.bootstrap, "ci_low", np.full((res.model.n_logk,), np.nan)),
-        dtype=float,
-    )
-    high_log = np.asarray(
-        getattr(res.bootstrap, "ci_high", np.full((res.model.n_logk,), np.nan)),
-        dtype=float,
-    )
+    low_log = np.asarray(res.bootstrap.ci_low, dtype=float)
+    high_log = np.asarray(res.bootstrap.ci_high, dtype=float)
     if low_log.shape != (res.model.n_logk,) or high_log.shape != (res.model.n_logk,):
         return np.full((res.model.n_logk,), np.nan), np.full((res.model.n_logk,), np.nan)
     return _safe_pow10(low_log), _safe_pow10(high_log)
@@ -415,13 +408,13 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
     return "; ".join(intervals)
 
 
-def _logk_bound_warnings(res: FitResultLike) -> List[str]:
-    if res.model.n_logk == 0 or not hasattr(res, "params"):
+def _logk_bound_warnings(res: FitResult) -> List[str]:
+    if res.model.n_logk == 0:
         return []
     # Compare against the bounds the fit actually used; when they are unknown
     # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
     # valid estimate such as K=1 or K=1e12 would be misleading.
-    bounds = getattr(res, "logk_bounds", None)
+    bounds = res.logk_bounds
     if bounds is None:
         return []
     low, high = float(bounds[0]), float(bounds[1])
@@ -438,11 +431,9 @@ def _logk_bound_warnings(res: FitResultLike) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
+def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, object]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
-        return None
-    if not hasattr(res, "species"):
         return None
     solver_stats = _accumulate_solver_stats(res.species)
     if solver_stats is None:
@@ -457,12 +448,12 @@ def _solver_stats_for_result(res: FitResultLike) -> Optional[Dict[str, object]]:
 
 def _build_model_warnings(
     args: argparse.Namespace,
-    res: FitResultLike,
+    res: FitResult,
     solver_stats: Optional[Dict[str, object]],
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
-    datasets = getattr(res, "datasets", [])
+    datasets = res.datasets
 
     dropped_peaks = _format_dropped_peaks(datasets)
     if dropped_peaks != "None":
@@ -473,15 +464,15 @@ def _build_model_warnings(
         warnings.append(f"Dropped rows with missing required concentrations: {dropped_rows}")
 
     if not np.isfinite(res.bic):
-        if getattr(res, "n", 0) <= getattr(res, "p", 0) + 1:
+        if res.n <= res.p + 1:
             warnings.append(
                 "BIC/AICc unavailable: finite observations are not greater than fitted parameters plus variance"
             )
-        elif np.isfinite(getattr(res, "rss", np.nan)) and res.rss <= 0:
+        elif np.isfinite(res.rss) and res.rss <= 0:
             warnings.append("BIC/AICc unavailable: residual variance is zero")
         else:
             warnings.append("BIC/AICc unavailable for this fit")
-    elif not np.isfinite(getattr(res, "aicc", float("nan"))):
+    elif not np.isfinite(res.aicc):
         warnings.append(
             "AICc unavailable: too few observations for the small-sample correction; BIC is still reported"
         )
@@ -494,17 +485,17 @@ def _build_model_warnings(
             warnings.append("bootstrap CI too wide")
 
     if res.bootstrap is not None:
-        n_boot = int(getattr(res.bootstrap, "n_boot", 0))
-        n_success = int(getattr(res.bootstrap, "n_success", 0))
+        n_boot = int(res.bootstrap.n_boot)
+        n_success = int(res.bootstrap.n_success)
         if n_boot > 0:
             n_fail = n_boot - n_success
             if n_fail > 0:
                 warnings.append(f"bootstrap failures: {n_fail} of {n_boot} iterations")
-        if not getattr(res.bootstrap, "ci_valid", True):
-            ci_message = str(getattr(res.bootstrap, "ci_message", "")).strip()
+        if not res.bootstrap.ci_valid:
+            ci_message = str(res.bootstrap.ci_message).strip()
             warnings.append(ci_message or "bootstrap confidence interval is unavailable")
 
-    penalty_count = int(getattr(res, "penalty_count", 0))
+    penalty_count = int(res.penalty_count)
     if penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {penalty_count}")
 
@@ -514,7 +505,7 @@ def _build_model_warnings(
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
-    for ds, species in zip(datasets, getattr(res, "species", [])):
+    for ds, species in zip(datasets, res.species):
         stats = species.solver_stats
         if stats is None:
             continue
@@ -529,9 +520,9 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
     # Build stats block for report tables.
-    r2_per_peak = getattr(res, "r2_per_peak", [])
+    r2_per_peak = res.r2_per_peak
     r2_per_peak_text = (
         ";".join(f"{value:.6g}" for value in r2_per_peak)
         if r2_per_peak
@@ -547,24 +538,17 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
         "penalty_events": str(res.penalty_count),
     }
-    for attr in ("n", "p", "dof", "jacobian_rank"):
-        value = getattr(res, attr, None)
-        if value is not None:
-            stats_base[attr] = str(value)
-    jacobian_condition = getattr(res, "jacobian_condition", None)
-    if jacobian_condition is not None:
-        stats_base["jacobian_condition"] = f"{float(jacobian_condition):.6g}"
-    jacobian_logk_sensitivity = getattr(res, "jacobian_logk_sensitivity", None)
-    if jacobian_logk_sensitivity is not None and np.isfinite(jacobian_logk_sensitivity):
-        stats_base["jacobian_logk_sensitivity"] = f"{float(jacobian_logk_sensitivity):.6g}"
+    stats_base["n"] = str(res.n)
+    stats_base["p"] = str(res.p)
+    stats_base["dof"] = str(res.dof)
+    stats_base["jacobian_rank"] = str(res.jacobian_rank)
+    stats_base["jacobian_condition"] = f"{float(res.jacobian_condition):.6g}"
+    if np.isfinite(res.jacobian_logk_sensitivity):
+        stats_base["jacobian_logk_sensitivity"] = f"{float(res.jacobian_logk_sensitivity):.6g}"
     if res.bootstrap is not None:
-        n_success = getattr(res.bootstrap, "n_success", None)
-        n_boot = getattr(res.bootstrap, "n_boot", None)
-        if n_success is not None and n_boot is not None:
-            stats_base["bootstrap_success"] = f"{n_success} / {n_boot}"
-        ci_method_used = getattr(res.bootstrap, "ci_method_used", None)
-        if ci_method_used:
-            stats_base["bootstrap_ci_method"] = str(ci_method_used)
+        stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
+        if res.bootstrap.ci_method_used:
+            stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
     if solver_stats is not None:
         stats_base.update(
             {
@@ -574,7 +558,7 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
                 "solver_method": str(solver_stats["solver_method"]),
             }
         )
-    diagnostics = getattr(res, "residual_diagnostics", {})
+    diagnostics = res.residual_diagnostics
     if diagnostics:
         if "residual_n" in diagnostics:
             stats_base["residual_n"] = f"{diagnostics['residual_n']:.0f}"
@@ -588,7 +572,7 @@ def _build_stats_dict(res: FitResultLike, solver_stats: Optional[Dict[str, objec
 
 
 def _build_summary_row(
-    res: FitResultLike,
+    res: FitResult,
     ds_label: str,
     display_name: str,
     warnings: Optional[Sequence[str]] = None,
@@ -635,7 +619,7 @@ def _build_model_entry(
     args: argparse.Namespace,
     key: str,
     model_name: str,
-    res: FitResultLike,
+    res: FitResult,
     out_dir: Path,
     display_model_name: Callable[[str], str],
     dataset_dir_token: Optional[str] = None,
@@ -669,7 +653,7 @@ def _build_model_entry(
 def build_report_artifacts(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResultLike]],
+    results_by_key: Dict[str, Dict[str, FitResult]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     out_dir: Path,
     display_model_name: Callable[[str], str],
@@ -681,7 +665,7 @@ def build_report_artifacts(
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
+        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         for model_name, message in failures:
             report_warnings.append(
@@ -706,7 +690,7 @@ def build_report_artifacts(
     return summary_rows, model_entries, report_warnings
 
 
-def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> List[Dict[str, str]]:
+def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> List[Dict[str, str]]:
     # Shared source for both structured methods sections and plain-text methods summary.
     sections: List[Dict[str, str]] = []
     # K is reported in M⁻¹ (molar inputs).
@@ -840,9 +824,11 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
         f"Each pseudo-dataset was fitted from the perturbed and full-data-optimum starts; a draw was "
         f"treated as censored if a non-identifiable solution was competitive within the "
         f"{BOOTSTRAP_COMPETITIVE_CONFIDENCE:.0%} profile-likelihood RSS window. "
-        f"A confidence interval was reported only when at least {MIN_BOOTSTRAP_CI_SUCCESSES} refits were "
-        "requested and every requested pseudo-dataset yielded an uncensored acceptable refit; otherwise "
-        "the interval and bootstrap-derived standard errors were reported as unavailable. "
+        f"Raw-distribution standard errors and diagnostic artifacts were reported only when at least "
+        f"{MIN_BOOTSTRAP_CI_SUCCESSES} refits were requested and every requested pseudo-dataset yielded "
+        "an uncensored acceptable refit; otherwise they were reported as unavailable. A confidence "
+        "interval additionally required the selected interval method to succeed, so a BCa-only failure "
+        "left complete raw-distribution summaries available while the interval remained unavailable. "
         f"{ci_desc}"
         if args.bootstrap > 0
         else "Bootstrap uncertainty was not evaluated in this analysis."
@@ -857,14 +843,14 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     return sections
 
 
-def build_methods_text(args: argparse.Namespace, datasets: Sequence[DatasetLike]) -> str:
+def build_methods_text(args: argparse.Namespace, datasets: Sequence[Dataset]) -> str:
     # Flatten structured methods sections into one text block.
     sections = _compose_methods_sections(args, datasets)
     return " ".join(section["content"] for section in sections)
 
 
 def build_methods_sections(
-    args: argparse.Namespace, datasets: Sequence[DatasetLike]
+    args: argparse.Namespace, datasets: Sequence[Dataset]
 ) -> List[Dict[str, str]]:
     """Return structured methods as list of {title, content} dicts for detailed HTML reporting."""
     return _compose_methods_sections(args, datasets)
@@ -873,7 +859,7 @@ def build_methods_sections(
 def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
-    results_by_key: Dict[str, Dict[str, FitResultLike]],
+    results_by_key: Dict[str, Dict[str, FitResult]],
     failures_by_key: Dict[str, List[Tuple[str, str]]],
     display_model_name: Callable[[str], str],
 ) -> Tuple[List[str], List[DecisionEntry]]:
@@ -882,7 +868,7 @@ def build_decisions(
     decision_entries: List[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = cast(Dict[str, FitResultLike], results_by_key.get(key, {}))
+        model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
         failures = failures_by_key.get(key, [])
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
         decisions.append(f"Dataset: {key}")
@@ -922,8 +908,8 @@ def build_decisions(
             if np.isfinite(delta_bic) and delta_bic < 2.0:
                 decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
-        if best.bootstrap is not None and not getattr(best.bootstrap, "ci_valid", True):
-            ci_message = str(getattr(best.bootstrap, "ci_message", "")).strip()
+        if best.bootstrap is not None and not best.bootstrap.ci_valid:
+            ci_message = str(best.bootstrap.ci_message).strip()
             warning = ci_message or "Bootstrap uncertainty is unavailable for the selected model."
             decisions.append(f"- {warning}")
             reasons.append(warning)

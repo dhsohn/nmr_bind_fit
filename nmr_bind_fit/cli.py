@@ -13,8 +13,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from .fit import fit_models
-from .io import load_datasets
+from .fit import FitResult, fit_models
+from .io import Dataset, load_datasets
 from .report import write_decision_txt, write_report_html, write_summary_csv
 from .report_pipeline import (
     build_decisions,
@@ -22,7 +22,6 @@ from .report_pipeline import (
     build_methods_text,
     build_report_artifacts,
 )
-from .types import DatasetLike, FitResultLike
 
 MODEL_LABELS = {
     "11": "H : G = 1 : 1",
@@ -95,11 +94,17 @@ def _resolve_inputs(patterns: list[str]) -> list[Path]:
     resolved_paths: list[Path] = []
 
     for pattern in patterns:
-        matches = sorted(glob.glob(pattern))
-        candidates = [Path(match) for match in matches] or [Path(pattern)]
-        for path in candidates:
-            if not path.exists():
+        literal = Path(pattern)
+        if literal.exists():
+            # An input that names an existing path is used verbatim, so a
+            # filename containing glob metacharacters is never silently replaced
+            # by a different file the pattern would otherwise match.
+            candidates = [literal]
+        else:
+            candidates = [Path(match) for match in sorted(glob.glob(pattern))]
+            if not candidates:
                 raise FileNotFoundError(f"Input file or pattern not found: {pattern}")
+        for path in candidates:
             if not path.is_file():
                 raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
@@ -141,7 +146,7 @@ def _reserve_output_dir(paths: list[Path]) -> Path:
             suffix += 1
 
 
-def _build_dataset_labels(datasets: Sequence[DatasetLike]) -> dict[int, str]:
+def _build_dataset_labels(datasets: Sequence[Dataset]) -> dict[int, str]:
     names = [dataset.name for dataset in datasets]
     if len(names) == len(set(names)):
         return {id(dataset): dataset.name for dataset in datasets}
@@ -175,13 +180,13 @@ def _resolve_logk_config(
 
 
 def _index_results(
-    results: Sequence[FitResultLike],
+    results: Sequence[FitResult],
     dataset_labels: dict[int, str],
 ) -> tuple[
-    dict[str, dict[str, FitResultLike]],
+    dict[str, dict[str, FitResult]],
     dict[str, list[tuple[str, str]]],
 ]:
-    results_by_key: dict[str, dict[str, FitResultLike]] = {}
+    results_by_key: dict[str, dict[str, FitResult]] = {}
     failures_by_key: dict[str, list[tuple[str, str]]] = {}
     for result in results:
         if len(result.datasets) > 1:

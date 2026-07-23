@@ -226,6 +226,20 @@ def test_resolve_inputs_accepts_literal_path_with_glob_characters(tmp_path):
     assert paths == [csv_path]
 
 
+def test_resolve_inputs_prefers_literal_path_over_glob_metacharacter_match(tmp_path):
+    # A filename containing glob metacharacters must resolve to itself, never to
+    # a different file the pattern happens to match, or the tool would silently
+    # analyze data the user did not request.
+    literal = tmp_path / "sample[1].csv"
+    decoy = tmp_path / "sample1.csv"
+    literal.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+    decoy.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
+
+    paths = _resolve_inputs([str(literal)])
+
+    assert paths == [literal]
+
+
 def test_run_fit_rejects_replicates_with_one_dataset(monkeypatch):
     args = SimpleNamespace(
         bootstrap=0,

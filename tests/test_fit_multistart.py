@@ -54,6 +54,12 @@ def _select_with_fake_optimizer(fit_with_initial_fn):
     )
 
 
+@pytest.mark.parametrize("replicates", [False, True])
+def test_fit_models_rejects_empty_dataset_list_consistently(replicates):
+    with pytest.raises(ValueError, match="At least one dataset is required"):
+        fit.fit_models([], ["11"], logk_starts=[4.0], replicates=replicates)
+
+
 def test_select_best_multistart_prefers_success_over_lower_rss_failure():
     call_count = {"n": 0}
 

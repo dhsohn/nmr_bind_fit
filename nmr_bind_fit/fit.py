@@ -43,6 +43,9 @@ class FitResult:
     n: int
     p: int
     dof: int
+    jacobian_rank: int
+    jacobian_condition: float
+    jacobian_logk_sensitivity: float
     y_pred: List[np.ndarray]
     species: List
     residuals: List[np.ndarray]
@@ -50,9 +53,6 @@ class FitResult:
     bootstrap: Optional[BootstrapResult]
     penalty_count: int
     logk_bounds: Optional[Tuple[float, float]] = None
-    jacobian_rank: int = 0
-    jacobian_condition: float = float("inf")
-    jacobian_logk_sensitivity: float = float("nan")
 
 
 class ModelFitError(RuntimeError):
@@ -69,15 +69,8 @@ def _residual_penalty_scale(y: np.ndarray) -> float:
         return 1.0
     scale = float(np.std(finite))
     if not np.isfinite(scale) or scale <= 0:
-        q75, q25 = np.percentile(finite, [75.0, 25.0])
-        scale = float((q75 - q25) / 1.349)
-    if not np.isfinite(scale) or scale <= 0:
-        span = float(np.max(finite) - np.min(finite))
-        scale = span
-    if not np.isfinite(scale) or scale <= 0:
+        # Degenerate constant data has no spread; fall back to its magnitude.
         scale = float(np.max(np.abs(finite))) * 1e-2
-    if not np.isfinite(scale) or scale <= 0:
-        scale = 1e-3
     return float(max(scale * 8.0, 1e-3))
 
 

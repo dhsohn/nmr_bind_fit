@@ -14,13 +14,42 @@ from nmr_bind_fit.report_pipeline import (
 )
 
 
+def _result(**overrides):
+    # A complete FitResult-shaped stand-in; override only what a test exercises.
+    base = dict(
+        model=SimpleNamespace(name="11", n_logk=1),
+        datasets=[],
+        params=np.array([2.0, 7.0, 7.5], dtype=float),
+        param_names=["logK", "H", "HG"],
+        bootstrap=None,
+        r2=0.9,
+        r2_per_peak=[0.9],
+        rss=1.0,
+        rmse=0.5,
+        bic=10.0,
+        aicc=11.0,
+        penalty_count=0,
+        species=[],
+        residual_diagnostics={},
+        n=10,
+        p=3,
+        dof=7,
+        jacobian_rank=3,
+        jacobian_condition=100.0,
+        jacobian_logk_sensitivity=0.5,
+        logk_bounds=None,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 def test_build_decisions_uses_provisional_language():
     args = argparse.Namespace(bootstrap_ci_width=None)
     ordered_keys = ["dataset_a"]
     results_by_key = {
         "dataset_a": {
-            "11": SimpleNamespace(model=SimpleNamespace(name="11", n_logk=1), bic=10.0, bootstrap=None),
-            "12": SimpleNamespace(model=SimpleNamespace(name="12", n_logk=2), bic=10.9, bootstrap=None),
+            "11": _result(model=SimpleNamespace(name="11", n_logk=1), bic=10.0),
+            "12": _result(model=SimpleNamespace(name="12", n_logk=2), bic=10.9),
         }
     }
     failures_by_key = {}
@@ -66,12 +95,14 @@ def test_build_decisions_uses_fit_failed_wording_for_exclusions():
 
 def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
     args = argparse.Namespace(bootstrap_ci_width=None)
-    result = SimpleNamespace(
-        model=SimpleNamespace(name="11", n_logk=1),
+    result = _result(
         bic=10.0,
         bootstrap=SimpleNamespace(
             ci_valid=False,
             ci_message="Bootstrap uncertainty unavailable: 1/1000 refits succeeded.",
+            n_boot=1000,
+            n_success=1,
+            ci_method_used="unavailable",
         ),
     )
 
@@ -147,6 +178,9 @@ def test_build_methods_sections_mentions_bca_when_selected():
     assert "95% profile-likelihood RSS window" in uq_section["content"]
     assert "at least 20 refits were requested" in uq_section["content"]
     assert "every requested pseudo-dataset yielded an uncensored acceptable refit" in uq_section["content"]
+    assert "selected interval method to succeed" in uq_section["content"]
+    assert "BCa-only failure" in uq_section["content"]
+    assert "complete raw-distribution summaries available" in uq_section["content"]
 
 
 def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
@@ -160,6 +194,7 @@ def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
         ci_low_bca=np.array([1.2], dtype=float),
         ci_high_bca=np.array([2.8], dtype=float),
         ci_method="bca",
+        ci_valid=True,
         n_success=3,
         n_boot=3,
     )
@@ -193,6 +228,7 @@ def test_build_summary_row_labels_sequential_k_values_and_ci():
         ci_low_bca=np.array([np.nan, np.nan], dtype=float),
         ci_high_bca=np.array([np.nan, np.nan], dtype=float),
         ci_method="percentile",
+        ci_valid=True,
         n_success=2,
         n_boot=2,
     )
@@ -299,7 +335,7 @@ def test_build_decisions_excludes_nonfinite_bic_from_ranking():
     ordered_keys = ["dataset_a"]
     results_by_key = {
         "dataset_a": {
-            "11": SimpleNamespace(model=SimpleNamespace(name="11", n_logk=1), bic=float("nan"), bootstrap=None),
+            "11": _result(bic=float("nan")),
         }
     }
 

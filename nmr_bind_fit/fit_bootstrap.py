@@ -16,9 +16,6 @@ from .models import ModelSpec
 MIN_BOOTSTRAP_CI_SUCCESSES = 20
 MIN_BOOTSTRAP_CI_SUCCESS_RATE = 1.0
 BOOTSTRAP_COMPETITIVE_CONFIDENCE = 0.95
-# Backward-compatible name retained for callers introduced on main.  The
-# effective requirement is stricter than this floor for n_boot > 25.
-MIN_BOOTSTRAP_CI_SAMPLES = MIN_BOOTSTRAP_CI_SUCCESSES
 
 
 @dataclass
@@ -32,12 +29,11 @@ class BootstrapResult:
     ci_low_bca: np.ndarray
     ci_high_bca: np.ndarray
     ci_method: str
+    ci_method_used: str
+    ci_valid: bool
+    ci_message: str
     n_success: int
     n_boot: int
-    ci_warning: str = ""
-    ci_method_used: str = ""
-    ci_valid: bool = True
-    ci_message: str = ""
 
 
 def _bca_ci(
@@ -158,7 +154,7 @@ def _residual_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -185,7 +181,7 @@ def _parametric_bootstrap(
         y=y_boot,
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -203,7 +199,7 @@ def _points_bootstrap(
         y=ds.y[idx],
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -232,7 +228,7 @@ def _delete_dataset_row(ds: Dataset, row: int) -> Dataset:
         y=np.delete(ds.y, row, axis=0),
         y_cols=ds.y_cols,
         dropped_peaks=ds.dropped_peaks,
-        dropped_rows=getattr(ds, "dropped_rows", 0),
+        dropped_rows=ds.dropped_rows,
     )
 
 
@@ -532,15 +528,6 @@ def bootstrap_params(
         ci_low = np.full((model.n_logk,), np.nan)
         ci_high = np.full((model.n_logk,), np.nan)
 
-    # Preserve the legacy warning field while ci_valid/ci_message provide the
-    # structured contract used by current reporting code.
-    if ci_valid:
-        ci_warning = ""
-    elif model.n_logk > 0:
-        ci_warning = f"Bootstrap CI omitted: {ci_message}"
-    else:
-        ci_warning = ci_message
-
     return BootstrapResult(
         param_samples=samples,
         logk_samples=logk_samples,
@@ -556,5 +543,4 @@ def bootstrap_params(
         ci_message=ci_message,
         n_success=n_success,
         n_boot=n_boot,
-        ci_warning=ci_warning,
     )

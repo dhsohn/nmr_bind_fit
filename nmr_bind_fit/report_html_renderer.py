@@ -578,7 +578,7 @@ def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: 
     plots_html = _render_plot_grid(
         entry.plots,
         fig_counter,
-        getattr(entry, "plot_labels", None),
+        entry.plot_labels,
     )
 
     display_title = f"{html.escape(entry.model)}"
