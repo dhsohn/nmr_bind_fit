@@ -94,11 +94,17 @@ def _resolve_inputs(patterns: list[str]) -> list[Path]:
     resolved_paths: list[Path] = []
 
     for pattern in patterns:
-        matches = sorted(glob.glob(pattern))
-        candidates = [Path(match) for match in matches] or [Path(pattern)]
-        for path in candidates:
-            if not path.exists():
+        literal = Path(pattern)
+        if literal.exists():
+            # An input that names an existing path is used verbatim, so a
+            # filename containing glob metacharacters is never silently replaced
+            # by a different file the pattern would otherwise match.
+            candidates = [literal]
+        else:
+            candidates = [Path(match) for match in sorted(glob.glob(pattern))]
+            if not candidates:
                 raise FileNotFoundError(f"Input file or pattern not found: {pattern}")
+        for path in candidates:
             if not path.is_file():
                 raise ValueError(f"Input path is not a regular file: {path}")
             paths.append(path)
