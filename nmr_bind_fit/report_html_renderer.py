@@ -9,12 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-# Warnings already reach the page through the per-model warning boxes, and an
-# excluded model's reason through the analysis warnings block, so the column is
-# not repeated in the comparison table. It stays in summary.csv, which has no
-# other place to carry them.
-_COLS_OMITTED_FROM_COMPARISON = {"Notes"}
-
 _NUMERIC_COLS = {
     "Binding constant",
     "Binding constant (M⁻¹)",
@@ -207,9 +201,7 @@ def _render_warnings_block(warnings: Optional[Sequence[str]]) -> str:
 def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: Dict[str, str]) -> str:
     if not summary_rows:
         return ""
-    headers = [
-        h for h in summary_rows[0].keys() if h not in _COLS_OMITTED_FROM_COMPARISON
-    ]
+    headers = list(summary_rows[0].keys())
     thead = "".join(
         f'<th{_cell_class(h)}>{html.escape(h)}</th>' for h in headers
     )

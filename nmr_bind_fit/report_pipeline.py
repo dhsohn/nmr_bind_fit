@@ -35,7 +35,6 @@ SUMMARY_LABELS = {
     "R2": "R² (mean)",
     "BIC": "BIC",
     "AICc": "AICc",
-    "notes": "Notes",
 }
 
 LOGK_BOUND_ATOL = 1e-7
@@ -566,7 +565,6 @@ def _build_summary_row(
     res: FitResult,
     ds_label: str,
     display_name: str,
-    warnings: Optional[Sequence[str]] = None,
 ) -> Dict[str, str]:
     # Build one row for summary.csv.
     logk_vals = res.params[: res.model.n_logk]
@@ -585,12 +583,11 @@ def _build_summary_row(
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
-        "notes": "; ".join(str(warning) for warning in (warnings or [])),
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
 
-def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -> Dict[str, str]:
+def _build_failure_summary_row(ds_label: str, display_name: str) -> Dict[str, str]:
     # Keep failed candidates visible in summary.csv for auditability.
     summary_base = {
         "dataset": ds_label,
@@ -601,7 +598,6 @@ def _build_failure_summary_row(ds_label: str, display_name: str, message: str) -
         "R2": "N/A",
         "BIC": "N/A",
         "AICc": "N/A",
-        "notes": f"fit failed: {message}",
     }
     return {_label_summary_key(k): v for k, v in summary_base.items()}
 
@@ -637,7 +633,7 @@ def _build_model_entry(
         warnings=warnings,
         plot_labels=plot_labels,
     )
-    summary_row = _build_summary_row(res, key, display_name, warnings)
+    summary_row = _build_summary_row(res, key, display_name)
     return model_entry, summary_row
 
 
@@ -662,7 +658,7 @@ def build_report_artifacts(
             report_warnings.append(
                 f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
             )
-            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name), message))
+            summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name)))
         if not model_map:
             continue
         for model_name, res in model_map.items():
@@ -851,43 +847,22 @@ def build_decisions(
     args: argparse.Namespace,
     ordered_keys: List[str],
     results_by_key: Dict[str, Dict[str, FitResult]],
-    failures_by_key: Dict[str, List[Tuple[str, str]]],
     display_model_name: Callable[[str], str],
-) -> Tuple[List[str], List[DecisionEntry]]:
-    # Build decision.txt lines and structured report decision entries.
-    decisions: List[str] = []
+) -> List[DecisionEntry]:
+    """Rank each dataset's candidates and record why the leader was chosen.
+
+    Datasets with no finitely ranked candidate yield no entry; the reason is
+    already reported through the warnings shown alongside them.
+    """
     decision_entries: List[DecisionEntry] = []
 
     for key in ordered_keys:
         model_map = cast(Dict[str, FitResult], results_by_key.get(key, {}))
-        failures = failures_by_key.get(key, [])
         bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
-        decisions.append(f"Dataset: {key}")
-        model_warning_lines: List[str] = []
-        for model_name, res in model_map.items():
-            model_warnings = _build_model_warnings(args, res, _solver_stats_for_result(res))
-            for warning in model_warnings:
-                model_warning_lines.append(f"- {display_model_name(model_name)}: {warning}")
-        if failures or model_warning_lines:
-            decisions.append("Warnings:")
-            for model_name, message in failures:
-                decisions.append(
-                    f"- excluded {display_model_name(model_name)} (fit failed: {message})"
-                )
-            decisions.extend(model_warning_lines)
         if not bic_sorted:
-            if model_map:
-                decisions.append("No model had a finite BIC for ranking; see warnings.")
-            else:
-                decisions.append("No successful model fits; see warnings.")
-            decisions.append("")
             continue
 
         best = bic_sorted[0]
-        best_display = display_model_name(best.model.name)
-        decisions.append(
-            f"Tentative working model among tested candidates: {best_display} (lowest BIC among candidates)"
-        )
         reasons = [
             f"Within the tested model set, this model gave the lowest Bayesian Information Criterion "
             f"(BIC={best.bic:.6g}). This ranking indicates relative support only and should be interpreted with "
@@ -895,15 +870,11 @@ def build_decisions(
         ]
         if len(bic_sorted) > 1:
             delta_bic = float(bic_sorted[1].bic - best.bic)
-            decisions.append(f"- delta BIC to next candidate: {delta_bic:.6g}")
             if np.isfinite(delta_bic) and delta_bic < 2.0:
-                decisions.append("- BIC separation is small; treat model selection as provisional")
                 reasons.append("BIC separation from the next candidate was small, so model discrimination is weak")
         if best.bootstrap is not None and not best.bootstrap.ci_valid:
             ci_message = str(best.bootstrap.ci_message).strip()
-            warning = ci_message or "Bootstrap uncertainty is unavailable for the selected model."
-            decisions.append(f"- {warning}")
-            reasons.append(warning)
+            reasons.append(ci_message or "Bootstrap uncertainty is unavailable for the selected model.")
         if args.bootstrap_ci_width is not None and best.bootstrap is not None and best.model.n_logk > 0:
             k_ci_low, k_ci_high = _bootstrap_k_ci(best)
             if k_ci_low.size > 0 and np.any(
@@ -911,15 +882,13 @@ def build_decisions(
                 & np.isfinite(k_ci_high)
                 & ((k_ci_high - k_ci_low) > args.bootstrap_ci_width)
             ):
-                decisions.append("- bootstrap CI too wide")
                 reasons.append("Bootstrap confidence interval width exceeds the specified threshold")
-        decisions.append("")
         decision_entries.append(
             DecisionEntry(
                 dataset=key,
-                recommended_model=best_display,
+                recommended_model=display_model_name(best.model.name),
                 reasons=reasons,
             )
         )
 
-    return decisions, decision_entries
+    return decision_entries

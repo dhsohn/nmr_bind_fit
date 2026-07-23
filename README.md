@@ -123,8 +123,7 @@ Synthetic examples are available in [examples/](examples/):
 The output directory is atomically created as `YYYYMMDD_HHMMSS_<input_name>` (or `..._replicates`), with an ordinal suffix if that name is already reserved, and contains:
 
 - `summary.csv` — model comparison table;
-- `decision.txt` — recommended provisional working model and diagnostics;
-- `report.html` — plots, methods summary, decision text, and model sections;
+- `report.html` — recommended provisional working model, plots, methods summary, and model sections;
 - `model_*/dataset_*/` — dataset-scoped model plots, bootstrap histograms, and correlation matrices when available.
 
 ## Flowchart
@@ -156,7 +155,7 @@ flowchart TD
     M --> N[Stats RSS RMSE BIC AICc]
     M --> O[Bootstrap resampling]
     M --> P[Plots isotherm residual fraction boot]
-    M --> Q[Outputs summary.csv report.html decision.txt]
+    M --> Q[Outputs summary.csv report.html]
 
     L1 --> Q
 ```

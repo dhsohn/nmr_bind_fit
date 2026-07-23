@@ -15,7 +15,7 @@ import numpy as np
 
 from .fit import FitResult, fit_models
 from .io import Dataset, load_datasets
-from .report import write_decision_txt, write_report_html, write_summary_csv
+from .report import write_report_html, write_summary_csv
 from .report_pipeline import (
     build_decisions,
     build_methods_sections,
@@ -269,15 +269,12 @@ def run_fit(args: argparse.Namespace) -> None:
 
     methods_text = build_methods_text(args, datasets)
     methods_sections = build_methods_sections(args, datasets)
-    decisions, decision_entries = build_decisions(
+    decision_entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key,
         display_model_name=_display_model_name,
     )
-
-    write_decision_txt(decisions, out_dir / "decision.txt")
 
     write_report_html(
         summary_rows,

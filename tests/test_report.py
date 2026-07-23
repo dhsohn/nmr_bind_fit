@@ -453,21 +453,18 @@ def test_build_decisions_uses_provisional_language():
             "12": _result(model=SimpleNamespace(name="12", n_logk=2), bic=10.9),
         }
     }
-    failures_by_key = {}
-
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key,
         display_model_name=lambda name: name,
     )
 
-    assert any("Tentative working model among tested candidates" in line for line in decisions)
-    assert any("delta BIC to next candidate" in line for line in decisions)
-    assert any("model selection as provisional" in line for line in decisions)
     assert len(entries) == 1
+    assert entries[0].recommended_model == "11"
     assert "relative support only" in entries[0].reasons[0]
+    # The two candidates are 0.9 apart, so discrimination is flagged as weak.
+    assert any("discrimination is weak" in reason for reason in entries[0].reasons)
 
 
 def test_decision_paragraphs_use_provisional_working_model_language():
@@ -478,20 +475,6 @@ def test_decision_paragraphs_use_provisional_working_model_language():
     assert len(paragraphs) == 1
     assert "provisional working model" in paragraphs[0]
     assert "best supported" not in paragraphs[0]
-
-
-def test_build_decisions_uses_fit_failed_wording_for_exclusions():
-    args = argparse.Namespace(bootstrap_ci_width=None)
-    decisions, entries = build_decisions(
-        args,
-        ordered_keys=["dataset_a"],
-        results_by_key={"dataset_a": {}},
-        failures_by_key={"dataset_a": [("11", "ModelFitError: forced model crash")]},
-        display_model_name=lambda name: name,
-    )
-
-    assert len(entries) == 0
-    assert any("fit failed: ModelFitError: forced model crash" in line for line in decisions)
 
 
 def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
@@ -507,15 +490,13 @@ def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
         ),
     )
 
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys=["dataset_a"],
         results_by_key={"dataset_a": {"11": result}},
-        failures_by_key={},
         display_model_name=lambda name: name,
     )
 
-    assert any("1/1000 refits succeeded" in line for line in decisions)
     assert any("1/1000 refits succeeded" in reason for reason in entries[0].reasons)
 
 
@@ -531,7 +512,7 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
 
     assert len(summary_rows) == 1
     assert summary_rows[0]["Status"] == "failed"
-    assert "fit failed: ModelFitError: forced model crash" in summary_rows[0]["Notes"]
+    assert "Notes" not in summary_rows[0]
     assert model_entries == []
     assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]
 
@@ -666,14 +647,12 @@ def _pinned_k_result(logk_bounds):
     )
 
 
-def test_bound_pinned_k_is_reported_in_warnings_and_summary_notes():
+def test_bound_pinned_k_is_reported_in_warnings():
     res = _pinned_k_result((0.0, 12.0))
 
     warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
-    row = _build_summary_row(res, "sample", "11", warnings)
 
     assert any("upper log10(K) bound" in warning for warning in warnings)
-    assert "upper log10(K) bound" in row["Notes"]
 
 
 def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
@@ -716,11 +695,9 @@ def test_aicc_only_unavailable_is_explained_in_warnings():
     )
 
     warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
-    row = _build_summary_row(res, "sample", "11", warnings)
 
     assert any("AICc unavailable: too few observations" in warning for warning in warnings)
     assert not any("BIC/AICc unavailable" in warning for warning in warnings)
-    assert "AICc unavailable" in row["Notes"]
 
 
 def test_build_decisions_excludes_nonfinite_bic_from_ranking():
@@ -732,13 +709,13 @@ def test_build_decisions_excludes_nonfinite_bic_from_ranking():
         }
     }
 
-    decisions, entries = build_decisions(
+    entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key={},
         display_model_name=lambda name: name,
     )
 
+    # No finitely ranked candidate yields no recommendation; the reason reaches
+    # the reader through the warnings shown alongside the dataset.
     assert entries == []
-    assert any("No model had a finite BIC" in line for line in decisions)

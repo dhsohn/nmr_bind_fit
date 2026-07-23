@@ -71,6 +71,13 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Removed
 
+- Removed `decision.txt` from the output directory. The recommended provisional working model
+  and the reasons behind it are reported in the executive summary of `report.html`, which is
+  built from the same decision entries, so a run now produces `summary.csv`, `report.html` and
+  the per-model plot directories.
+- Removed the `Notes` column from `summary.csv`. Warnings are reported in `report.html`: a
+  model's own warnings in its model card, and an excluded model's reason in the analysis
+  warnings block.
 - Removed the optional `fit` positional command. Invoke `nmr_bind_fit --input ...`
   directly.
 - Removed the `--concentration-unit` flag, which only relabeled report text while the fit and `K` bounds used raw numeric values. Supply concentrations in molar (M) instead.

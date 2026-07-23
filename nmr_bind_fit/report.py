@@ -98,12 +98,6 @@ def write_summary_csv(rows: Sequence[Dict[str, str]], path: Path) -> None:
             writer.writerow({key: _spreadsheet_safe_cell(value) for key, value in row.items()})
 
 
-def write_decision_txt(decisions: Sequence[str], path: Path) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        for line in decisions:
-            f.write(line.rstrip() + "\n")
-
-
 def write_report_html(
     summary_rows: Sequence[Dict[str, str]],
     model_entries: Sequence[ModelEntry],
