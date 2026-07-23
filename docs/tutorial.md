@@ -43,7 +43,7 @@ PY
 ## 3. Run a single-file fit
 
 ```bash
-nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 0
+nmr_bind_fit --input examples/synthetic_11.csv
 ```
 
 This fits four candidate explanations to the same data:
@@ -60,22 +60,22 @@ The output directory is named with a timestamp and the input stem, for example `
 The most important outputs are:
 
 - `report.html`: human-readable report with the provisional working model, methods text, plots, tables, and warnings;
-- `model_*/dataset_*/`: dataset-scoped isotherm plots, residual plots, bound-fraction plots, and bootstrap histograms when available.
+- `model_*/dataset_*/`: dataset-scoped isotherm plots, residual plots, bound-fraction plots, and the parameter correlation matrix.
 
 The lowest finite-BIC model is reported as the provisional working model among tested candidates. It is not an automatic chemical truth claim.
 
-## 5. Add bootstrap uncertainty
+## 5. Read the reported uncertainty
 
-```bash
-nmr_bind_fit --input examples/synthetic_11.csv --bootstrap 200 --seed 1
-```
-
-For publication-facing runs, use more bootstrap iterations, for example `--bootstrap 1000`. Bootstrap intervals should be interpreted together with fit quality, saturation, spectral behavior, and model plausibility.
+Every successful fit reports a standard error for each parameter and a 95% confidence interval
+for each binding constant. The interval is computed in `log10 K` and shown in `K`, so it is
+asymmetric about `K`. Read it together with fit quality,
+saturation, spectral behavior, and model plausibility — a narrow interval on a poorly
+saturated titration still does not make the constant trustworthy.
 
 ## 6. Try the non-binding control example
 
 ```bash
-nmr_bind_fit --input examples/synthetic_nonbinding.csv --bootstrap 200 --seed 1
+nmr_bind_fit --input examples/synthetic_nonbinding.csv
 ```
 
 This example is useful for checking that a workflow includes a non-binding alternative rather than forcing a binding constant onto drift-like data.
@@ -98,7 +98,7 @@ Before accepting a binding model, check:
 - whether the titration reaches a saturation region;
 - whether the selected model is clearly separated from the next-best model by ΔBIC;
 - whether the non-binding model is competitive;
-- whether bootstrap confidence intervals are narrow enough to support the reported K;
+- whether the reported confidence intervals are narrow enough to support the reported K;
 - whether fitted δ values and stoichiometry are chemically plausible.
 
 The software provides model-comparison evidence and diagnostic warnings; final chemical interpretation remains the user's responsibility.

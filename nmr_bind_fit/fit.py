@@ -8,8 +8,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from .fit_bootstrap import BootstrapResult
-from .fit_bootstrap import bootstrap_params as _bootstrap_params_impl
 from .fit_criteria import information_criteria
 from .fit_optimizer import (
     MAX_JACOBIAN_CONDITION,
@@ -21,6 +19,7 @@ from .fit_optimizer import (
     select_best_multistart,
 )
 from .fit_optimizer import fit_with_initial as _optimizer_fit_with_initial
+from .fit_uncertainty import Uncertainty, parameter_uncertainty
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
 from .stats import residual_diagnostics as _residual_diagnostics_impl
@@ -50,7 +49,7 @@ class FitResult:
     species: List
     residuals: List[np.ndarray]
     residual_diagnostics: Dict[str, float]
-    bootstrap: Optional[BootstrapResult]
+    uncertainty: Optional[Uncertainty]
     penalty_count: int
     logk_bounds: Optional[Tuple[float, float]] = None
 
@@ -328,11 +327,7 @@ def _validate_fit_options(
     model_names: Sequence[str],
     logk_starts: Sequence[float],
     max_nfev: int,
-    bootstrap: int,
-    bootstrap_method: str,
-    bootstrap_ci_method: str,
     logk_bounds: Optional[Tuple[float, float]],
-    logk_jitter: float,
     solver_failure_mode: str,
 ) -> None:
     if not model_names:
@@ -342,20 +337,8 @@ def _validate_fit_options(
         raise ValueError("Unknown model names: " + ", ".join(unknown_models))
     if not isinstance(max_nfev, (int, np.integer)) or max_nfev <= 0:
         raise ValueError("max_nfev must be a positive integer")
-    if not isinstance(bootstrap, (int, np.integer)) or bootstrap < 0:
-        raise ValueError("bootstrap must be a non-negative integer")
-    if bootstrap_method not in {"residual", "points", "parametric"}:
-        raise ValueError("bootstrap_method must be one of: residual, points, parametric")
-    if bootstrap_ci_method not in {"percentile", "bca"}:
-        raise ValueError("bootstrap_ci_method must be one of: percentile, bca")
     if solver_failure_mode not in {"fail-fast", "continue"}:
         raise ValueError("solver_failure_mode must be one of: fail-fast, continue")
-    try:
-        jitter_value = float(logk_jitter)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("logk_jitter must be finite and non-negative") from exc
-    if not np.isfinite(jitter_value) or jitter_value < 0:
-        raise ValueError("logk_jitter must be finite and non-negative")
 
     binding_requested = any(MODEL_SPECS[name].n_logk > 0 for name in model_names)
     try:
@@ -432,7 +415,7 @@ def _failed_fit_result(
         species=species if species is not None else [],
         residuals=[],
         residual_diagnostics={},
-        bootstrap=None,
+        uncertainty=None,
         penalty_count=0,
         logk_bounds=logk_bounds,
     )
@@ -457,13 +440,7 @@ def _build_successful_fit_result(
     datasets: List[Dataset],
     best_params: np.ndarray,
     best_res: OptimizeResult,
-    bootstrap: int,
-    bootstrap_method: str,
-    bootstrap_ci_method: str,
-    seed: Optional[int],
     logk_bounds: Optional[Tuple[float, float]],
-    logk_jitter: float,
-    max_nfev: int,
     solver_failure_mode: str,
     compute_residual_diagnostics: bool,
 ) -> FitResult:
@@ -563,21 +540,7 @@ def _build_successful_fit_result(
                 include_durbin_watson=len(finite_residuals) == 1,
             )
 
-    bootstrap_result = None
-    if bootstrap > 0:
-        bootstrap_result = bootstrap_params(
-            best_params,
-            model,
-            datasets,
-            bootstrap,
-            bootstrap_method,
-            seed=seed,
-            logk_bounds=logk_bounds,
-            logk_jitter=logk_jitter,
-            ci_method=bootstrap_ci_method,
-            max_nfev=max_nfev,
-            solver_failure_mode=solver_failure_mode,
-        )
+    uncertainty = parameter_uncertainty(best_params, best_res, model.n_logk)
 
     return FitResult(
         model=model,
@@ -602,7 +565,7 @@ def _build_successful_fit_result(
         species=species_list,
         residuals=residuals,
         residual_diagnostics=diag,
-        bootstrap=bootstrap_result,
+        uncertainty=uncertainty,
         penalty_count=int(getattr(best_res, "penalty_count", 0)),
         logk_bounds=logk_bounds,
     )
@@ -613,12 +576,7 @@ def fit_model(
     model_name: str,
     logk_starts: Sequence[float],
     max_nfev: int = 5000,
-    bootstrap: int = 0,
-    bootstrap_method: str = "residual",
-    bootstrap_ci_method: str = "percentile",
-    seed: Optional[int] = None,
     logk_bounds: Optional[Tuple[float, float]] = None,
-    logk_jitter: float = 0.1,
     solver_failure_mode: str = "fail-fast",
     residual_diagnostics: bool = False,
 ) -> FitResult:
@@ -626,11 +584,7 @@ def fit_model(
         [model_name],
         logk_starts,
         max_nfev,
-        bootstrap,
-        bootstrap_method,
-        bootstrap_ci_method,
         logk_bounds,
-        logk_jitter,
         solver_failure_mode,
     )
     model = MODEL_SPECS[model_name]
@@ -680,51 +634,12 @@ def fit_model(
             datasets=datasets,
             best_params=best_params,
             best_res=best_res,
-            bootstrap=bootstrap,
-            bootstrap_method=bootstrap_method,
-            bootstrap_ci_method=bootstrap_ci_method,
-            seed=seed,
             logk_bounds=logk_bounds,
-            logk_jitter=logk_jitter,
-            max_nfev=max_nfev,
             solver_failure_mode=solver_failure_mode,
             compute_residual_diagnostics=residual_diagnostics,
         )
     except _NUMERIC_EXCEPTIONS as exc:
         raise ModelFitError(str(exc)) from exc
-
-
-def bootstrap_params(
-    params: np.ndarray,
-    model: ModelSpec,
-    datasets: List[Dataset],
-    n_boot: int,
-    method: str,
-    seed: Optional[int],
-    logk_bounds: Optional[Tuple[float, float]],
-    logk_jitter: float,
-    ci_method: str = "percentile",
-    max_nfev: int = 5000,
-    solver_failure_mode: str = "fail-fast",
-) -> BootstrapResult:
-    """Run bootstrap resampling using fit.py prediction and optimizer policies."""
-    return _bootstrap_params_impl(
-        params=params,
-        model=model,
-        datasets=datasets,
-        n_boot=n_boot,
-        method=method,
-        ci_method=ci_method,
-        seed=seed,
-        logk_bounds=logk_bounds,
-        logk_jitter=logk_jitter,
-        predict_all_fn=_predict_all,
-        fit_with_initial_fn=_fit_with_initial,
-        param_bounds_fn=param_bounds,
-        numeric_exceptions=_NUMERIC_EXCEPTIONS,
-        max_nfev=max_nfev,
-        solver_failure_mode=solver_failure_mode,
-    )
 
 
 def _exception_failure_result(
@@ -769,13 +684,8 @@ def fit_models(
     logk_starts: Sequence[float],
     replicates: bool = False,
     max_nfev: int = 5000,
-    bootstrap: int = 0,
-    bootstrap_method: str = "residual",
-    seed: Optional[int] = None,
     logk_bounds: Optional[Tuple[float, float]] = None,
-    logk_jitter: float = 0.1,
     solver_failure_mode: str = "fail-fast",
-    bootstrap_ci_method: str = "percentile",
     residual_diagnostics: bool = False,
 ) -> List[FitResult]:
     """Fit candidate models and return one :class:`FitResult` per fit job.
@@ -794,22 +704,17 @@ def fit_models(
             constants and dataset-specific chemical shifts. If False (default),
             fit each dataset independently.
         max_nfev: Maximum optimizer function evaluations per start.
-        bootstrap: Number of bootstrap refits for uncertainty; 0 disables it.
-        bootstrap_method: Resampling scheme: ``"residual"``, ``"points"``, or
-            ``"parametric"``.
-        seed: Seed for the bootstrap random generator (None for nondeterministic).
         logk_bounds: Optional ``(low, high)`` bounds on log10(K).
-        logk_jitter: Std. dev. of the log10(K) start perturbation per refit.
         solver_failure_mode: Per-point equilibrium-solver policy for 1:2/2:1
             models: ``"fail-fast"`` or ``"continue"``.
-        bootstrap_ci_method: Confidence-interval method: ``"percentile"`` or
-            ``"bca"``.
         residual_diagnostics: If True, compute informational residual
             diagnostics (Shapiro-Wilk, Durbin-Watson).
 
     Returns:
         One :class:`FitResult` per (dataset-group, model) job, in job order.
-        Check ``FitResult.success`` before using the fitted values.
+        Check ``FitResult.success`` before using the fitted values. Successful
+        fits carry asymptotic standard errors and log10(K) confidence intervals
+        in ``FitResult.uncertainty``.
 
     Raises:
         ValueError: If model names or fitting options are invalid.
@@ -820,11 +725,7 @@ def fit_models(
         model_names,
         logk_starts,
         max_nfev,
-        bootstrap,
-        bootstrap_method,
-        bootstrap_ci_method,
         logk_bounds,
-        logk_jitter,
         solver_failure_mode,
     )
     results = []
@@ -835,12 +736,7 @@ def fit_models(
                 model_name,
                 logk_starts,
                 max_nfev=max_nfev,
-                bootstrap=bootstrap,
-                bootstrap_method=bootstrap_method,
-                bootstrap_ci_method=bootstrap_ci_method,
-                seed=seed,
                 logk_bounds=logk_bounds,
-                logk_jitter=logk_jitter,
                 solver_failure_mode=solver_failure_mode,
                 residual_diagnostics=residual_diagnostics,
             )

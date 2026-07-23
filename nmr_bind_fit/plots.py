@@ -41,7 +41,6 @@ matplotlib.rcParams.update(
 _CLR_DATA = "#2b2d42"
 _CLR_FIT = "#d90429"
 _CLR_ZERO = "#94a3b8"
-_CLR_HIST = "#334155"
 
 
 def _peak_file_token(index: int) -> str:
@@ -194,38 +193,6 @@ def plot_residuals(
         peak_token = _peak_file_token(i + 1)
         png_path = out_dir / f"residual_{peak_token}.png"
         pdf_path = out_dir / f"residual_{peak_token}.pdf"
-        _save_figure(fig, png_path, pdf_path)
-        files.extend([png_path, pdf_path])
-    return files
-
-
-def plot_bootstrap_hist(
-    samples: np.ndarray,
-    names: List[str],
-    out_dir: Path,
-    title: str = "bootstrap K",
-) -> List[Path]:
-    # Draw bootstrap histograms for K (or K1/K2) samples.
-    out_dir.mkdir(parents=True, exist_ok=True)
-    files: List[Path] = []
-    if samples.size == 0:
-        return files
-    for i, name in enumerate(names):
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        ax.hist(samples[:, i], bins=25, color=_CLR_HIST, alpha=0.85,
-                edgecolor="white", linewidth=0.5)
-        if name == "K":
-            xlabel = r"$K$ (M$^{-1}$)"
-        elif name.startswith("K") and name[1:].isdigit():
-            xlabel = rf"$K_{name[1:]}$ (M$^{{-1}}$)"
-        else:
-            xlabel = f"{name} (M$^{{-1}}$)"
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Count")
-        _style_axes(ax)
-        fig.tight_layout()
-        png_path = out_dir / f"bootstrap_{name}.png"
-        pdf_path = out_dir / f"bootstrap_{name}.pdf"
         _save_figure(fig, png_path, pdf_path)
         files.extend([png_path, pdf_path])
     return files

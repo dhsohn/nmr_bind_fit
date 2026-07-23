@@ -44,7 +44,7 @@ Pull requests should keep the workflow reproducible and conservative. In particu
 Documentation should distinguish between:
 
 - statistical model ranking among tested candidates;
-- uncertainty estimates such as bootstrap confidence intervals;
+- uncertainty estimates such as standard errors and confidence intervals;
 - chemical plausibility checks that require user judgment, such as fast-exchange behavior, saturation, peak assignment, and feasible stoichiometry.
 
 ## AI-assisted contributions

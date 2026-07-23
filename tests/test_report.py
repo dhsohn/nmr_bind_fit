@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import List, Optional
 
 import numpy as np
-import pytest
 
 import nmr_bind_fit.report_pipeline as report_pipeline
 from nmr_bind_fit.io import Dataset
@@ -48,34 +47,16 @@ def _dataset(name: str, peak_names: Optional[List[str]] = None) -> Dataset:
 def _fit_result(
     ds: Dataset,
     *,
-    n_boot: int = 20,
-    n_success: Optional[int] = None,
-    ci_valid: bool = True,
-    ci_method_used: Optional[str] = None,
-    ci_message: Optional[str] = None,
+    with_uncertainty: bool = True,
 ) -> SimpleNamespace:
-    success_count = n_boot if n_success is None else n_success
-    offsets = np.linspace(-0.1, 0.1, success_count, dtype=float)
-    param_samples = np.column_stack(
-        [
-            2.0 + offsets,
-            7.0 + 0.2 * offsets,
-            7.2 - 0.1 * offsets,
-        ]
-    )
-    bootstrap = SimpleNamespace(
-        param_samples=param_samples,
-        logk_samples=param_samples[:, :1],
-        ci_low=np.array([1.8], dtype=float),
-        ci_high=np.array([2.2], dtype=float),
-        n_boot=n_boot,
-        n_success=success_count,
-        ci_valid=ci_valid,
-        ci_method_used=ci_method_used or ("percentile" if ci_valid else "unavailable"),
-        ci_message=ci_message if ci_message is not None else (
-            "" if ci_valid else "bootstrap CI requires more successful refits"
-        ),
-    )
+    uncertainty = None
+    if with_uncertainty:
+        uncertainty = SimpleNamespace(
+            param_se=np.array([0.05, 0.02, 0.03], dtype=float),
+            logk_ci_low=np.array([1.8], dtype=float),
+            logk_ci_high=np.array([2.2], dtype=float),
+            correlation=np.eye(3, dtype=float),
+        )
     return SimpleNamespace(
         model=MODEL_SPECS["11"],
         datasets=[ds],
@@ -83,7 +64,7 @@ def _fit_result(
         param_names=["logK", "delta_free", "delta_bound"],
         residuals=[np.zeros_like(ds.y)],
         species=[SimpleNamespace(solver_stats=None)],
-        bootstrap=bootstrap,
+        uncertainty=uncertainty,
         r2=0.99,
         r2_per_peak=[0.99],
         rss=0.01,
@@ -112,20 +93,13 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
         path.write_text(ds.name, encoding="utf-8")
         return [path]
 
-    def fake_bootstrap(samples, names, out_dir):
-        del samples, names
-        path = out_dir / "bootstrap_K.png"
-        path.write_text(str(out_dir), encoding="utf-8")
-        return [path]
-
     monkeypatch.setattr(report_pipeline, "plot_isotherms", fake_isotherms)
     monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
     monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", fake_bootstrap)
 
     keys = ["sample/a", "sample?a"]
     summary_rows, entries, warnings = report_pipeline.build_report_artifacts(
-        args=SimpleNamespace(bootstrap_ci_width=None),
+        args=SimpleNamespace(ci_width=None),
         ordered_keys=keys,
         results_by_key={key: {"11": _fit_result(ds)} for key, ds in zip(keys, datasets)},
         failures_by_key={},
@@ -137,13 +111,8 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
         tmp_path / next(path for path in entry.plots if "isotherm_" in path)
         for entry in entries
     ]
-    bootstraps = [
-        tmp_path / next(path for path in entry.plots if "bootstrap_" in path)
-        for entry in entries
-    ]
 
     assert isotherms[0] != isotherms[1]
-    assert bootstraps[0] != bootstraps[1]
     assert isotherms[0].read_text(encoding="utf-8") == "first"
     assert isotherms[1].read_text(encoding="utf-8") == "second"
     assert isotherms[0].relative_to(tmp_path).parts[0] == "model_11"
@@ -160,9 +129,7 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert not any("Jacobian" in label for label in entries[0].stats)
     # Counters that only matter on failure stay out of a clean card.
     assert "Optimization penalty events" not in entries[0].stats
-    assert entries[0].stats["Successful bootstrap refits"] == "20 / 20"
-    assert entries[0].stats["Bootstrap CI method used"] == "percentile"
-    assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0
+    assert float(entries[0].stats["Standard error (log10 K)"]) > 0.0
     assert all(np.isfinite(param.se) for param in entries[0].params)
     assert summary_rows[0]["95 % CI"] != "N/A"
     assert warnings == []
@@ -170,99 +137,7 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert set(entries[0].plot_labels.values()) == {"ppm_H1"}
 
 
-@pytest.mark.parametrize(("n_boot", "n_success"), [(20, 19), (19, 19)])
-def test_incomplete_or_too_small_bootstrap_withholds_raw_distribution_artifacts(
-    tmp_path,
-    monkeypatch,
-    n_boot,
-    n_success,
-):
-    ds = _dataset("sample")
-
-    def unexpected_bootstrap_plot(*args):
-        raise AssertionError("bootstrap histogram must not be generated")
-
-    monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", unexpected_bootstrap_plot)
-
-    message = "Bootstrap uncertainty unavailable: the raw sample is incomplete or too small."
-    summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
-        args=SimpleNamespace(bootstrap_ci_width=None),
-        ordered_keys=["sample"],
-        results_by_key={
-            "sample": {
-                "11": _fit_result(
-                    ds,
-                    n_boot=n_boot,
-                    n_success=n_success,
-                    ci_valid=False,
-                    ci_message=message,
-                )
-            }
-        },
-        failures_by_key={},
-        out_dir=tmp_path,
-        display_model_name=lambda name: name,
-    )
-
-    assert report_warnings == []
-    assert not any("bootstrap_" in path for path in entries[0].plots)
-    assert list(tmp_path.rglob("correlation.csv")) == []
-    assert entries[0].stats["Bootstrap SE (log10 K)"] == "N/A"
-    assert all(np.isnan(param.se) for param in entries[0].params)
-    assert summary_rows[0]["95 % CI"] == "N/A"
-    assert message in entries[0].warnings
-
-
-def test_bca_only_failure_keeps_complete_raw_distribution_artifacts(tmp_path, monkeypatch):
-    ds = _dataset("sample")
-
-    def fake_bootstrap(samples, names, out_dir):
-        assert samples.shape == (20, 1)
-        assert names == ["K"]
-        path = out_dir / "bootstrap_K.png"
-        path.write_text("complete distribution", encoding="utf-8")
-        return [path]
-
-    monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", fake_bootstrap)
-
-    message = "BCa CI unavailable: all delete-one jackknife refits must succeed."
-    summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
-        args=SimpleNamespace(bootstrap_ci_width=None),
-        ordered_keys=["sample"],
-        results_by_key={
-            "sample": {
-                "11": _fit_result(
-                    ds,
-                    ci_valid=False,
-                    ci_method_used="unavailable",
-                    ci_message=message,
-                )
-            }
-        },
-        failures_by_key={},
-        out_dir=tmp_path,
-        display_model_name=lambda name: name,
-    )
-
-    assert report_warnings == []
-    bootstrap_path = tmp_path / next(
-        path for path in entries[0].plots if "bootstrap_" in path
-    )
-    assert bootstrap_path.read_text(encoding="utf-8") == "complete distribution"
-    assert list(tmp_path.rglob("correlation.csv"))
-    assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0
-    assert all(np.isfinite(param.se) for param in entries[0].params)
-    assert summary_rows[0]["95 % CI"] == "N/A"
-    assert message in entries[0].warnings
-
-
-def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_histogram(
+def test_nonbinding_model_reports_parameter_errors_but_no_k_interval(
     tmp_path,
     monkeypatch,
 ):
@@ -271,19 +146,13 @@ def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_
     result.model = MODEL_SPECS["nb"]
     result.params = np.array([7.0, 0.5], dtype=float)
     result.param_names = ["delta_0", "slope"]
-    result.bootstrap.param_samples = result.bootstrap.param_samples[:, 1:]
-    result.bootstrap.logk_samples = np.empty((20, 0), dtype=float)
-
-    def unexpected_bootstrap_plot(*args):
-        raise AssertionError("a non-binding model has no K histogram")
 
     monkeypatch.setattr(report_pipeline, "plot_isotherms", lambda *args: [])
     monkeypatch.setattr(report_pipeline, "plot_residuals", lambda *args: [])
     monkeypatch.setattr(report_pipeline, "plot_fraction_bound", lambda *args: [])
-    monkeypatch.setattr(report_pipeline, "plot_bootstrap_hist", unexpected_bootstrap_plot)
 
     summary_rows, entries, report_warnings = report_pipeline.build_report_artifacts(
-        args=SimpleNamespace(bootstrap_ci_width=None),
+        args=SimpleNamespace(ci_width=None),
         ordered_keys=["sample"],
         results_by_key={"sample": {"nb": result}},
         failures_by_key={},
@@ -294,8 +163,7 @@ def test_complete_nonbinding_bootstrap_reports_parameter_distribution_without_k_
     assert report_warnings == []
     assert list(tmp_path.rglob("correlation.csv"))
     assert all(np.isfinite(param.se) for param in entries[0].params)
-    assert entries[0].stats["Bootstrap SE (log10 K)"] == "N/A"
-    assert not any("bootstrap_" in path for path in entries[0].plots)
+    assert "Standard error (log10 K)" not in entries[0].stats
     assert summary_rows[0]["Binding constant (M⁻¹)"] == "N/A"
     assert summary_rows[0]["95 % CI"] == "N/A"
 
@@ -385,7 +253,7 @@ def _result(**overrides):
         datasets=[],
         params=np.array([2.0, 7.0, 7.5], dtype=float),
         param_names=["logK", "H", "HG"],
-        bootstrap=None,
+        uncertainty=None,
         r2=0.9,
         r2_per_peak=[0.9],
         rss=1.0,
@@ -408,7 +276,7 @@ def _result(**overrides):
 
 
 def test_build_decisions_uses_provisional_language():
-    args = argparse.Namespace(bootstrap_ci_width=None)
+    args = argparse.Namespace(ci_width=None)
     ordered_keys = ["dataset_a"]
     results_by_key = {
         "dataset_a": {
@@ -440,29 +308,6 @@ def test_decision_paragraphs_use_provisional_working_model_language():
     assert "best supported" not in paragraphs[0]
 
 
-def test_build_decisions_propagates_unavailable_bootstrap_uncertainty():
-    args = argparse.Namespace(bootstrap_ci_width=None)
-    result = _result(
-        bic=10.0,
-        bootstrap=SimpleNamespace(
-            ci_valid=False,
-            ci_message="Bootstrap uncertainty unavailable: 1/1000 refits succeeded.",
-            n_boot=1000,
-            n_success=1,
-            ci_method_used="unavailable",
-        ),
-    )
-
-    entries = build_decisions(
-        args,
-        ordered_keys=["dataset_a"],
-        results_by_key={"dataset_a": {"11": result}},
-        display_model_name=lambda name: name,
-    )
-
-    assert any("1/1000 refits succeeded" in reason for reason in entries[0].reasons)
-
-
 def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path):
     summary_rows, model_entries, warnings = build_report_artifacts(
         args=argparse.Namespace(),
@@ -483,9 +328,6 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
 def test_build_methods_sections_uses_brent_and_molar_k_units():
     args = SimpleNamespace(
         replicates=False,
-        bootstrap=0,
-        bootstrap_method="residual",
-        bootstrap_logk_jitter=0.1,
     )
     ds = SimpleNamespace(name="sample", path="sample.csv")
 
@@ -501,44 +343,34 @@ def test_build_methods_sections_uses_brent_and_molar_k_units():
     assert "Newton" not in content
 
 
-def test_build_methods_sections_mentions_bca_when_selected():
+def test_build_methods_sections_discloses_asymptotic_covariance_interval():
     args = SimpleNamespace(
         replicates=False,
-        bootstrap=100,
-        bootstrap_method="residual",
-        bootstrap_ci_method="bca",
-        bootstrap_logk_jitter=0.1,
     )
     ds = SimpleNamespace(name="sample", path="sample.csv")
 
     sections = build_methods_sections(args, [ds])
     uq_section = next(section for section in sections if section["title"] == "Uncertainty Quantification")
-    # The selected interval method and its jackknife basis must be disclosed;
-    # the surrounding prose may change.
+    # The covariance basis, the Student-t interval, and the local-linearity
+    # assumption must all be disclosed; the surrounding prose may change.
     content = uq_section["content"]
-    assert "BCa" in content
-    assert "jackknife" in content
+    assert "covariance" in content
+    assert "Student-t" in content
+    assert "95%" in content
+    assert "locally linear" in content
 
 
 def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
-    bootstrap = SimpleNamespace(
-        param_samples=np.array([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], dtype=float),
-        logk_samples=np.array([[1.0], [2.0], [3.0]], dtype=float),
-        ci_low=np.array([1.2], dtype=float),
-        ci_high=np.array([2.8], dtype=float),
-        ci_low_percentile=np.array([1.05], dtype=float),
-        ci_high_percentile=np.array([2.95], dtype=float),
-        ci_low_bca=np.array([1.2], dtype=float),
-        ci_high_bca=np.array([2.8], dtype=float),
-        ci_method="bca",
-        ci_valid=True,
-        n_success=3,
-        n_boot=3,
+    uncertainty = SimpleNamespace(
+        param_se=np.array([0.1], dtype=float),
+        logk_ci_low=np.array([1.2], dtype=float),
+        logk_ci_high=np.array([2.8], dtype=float),
+        correlation=np.eye(1, dtype=float),
     )
     res = SimpleNamespace(
         model=SimpleNamespace(n_logk=1),
         params=np.array([2.0], dtype=float),
-        bootstrap=bootstrap,
+        uncertainty=uncertainty,
         r2=0.9,
         r2_per_peak=[0.9],
         rss=1.0,
@@ -555,24 +387,16 @@ def test_build_summary_row_uses_selected_ci_and_reports_logk_se():
 
 
 def test_build_summary_row_labels_sequential_k_values_and_ci():
-    bootstrap = SimpleNamespace(
-        param_samples=np.array([[1.0, 2.0], [1.1, 2.1]], dtype=float),
-        logk_samples=np.array([[1.0, 2.0], [1.1, 2.1]], dtype=float),
-        ci_low=np.array([0.9, 1.9], dtype=float),
-        ci_high=np.array([1.2, 2.2], dtype=float),
-        ci_low_percentile=np.array([0.9, 1.9], dtype=float),
-        ci_high_percentile=np.array([1.2, 2.2], dtype=float),
-        ci_low_bca=np.array([np.nan, np.nan], dtype=float),
-        ci_high_bca=np.array([np.nan, np.nan], dtype=float),
-        ci_method="percentile",
-        ci_valid=True,
-        n_success=2,
-        n_boot=2,
+    uncertainty = SimpleNamespace(
+        param_se=np.array([0.05, 0.05], dtype=float),
+        logk_ci_low=np.array([0.9, 1.9], dtype=float),
+        logk_ci_high=np.array([1.2, 2.2], dtype=float),
+        correlation=np.eye(2, dtype=float),
     )
     res = SimpleNamespace(
         model=SimpleNamespace(n_logk=2),
         params=np.array([1.0, 2.0], dtype=float),
-        bootstrap=bootstrap,
+        uncertainty=uncertainty,
         r2=0.9,
         r2_per_peak=[0.9],
         rss=1.0,
@@ -594,7 +418,7 @@ def _pinned_k_result(logk_bounds):
         datasets=[],
         params=np.array([12.0, 7.0, 7.5], dtype=float),
         param_names=["logK", "H", "HG"],
-        bootstrap=None,
+        uncertainty=None,
         r2=0.9,
         r2_per_peak=[0.9],
         rss=1.0,
@@ -613,7 +437,7 @@ def _pinned_k_result(logk_bounds):
 def test_bound_pinned_k_is_reported_in_warnings():
     res = _pinned_k_result((0.0, 12.0))
 
-    warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
+    warnings = _build_model_warnings(argparse.Namespace(ci_width=None), res, None)
 
     assert any("upper log10(K) bound" in warning for warning in warnings)
 
@@ -623,10 +447,10 @@ def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
     # bounds (a programmatic fit) or a wider bound, K=1e12 is a valid estimate
     # and must not be flagged.
     unbounded = _build_model_warnings(
-        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result(None), None
+        argparse.Namespace(ci_width=None), _pinned_k_result(None), None
     )
     wider = _build_model_warnings(
-        argparse.Namespace(bootstrap_ci_width=None), _pinned_k_result((0.0, 15.0)), None
+        argparse.Namespace(ci_width=None), _pinned_k_result((0.0, 15.0)), None
     )
 
     assert not any("log10(K) bound" in warning for warning in unbounded)
@@ -642,7 +466,7 @@ def test_aicc_only_unavailable_is_explained_in_warnings():
         datasets=[],
         params=np.array([3.0, 7.0, 7.5], dtype=float),
         param_names=["logK", "H", "HG"],
-        bootstrap=None,
+        uncertainty=None,
         r2=0.9,
         r2_per_peak=[0.9],
         rss=1.0,
@@ -657,14 +481,14 @@ def test_aicc_only_unavailable_is_explained_in_warnings():
         logk_bounds=(0.0, 12.0),
     )
 
-    warnings = _build_model_warnings(argparse.Namespace(bootstrap_ci_width=None), res, None)
+    warnings = _build_model_warnings(argparse.Namespace(ci_width=None), res, None)
 
     assert any("AICc unavailable: too few observations" in warning for warning in warnings)
     assert not any("BIC/AICc unavailable" in warning for warning in warnings)
 
 
 def test_build_decisions_excludes_nonfinite_bic_from_ranking():
-    args = argparse.Namespace(bootstrap_ci_width=None)
+    args = argparse.Namespace(ci_width=None)
     ordered_keys = ["dataset_a"]
     results_by_key = {
         "dataset_a": {

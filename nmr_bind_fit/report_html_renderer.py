@@ -108,8 +108,6 @@ def _plot_alt_text(plot_path: str, plot_label: Optional[str] = None) -> str:
         return f"Fit residuals – {peak}"
     if stem == "fraction_bound":
         return "Fraction bound"
-    if stem.startswith("bootstrap_"):
-        return f"Bootstrap distribution – {stem.removeprefix('bootstrap_')}"
     return stem
 
 
@@ -128,9 +126,6 @@ def _fig_caption(
         return f"<strong>Figure {n}.</strong> Fit residuals – {html.escape(peak)}"
     if stem == "fraction_bound":
         return f"<strong>Figure {n}.</strong> Fraction bound"
-    if stem.startswith("bootstrap_"):
-        k = stem.replace("bootstrap_", "")
-        return f"<strong>Figure {n}.</strong> Bootstrap distribution – {html.escape(k)}"
     return f"<strong>Figure {n}.</strong> {html.escape(stem)}"
 
 

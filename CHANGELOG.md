@@ -18,6 +18,23 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Changed
 
+- Replaced bootstrap resampling with asymptotic uncertainty from the covariance matrix of the
+  converged fit, `cov = (RSS / dof) * inv(J^T J)`, with Student-t confidence intervals on
+  `log10 K`. This fixes a calibration defect and simplifies the method at the same time. The
+  bootstrap it replaces was anti-conservative on the small datasets typical of NMR titrations:
+  a 200-run Monte-Carlo check of the nominal 95% interval on the bundled 1:1 synthetic design
+  measured 0.83-0.92 coverage for the bootstrap against 0.950, 0.965 and 0.970 for the
+  asymptotic interval at noise levels of 0.005, 0.01 and 0.02 ppm. On the 1:2 and 2:1 designs
+  the asymptotic interval measured 0.94-0.98. The bootstrap also withheld the interval
+  entirely whenever any refit failed its all-refits-must-succeed gate, which the asymptotic
+  interval has no equivalent of. Intervals are computed in `log10 K` and converted to `K` for
+  display, so they are asymmetric about `K`; the standard error quoted for `K` uses the delta
+  method. Uncertainty is now always reported for a successful fit and needs no flag, no seed,
+  and no refits.
+- Parameter correlations now come from the fit covariance matrix instead of bootstrap samples,
+  so `correlation.csv` is in the fitted-parameter basis and is written whenever the standard
+  errors are nonzero.
+
 - Simplified CLI input and output handling: glob-like literal filenames are accepted,
   duplicate dataset names receive deterministic numbered labels, positive numeric options
   are validated by the argument parser, and output directories use second-resolution
@@ -34,20 +51,13 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
   solver counts and per-peak R² now appear only when they carry information. Equilibrium solver
   counts are also labelled instead of showing their internal key names. The executive summary,
   methods sections, warnings, model comparison table and figures are unchanged.
-- Dropped guards that re-checked what their callers already guarantee: bootstrap
-  raw-distribution reporting now decides only the policy (enough draws requested, all of them
-  successful), and directory tokens and HTML anchors are sanitized and bounded without a hash
-  suffix, because callers prefix an ordinal that already keeps them distinct. Reporting
-  decisions are unchanged; only the generated names for very long labels differ.
+- Dropped guards that re-checked what their callers already guarantee: directory tokens and
+  HTML anchors are sanitized and bounded without a hash suffix, because callers prefix an
+  ordinal that already keeps them distinct. Reporting decisions are unchanged; only the
+  generated names for very long labels differ.
 - Hardened model fitting and reporting guardrails: invalid multivalent binding constants
   are rejected, weak-binding solver brackets include the physical root, failed candidates
   remain visible in the model comparison table, and model selection now ranks only finite-BIC fits.
-- Bootstrap confidence intervals now require every requested pseudo-dataset to yield an
-  uncensored acceptable refit after comparing jittered and full-data-optimum starts. A
-  statistically competitive bound-limited or otherwise non-identifiable solution censors the
-  draw, preventing convergence-filtered tail samples from being reported as unconditional
-  intervals. BCa-style intervals use leave-one-titration-point jackknife refits and explicitly
-  omit the requested estimate when unavailable rather than silently falling back to percentile.
 - Input handling now treats non-finite ppm values as invalid peak observations and reports
   rows dropped for missing required concentrations.
 - Renamed the import package namespace from `core` to `nmr_bind_fit` while keeping the CLI command `nmr_bind_fit`.
@@ -59,17 +69,24 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Fixed
 
-- Withheld bootstrap standard errors, histograms, and correlation matrices when requested
-  draws are incomplete, censored, too few, or non-finite, while retaining complete raw
-  distributions when only method-specific BCa interval construction fails.
-- Isolated independent multi-dataset report artifacts so plots and bootstrap files cannot overwrite one another.
+- Isolated independent multi-dataset report artifacts so plots cannot overwrite one another.
 - Rejected underdetermined, rank-deficient, severely ill-conditioned, low-sensitivity, or bound-limited fits using response-unit-invariant diagnostics instead of reporting non-identifiable binding constants.
-- Required sufficient successful bootstrap refits before reporting confidence intervals and replaced bootstrap-sample acceleration with explicitly labeled local-refit BCa jackknife estimates.
 - Hardened 1:2 and 2:1 equilibrium bracketing and convergence behavior across extreme valid inputs.
 - Added early input/configuration validation and nonzero CLI failures when no candidate model succeeds.
 
 ### Removed
 
+- Removed the `nmr_bind_fit.fit_bootstrap` module and everything specific to bootstrap
+  resampling: `BootstrapResult`, BCa intervals and their delete-one jackknife refits, the
+  residual, parametric and case resampling schemes, the censored-draw and
+  all-refits-must-succeed gates, and bootstrap K histograms. `FitResult.bootstrap` is replaced
+  by `FitResult.uncertainty`.
+- Removed the `--bootstrap`, `--bootstrap-method`, `--bootstrap-ci-method`,
+  `--bootstrap-logk-jitter` and `--seed` command-line flags, and the `bootstrap`,
+  `bootstrap_method`, `bootstrap_ci_method`, `seed` and `logk_jitter` parameters of
+  `fit_models` and `fit_model`. Uncertainty no longer involves resampling, so none of them
+  have a meaning.
+- Renamed `--bootstrap-ci-width` to `--ci-width`.
 - Removed `summary.csv` from the output directory. Its model comparison table is rendered in
   `report.html` from the same rows, so a run now writes `report.html` and the per-model plot
   directories. The spreadsheet-formula cell escaping went with it, having nothing left to guard.
