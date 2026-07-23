@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import html
 import math
 import re
@@ -374,10 +373,10 @@ tr.best-model td { background: var(--success-bg) !important; font-weight: 500; }
 
 
 def _slug(text: str) -> str:
+    # Model cards are keyed by dataset label and model name, which are already
+    # distinct, so the slug only has to be a valid bounded HTML id.
     safe = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-_")
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
-    prefix = safe[:60].rstrip("-_") or "section"
-    return f"{prefix}-{digest}"
+    return safe[:60].rstrip("-_") or "section"
 
 
 def _plot_alt_text(plot_path: str, plot_label: Optional[str] = None) -> str:

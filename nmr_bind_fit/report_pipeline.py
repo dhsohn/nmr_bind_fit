@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, cast
@@ -109,15 +108,16 @@ def _filter_finite_rows(values: np.ndarray) -> np.ndarray:
 
 
 def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
-    """Return whether the raw bootstrap distribution is complete and reportable."""
-    samples = np.asarray(bootstrap.param_samples, dtype=float)
+    """Return whether the raw bootstrap distribution is complete and reportable.
+
+    Only the reporting policy is decided here. The samples are finite and
+    counted by construction: ``bootstrap_params`` rejects non-finite parameters
+    before accepting a draw, and appends a row and increments ``n_success``
+    together.
+    """
     return bool(
         bootstrap.n_boot >= MIN_BOOTSTRAP_CI_SUCCESSES
         and bootstrap.n_success == bootstrap.n_boot
-        and samples.ndim == 2
-        and samples.shape[0] == bootstrap.n_success
-        and samples.size > 0
-        and np.all(np.isfinite(samples))
     )
 
 
@@ -134,13 +134,11 @@ def _as_int(value: object) -> int:
 
 def _safe_path_token(value: str) -> str:
     # Sanitize and bound free-form labels before using them as path components.
+    # Callers prefix an ordinal, so this does not have to keep truncated labels
+    # distinct on its own.
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
     safe = safe or "dataset"
-    if len(safe) <= 80:
-        return safe
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
-    prefix = safe[:67].rstrip("._-") or "dataset"
-    return f"{prefix}-{digest}"
+    return safe[:80].rstrip("._-") or "dataset"
 
 
 def _dataset_dir_tokens(labels: Sequence[str]) -> Dict[str, str]:

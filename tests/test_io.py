@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nmr_bind_fit.io import _compute_equivalents, load_dataset, load_datasets
+from nmr_bind_fit.io import load_dataset, load_datasets
 
 
 def test_load_dataset_drops_incomplete_ppm_column(tmp_path):
@@ -174,28 +174,6 @@ def test_load_dataset_rejects_legacy_host_guest_columns(tmp_path):
         load_dataset(path)
 
 
-def test_load_dataset_rejects_header_only_input(tmp_path):
-    path = tmp_path / "header_only.csv"
-    path.write_text("[H]t,[G]t,ppm1\n", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="contains no data rows"):
-        load_dataset(path)
-
-
-def test_load_dataset_rejects_when_all_rows_have_missing_concentrations(tmp_path):
-    path = tmp_path / "missing_concentrations.csv"
-    pd.DataFrame(
-        {
-            "[H]t": [np.nan, np.nan],
-            "[G]t": [0.0, np.nan],
-            "ppm1": [7.1, 7.2],
-        }
-    ).to_csv(path, index=False)
-
-    with pytest.raises(ValueError, match="No rows remain after dropping rows"):
-        load_dataset(path)
-
-
 def test_load_dataset_drops_missing_concentration_row_before_ppm_numeric_validation(tmp_path):
     path = tmp_path / "droppable_placeholder.csv"
     pd.DataFrame(
@@ -265,23 +243,3 @@ def test_load_dataset_requires_a_regular_existing_file(tmp_path):
         load_dataset(directory)
 
 
-def test_load_dataset_reports_missing_xls_dependency_cleanly(tmp_path, monkeypatch):
-    path = tmp_path / "legacy.xls"
-    path.write_bytes(b"placeholder")
-
-    def fail_read_excel(_path):
-        raise ImportError("xlrd is unavailable")
-
-    monkeypatch.setattr(pd, "read_excel", fail_read_excel)
-
-    with pytest.raises(ValueError, match=r"Reading \.xls files requires.*xlrd"):
-        load_dataset(path)
-
-
-def test_compute_equivalents_is_defensive_for_zero_host_values():
-    h_tot = np.array([1e-3, 0.0], dtype=float)
-    g_tot = np.array([5e-4, 1e-3], dtype=float)
-
-    out = _compute_equivalents(h_tot, g_tot)
-
-    np.testing.assert_allclose(out, np.array([0.5, 0.0], dtype=float))

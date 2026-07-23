@@ -27,6 +27,11 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
   the optimizer penalty-scale fallback collapses to a single degenerate-data branch, and
   isotherm/residual plot files use position-based names (`peak-0001`). `summary.csv` keeps
   neutralizing spreadsheet-formula cells, since a dataset label comes from the input filename.
+- Dropped guards that re-checked what their callers already guarantee: bootstrap
+  raw-distribution reporting now decides only the policy (enough draws requested, all of them
+  successful), and directory tokens and HTML anchors are sanitized and bounded without a hash
+  suffix, because callers prefix an ordinal that already keeps them distinct. Reporting
+  decisions are unchanged; only the generated names for very long labels differ.
 - Hardened model fitting and reporting guardrails: invalid multivalent binding constants
   are rejected, weak-binding solver brackets include the physical root, failed candidates
   remain visible in `summary.csv`, and model selection now ranks only finite-BIC fits.
