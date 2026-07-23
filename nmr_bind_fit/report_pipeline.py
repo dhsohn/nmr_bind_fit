@@ -119,17 +119,6 @@ def _bootstrap_samples_reportable(bootstrap: BootstrapResult) -> bool:
     )
 
 
-def _as_int(value: object) -> int:
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
 def _safe_path_token(value: str) -> str:
     # Sanitize and bound free-form labels before using them as path components.
     # Callers prefix an ordinal, so this does not have to keep truncated labels
@@ -195,14 +184,10 @@ def _format_dropped_rows(datasets: Sequence[Dataset]) -> str:
     return "; ".join(items)
 
 
-def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, object]]:
-    # Combine solver statistics across species lists.
-    totals = {
-        "solver_points": 0,
-        "solver_success": 0,
-        "solver_fail": 0,
-        "solver_method": set(),
-    }
+def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict[str, int]]:
+    # Combine the per-point solver counts the report can show. A clean solve
+    # reports nothing, so only the totals behind a failure are accumulated.
+    totals = {"solver_points": 0, "solver_fail": 0}
     found = False
     for species in species_list:
         stats = species.solver_stats
@@ -210,15 +195,9 @@ def _accumulate_solver_stats(species_list: List[SpeciesResult]) -> Optional[Dict
             continue
         found = True
         totals["solver_points"] += int(stats.points)
-        totals["solver_success"] += int(stats.success)
         totals["solver_fail"] += int(stats.fail)
-        method = stats.method
-        if method:
-            totals["solver_method"].add(str(method))
     if not found:
         return None
-    methods = totals["solver_method"]
-    totals["solver_method"] = ", ".join(sorted(methods)) if methods else "N/A"
     return totals
 
 
@@ -427,25 +406,17 @@ def _logk_bound_warnings(res: FitResult) -> List[str]:
     return warnings
 
 
-def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, object]]:
+def _solver_stats_for_result(res: FitResult) -> Optional[Dict[str, int]]:
     # Collect solver diagnostics only for nonlinear root-solved models.
     if res.model.name not in {"12", "21"}:
         return None
-    solver_stats = _accumulate_solver_stats(res.species)
-    if solver_stats is None:
-        return {
-            "solver_points": "N/A",
-            "solver_success": "N/A",
-            "solver_fail": "N/A",
-            "solver_method": "N/A",
-        }
-    return solver_stats
+    return _accumulate_solver_stats(res.species)
 
 
 def _build_model_warnings(
     args: argparse.Namespace,
     res: FitResult,
-    solver_stats: Optional[Dict[str, object]],
+    solver_stats: Optional[Dict[str, int]],
 ) -> List[str]:
     # Build per-model warning messages for report rendering.
     warnings = []
@@ -495,9 +466,9 @@ def _build_model_warnings(
     if penalty_count > 0:
         warnings.append(f"optimization penalty residual events: {penalty_count}")
 
-    if solver_stats is not None and solver_stats.get("solver_fail", 0) not in {"N/A", None}:
-        n_fail = _as_int(solver_stats.get("solver_fail", 0))
-        n_points = _as_int(solver_stats.get("solver_points", 0))
+    if solver_stats is not None:
+        n_fail = solver_stats["solver_fail"]
+        n_points = solver_stats["solver_points"]
         if n_fail > 0 and n_points > 0:
             warnings.append(f"solver failures ({n_fail}/{n_points})")
 
@@ -516,7 +487,7 @@ def _build_model_warnings(
     return warnings
 
 
-def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
+def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, int]]) -> Dict[str, str]:
     """Build the stats block for one model card.
 
     Only reported fits reach this point, and reporting a fit already means it
@@ -544,7 +515,7 @@ def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]])
         stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
         if res.bootstrap.ci_method_used:
             stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
-    if solver_stats is not None and _as_int(solver_stats.get("solver_fail", 0)) > 0:
+    if solver_stats is not None and solver_stats["solver_fail"] > 0:
         # A clean per-point solve is the norm; the counts only inform a failure.
         stats_base["solver_points"] = str(solver_stats["solver_points"])
         stats_base["solver_fail"] = str(solver_stats["solver_fail"])
