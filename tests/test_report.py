@@ -156,8 +156,11 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
     assert entries[0].stats["Observations (n)"] == "3"
     assert entries[0].stats["Fitted parameters (p)"] == "3"
     assert entries[0].stats["Residual degrees of freedom"] == "0"
-    assert entries[0].stats["Jacobian rank"] == "2"
-    assert entries[0].stats["Jacobian condition number"] == "123"
+    # Reporting a fit already means it cleared the identifiability gate, so the
+    # rank and condition number behind that gate are not repeated per model.
+    assert not any("Jacobian" in label for label in entries[0].stats)
+    # Counters that only matter on failure stay out of a clean card.
+    assert "Optimization penalty events" not in entries[0].stats
     assert entries[0].stats["Successful bootstrap refits"] == "20 / 20"
     assert entries[0].stats["Bootstrap CI method used"] == "percentile"
     assert float(entries[0].stats["Bootstrap SE (log10 K)"]) > 0.0

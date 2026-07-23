@@ -35,339 +35,58 @@ class _FigCounter:
 
 
 _CSS = r"""
-/* ── Reset & Base ────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
-  --font-serif: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --navy: #5c4033;
-  --navy-light: #7a5c4f;
-  --slate-700: #4a3728;
-  --slate-500: #8b7355;
-  --slate-400: #a89279;
-  --slate-200: #ddd4c4;
-  --slate-100: #efe8db;
-  --slate-50: #f7f2ea;
-  --accent: #a0522d;
-  --accent-bg: #fdf5ef;
-  --warn-bg: #fef9ef;
-  --warn-border: #d4a043;
-  --success-bg: #f4f9f0;
-  --success-border: #6b8e5a;
-  --white: #fefcf7;
-  --text: #3b2a1a;
-  --text-secondary: #6b5744;
-  --radius: 6px;
-  --shadow-sm: 0 1px 2px rgba(60,40,20,.06);
-  --shadow: 0 1px 3px rgba(60,40,20,.1), 0 1px 2px rgba(60,40,20,.05);
-}
-
-html { font-size: 15px; }
-
 body {
-  font-family: var(--font-sans);
-  color: var(--text);
-  background: #f0e8d8;
-  line-height: 1.7;
-  -webkit-font-smoothing: antialiased;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, Arial, sans-serif;
+  color: #222;
+  background: #fff;
+  line-height: 1.6;
 }
 
-.container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 40px 32px 64px;
-  background: var(--white);
-  min-height: 100vh;
-}
+.container { max-width: 900px; margin: 0 auto; padding: 32px 24px 56px; }
 
-/* ── Header ──────────────────────────────────────── */
-.report-header {
-  border-bottom: 3px solid var(--navy);
-  padding-bottom: 20px;
-  margin-bottom: 36px;
-}
-.report-header h1 {
-  font-family: var(--font-serif);
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--navy);
-  letter-spacing: -0.02em;
-  margin-bottom: 6px;
-}
-.report-header .subtitle {
-  font-size: 0.85rem;
-  color: var(--slate-500);
-  font-weight: 400;
-}
+.report-header { border-bottom: 2px solid #444; padding-bottom: 12px; margin-bottom: 28px; }
+.report-header h1 { font-size: 1.8rem; }
+.report-header .subtitle { font-size: 0.85rem; color: #666; }
 
-/* ── Table of Contents ───────────────────────────── */
-.toc {
-  background: var(--slate-100);
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius);
-  padding: 20px 28px;
-  margin-bottom: 36px;
-}
-.toc h2 {
-  font-family: var(--font-serif);
-  font-size: 1.15rem;
-  color: var(--navy);
-  margin-bottom: 10px;
-}
-.toc ol {
-  padding-left: 0;
-  list-style: none;
-  columns: 2;
-  column-gap: 32px;
-}
-.toc li {
-  font-size: 0.88rem;
-  color: var(--text-secondary);
-  padding: 2px 0;
-  break-inside: avoid;
-}
-.toc a {
-  color: var(--navy-light);
-  text-decoration: none;
-  transition: color .15s;
-}
-.toc a:hover { color: var(--accent); }
+h2.section-title { font-size: 1.3rem; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #ccc; }
+h4.model-sub { font-size: 0.95rem; margin: 16px 0 6px; }
 
-/* ── Executive Summary Card ──────────────────────── */
-.exec-summary {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
-  color: var(--white);
-  border-radius: var(--radius);
-  padding: 24px 28px;
-  margin-bottom: 36px;
-  box-shadow: var(--shadow);
-}
-.exec-summary h2 {
-  font-family: var(--font-serif);
-  font-size: 1.2rem;
-  margin-bottom: 12px;
-  opacity: .9;
-}
-.exec-summary p {
-  font-size: 0.92rem;
-  line-height: 1.65;
-  opacity: .92;
-  text-align: justify;
-}
+.exec-summary { margin-bottom: 28px; }
+.exec-summary p { margin-bottom: 8px; }
 
-/* ── Section Headings ────────────────────────────── */
-h2.section-title {
-  font-family: var(--font-serif);
-  font-size: 1.4rem;
-  color: var(--navy);
-  margin-top: 44px;
-  margin-bottom: 16px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--slate-200);
-}
-h3.subsection-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--slate-700);
-  margin-top: 24px;
-  margin-bottom: 8px;
-}
-h4.model-sub {
-  font-size: 0.93rem;
-  font-weight: 600;
-  color: var(--slate-700);
-  margin-top: 18px;
-  margin-bottom: 6px;
-}
+.methods-section { margin-bottom: 10px; }
+.methods-section h3 { font-size: 0.95rem; }
+.methods-section p { font-size: 0.9rem; color: #444; text-align: justify; }
 
-/* ── Methods Detail ──────────────────────────────── */
-.methods-section { margin-bottom: 12px; }
-.methods-section h3 {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--navy-light);
-  margin-bottom: 4px;
-}
-.methods-section p {
-  font-size: 0.88rem;
-  color: var(--text-secondary);
-  line-height: 1.7;
-  text-align: justify;
-}
-
-/* ── Tables ──────────────────────────────────────── */
-table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 12px 0 20px;
-  font-size: 0.85rem;
-  box-shadow: var(--shadow-sm);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-thead th {
-  background: var(--navy);
-  color: var(--white);
-  padding: 10px 12px;
-  text-align: left;
-  font-weight: 600;
-  font-size: 0.82rem;
-  letter-spacing: 0.01em;
-}
-tbody td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--slate-200);
-  color: var(--text);
-}
-tbody tr:nth-child(even) { background: var(--slate-50); }
-tbody tr:hover { background: #f5eedf; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0 18px; font-size: 0.85rem; }
+th, td { padding: 6px 10px; border-bottom: 1px solid #ddd; text-align: left; }
+thead th { background: #f2f2f2; font-weight: 600; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-tr.best-model td { background: var(--success-bg) !important; font-weight: 500; }
+tr.best-model td { background: #f0f6ec; font-weight: 500; }
 
-/* ── Stats List ──────────────────────────────────── */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px;
-  margin: 8px 0 16px;
-}
-.stat-item {
-  background: var(--slate-50);
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-}
-.stat-item .stat-label {
-  font-size: 0.75rem;
-  color: var(--slate-500);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin-bottom: 2px;
-}
-.stat-item .stat-value {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--navy);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: break-word;
-  word-break: break-all;
-}
-
-/* ── Warnings ────────────────────────────────────── */
-.warning-box {
-  background: var(--warn-bg);
-  border-left: 4px solid var(--warn-border);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  padding: 14px 18px;
-  margin: 12px 0;
-}
-.warning-box .warn-title {
-  font-weight: 600;
-  font-size: 0.88rem;
-  color: #7a5520;
-  margin-bottom: 6px;
-}
+.warning-box { border-left: 3px solid #c89b3c; background: #fdf8ec; padding: 10px 14px; margin: 10px 0; }
+.warning-box .warn-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 4px; }
 .warning-box ul { padding-left: 18px; }
-.warning-box li {
-  font-size: 0.85rem;
-  color: #6b4c28;
-  padding: 2px 0;
-}
-.no-warnings {
-  font-size: 0.85rem;
-  color: var(--slate-400);
-  font-style: italic;
-}
+.warning-box li { font-size: 0.85rem; }
+.no-warnings { font-size: 0.85rem; color: #777; font-style: italic; }
 
-/* ── Plots / Figures ─────────────────────────────── */
-.figure-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-  gap: 20px;
-  margin: 16px 0 24px;
-}
-.figure-card {
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--white);
-  box-shadow: var(--shadow-sm);
-}
-.figure-card img {
-  width: 100%;
-  display: block;
-  background: var(--white);
-}
-.figure-card figcaption {
-  padding: 8px 14px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--slate-200);
-  background: var(--slate-50);
-}
-.figure-card figcaption strong {
-  color: var(--navy);
-}
+.model-card { border: 1px solid #ddd; border-radius: 4px; padding: 16px 20px; margin-bottom: 24px; }
+.model-card-header { display: flex; align-items: baseline; gap: 10px; }
+.model-card-header h3 { font-size: 1.05rem; }
+.model-badge.best { font-size: 0.75rem; color: #4a7a3a; }
+.dataset-label { font-weight: 400; color: #666; }
 
-/* ── Model Section Card ──────────────────────────── */
-.model-card {
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius);
-  padding: 24px;
-  margin: 20px 0;
-  box-shadow: var(--shadow-sm);
-  background: var(--white);
-}
-.model-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--slate-200);
-}
-.model-card-header h3 {
-  font-family: var(--font-serif);
-  font-size: 1.15rem;
-  color: var(--navy);
-  margin: 0;
-}
-.model-badge {
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 12px;
-  background: var(--slate-100);
-  color: var(--slate-500);
-}
-.model-badge.best {
-  background: var(--success-bg);
-  color: #4a6b3a;
-  border: 1px solid var(--success-border);
-}
+.figure-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin: 10px 0 18px; }
+figure img { width: 100%; display: block; }
+figcaption { font-size: 0.78rem; color: #555; padding-top: 4px; }
 
-/* ── Footer ──────────────────────────────────────── */
-.report-footer {
-  margin-top: 48px;
-  padding-top: 20px;
-  border-top: 2px solid var(--slate-200);
-  font-size: 0.8rem;
-  color: var(--slate-400);
-  text-align: center;
-}
-.report-footer a { color: var(--navy-light); text-decoration: none; }
+.report-footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 0.8rem; color: #666; }
 
-/* ── Print ───────────────────────────────────────── */
 @media print {
-  body { background: white; }
-  .container { max-width: 100%; padding: 0; box-shadow: none; }
-  .toc { break-inside: avoid; }
+  .container { max-width: none; padding: 0; }
   .model-card { break-inside: avoid; }
-  .figure-card { break-inside: avoid; }
-  .report-footer .no-print { display: none; }
-  a { color: inherit !important; text-decoration: none !important; }
-  table { font-size: 0.8rem; }
 }
 """
 
@@ -504,16 +223,13 @@ def _render_summary_table(summary_rows: Sequence[Dict[str, str]], best_models: D
     )
 
 
-def _render_stats_grid(stats: Dict[str, str]) -> str:
-    stats_items = []
-    for k, v in stats.items():
-        stats_items.append(
-            f'<div class="stat-item">'
-            f'<div class="stat-label">{html.escape(k)}</div>'
-            f'<div class="stat-value">{html.escape(str(v))}</div>'
-            f"</div>"
-        )
-    return f'<div class="stats-grid">{"".join(stats_items)}</div>'
+def _render_stats_table(stats: Dict[str, str]) -> str:
+    rows = "".join(
+        f"<tr><td>{html.escape(k)}</td>"
+        f'<td class="num">{html.escape(str(v))}</td></tr>'
+        for k, v in stats.items()
+    )
+    return f"<table><tbody>{rows}</tbody></table>"
 
 
 def _render_param_table(params: Sequence[object]) -> str:
@@ -558,7 +274,7 @@ def _render_plot_grid(
         caption = _fig_caption(fig_counter, p, plot_label)
         alt_text = _plot_alt_text(p, plot_label)
         fig_items.append(
-            f'<figure class="figure-card">'
+            f"<figure>"
             f'<img src="{html.escape(p)}" alt="{html.escape(alt_text)}" loading="lazy">'
             f"<figcaption>{caption}</figcaption>"
             f"</figure>"
@@ -571,7 +287,7 @@ def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: 
     badge = '<span class="model-badge best">★ Best Model</span>' if is_best else ""
     slug = _slug(f"{entry.dataset}-{entry.model}")
 
-    stats_grid = _render_stats_grid(entry.stats)
+    stats_table = _render_stats_table(entry.stats)
     param_table = _render_param_table(entry.params)
     warn_block = _render_model_warning_block(entry.warnings)
     plots_html = _render_plot_grid(
@@ -582,15 +298,13 @@ def _render_model_card(entry: object, best_models: Dict[str, str], fig_counter: 
 
     display_title = f"{html.escape(entry.model)}"
     if entry.dataset != "Simultaneous Fitting":
-        display_title += (
-            f" <span style='font-weight:400;color:var(--slate-500)'>— {html.escape(entry.dataset)}</span>"
-        )
+        display_title += f' <span class="dataset-label">— {html.escape(entry.dataset)}</span>'
 
     return (
         f'<div class="model-card" id="{slug}">'
         f'<div class="model-card-header"><h3>{display_title}</h3>{badge}</div>'
         f'<h4 class="model-sub">Goodness-of-Fit Statistics</h4>'
-        f"{stats_grid}"
+        f"{stats_table}"
         f'<h4 class="model-sub">Fitted Parameters</h4>'
         f"{param_table}"
         f'<h4 class="model-sub">Warnings</h4>'
@@ -607,39 +321,6 @@ def _render_model_sections(
     fig_counter: _FigCounter,
 ) -> List[str]:
     return [_render_model_card(entry, best_models, fig_counter) for entry in model_entries]
-
-
-def _render_toc(
-    exec_html: str,
-    methods_block: str,
-    summary_table: str,
-    model_entries: Sequence[object],
-) -> str:
-    toc_items = []
-    toc_idx = 1
-    if exec_html:
-        toc_items.append(f'<li><a href="#executive-summary">{toc_idx}. Executive Summary</a></li>')
-        toc_idx += 1
-    if methods_block:
-        toc_items.append(f'<li><a href="#methods">{toc_idx}. Methods</a></li>')
-        toc_idx += 1
-    if summary_table:
-        toc_items.append(f'<li><a href="#model-comparison">{toc_idx}. Model Comparison</a></li>')
-        toc_idx += 1
-    for entry in model_entries:
-        slug = _slug(f"{entry.dataset}-{entry.model}")
-        label = html.escape(entry.model)
-        if entry.dataset != "Simultaneous Fitting":
-            label += f" ({html.escape(entry.dataset)})"
-        toc_items.append(f'<li><a href="#{slug}">{toc_idx}. {label}</a></li>')
-        toc_idx += 1
-
-    if not toc_items:
-        return ""
-    return (
-        '<nav class="toc"><h2>Contents</h2>'
-        f'<ol>{"".join(toc_items)}</ol></nav>'
-    )
 
 
 def _render_model_detail_heading(model_sections: Sequence[str]) -> str:
@@ -667,7 +348,6 @@ def write_report_html(
     warnings_block = _render_warnings_block(warnings)
     summary_table = _render_summary_table(summary_rows, best_models)
     model_sections = _render_model_sections(model_entries, best_models, fig_counter)
-    toc_html = _render_toc(exec_html, methods_block, summary_table, model_entries)
     model_detail_heading = _render_model_detail_heading(model_sections)
 
     html_doc = f"""<!DOCTYPE html>
@@ -685,7 +365,6 @@ def write_report_html(
     <div class=\"subtitle\">Generated by nmr_bind_fit &middot; {now.strftime("%Y-%m-%d %H:%M:%S")}</div>
   </header>
 
-  {toc_html}
   {exec_html}
   {methods_block}
   {warnings_block}

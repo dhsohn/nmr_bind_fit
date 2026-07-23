@@ -45,9 +45,6 @@ STATS_LABELS = {
     "n": "Observations (n)",
     "p": "Fitted parameters (p)",
     "dof": "Residual degrees of freedom",
-    "jacobian_rank": "Jacobian rank",
-    "jacobian_condition": "Jacobian condition number",
-    "jacobian_logk_sensitivity": "Minimum dimensionless logK RMS sensitivity",
     "R2": "Coefficient of determination (mean per-peak)",
     "R2_per_peak": "R² per peak",
     "RSS": "Residual sum of squares",
@@ -58,6 +55,8 @@ STATS_LABELS = {
     "bootstrap_logK_SE": "Bootstrap SE (log10 K)",
     "bootstrap_success": "Successful bootstrap refits",
     "bootstrap_ci_method": "Bootstrap CI method used",
+    "solver_points": "Equilibrium solver points",
+    "solver_fail": "Equilibrium solver failures",
     "residual_n": "Residual count",
     "shapiro_stat": "Shapiro-Wilk statistic",
     "shapiro_p": "Shapiro-Wilk p-value",
@@ -519,43 +518,37 @@ def _build_model_warnings(
 
 
 def _build_stats_dict(res: FitResult, solver_stats: Optional[Dict[str, object]]) -> Dict[str, str]:
-    # Build stats block for report tables.
-    r2_per_peak = res.r2_per_peak
-    r2_per_peak_text = (
-        ";".join(f"{value:.6g}" for value in r2_per_peak)
-        if r2_per_peak
-        else "N/A"
-    )
+    """Build the stats block for one model card.
+
+    Only reported fits reach this point, and reporting a fit already means it
+    passed the identifiability gate, so the rank, condition number and logK
+    sensitivity behind that gate would always read as passing values. The
+    thresholds are stated once in the methods text instead. Counters that are
+    only meaningful when something went wrong are included only then.
+    """
     stats_base = {
         "R2": f"{res.r2:.6g}" if np.isfinite(res.r2) else "N/A",
-        "R2_per_peak": r2_per_peak_text,
-        "bootstrap_logK_SE": _bootstrap_logk_se_text(res),
         "RSS": f"{res.rss:.6g}",
         "RMSE": f"{res.rmse:.6g}",
         "BIC": f"{res.bic:.6g}" if np.isfinite(res.bic) else "N/A",
         "AICc": f"{res.aicc:.6g}" if np.isfinite(res.aicc) else "N/A",
-        "penalty_events": str(res.penalty_count),
     }
+    if len(res.r2_per_peak) > 1:
+        stats_base["R2_per_peak"] = ";".join(f"{value:.6g}" for value in res.r2_per_peak)
     stats_base["n"] = str(res.n)
     stats_base["p"] = str(res.p)
     stats_base["dof"] = str(res.dof)
-    stats_base["jacobian_rank"] = str(res.jacobian_rank)
-    stats_base["jacobian_condition"] = f"{float(res.jacobian_condition):.6g}"
-    if np.isfinite(res.jacobian_logk_sensitivity):
-        stats_base["jacobian_logk_sensitivity"] = f"{float(res.jacobian_logk_sensitivity):.6g}"
+    if res.penalty_count > 0:
+        stats_base["penalty_events"] = str(res.penalty_count)
     if res.bootstrap is not None:
+        stats_base["bootstrap_logK_SE"] = _bootstrap_logk_se_text(res)
         stats_base["bootstrap_success"] = f"{res.bootstrap.n_success} / {res.bootstrap.n_boot}"
         if res.bootstrap.ci_method_used:
             stats_base["bootstrap_ci_method"] = str(res.bootstrap.ci_method_used)
-    if solver_stats is not None:
-        stats_base.update(
-            {
-                "solver_points": str(solver_stats["solver_points"]),
-                "solver_success": str(solver_stats["solver_success"]),
-                "solver_fail": str(solver_stats["solver_fail"]),
-                "solver_method": str(solver_stats["solver_method"]),
-            }
-        )
+    if solver_stats is not None and _as_int(solver_stats.get("solver_fail", 0)) > 0:
+        # A clean per-point solve is the norm; the counts only inform a failure.
+        stats_base["solver_points"] = str(solver_stats["solver_points"])
+        stats_base["solver_fail"] = str(solver_stats["solver_fail"])
     diagnostics = res.residual_diagnostics
     if diagnostics:
         if "residual_n" in diagnostics:

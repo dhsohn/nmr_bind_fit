@@ -27,6 +27,14 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
   the optimizer penalty-scale fallback collapses to a single degenerate-data branch, and
   isotherm/residual plot files use position-based names (`peak-0001`). `summary.csv` keeps
   neutralizing spreadsheet-formula cells, since a dataset label comes from the input filename.
+- Slimmed the HTML report. The table of contents is gone, per-model statistics are a compact
+  table rather than a tile grid, and the stylesheet is a fraction of its former size. Model
+  cards no longer repeat the Jacobian rank, condition number and log₁₀(K) sensitivity, because
+  a reported fit has by definition cleared the identifiability gate those describe and the
+  thresholds are already stated in the methods text; optimization penalty counts, equilibrium
+  solver counts and per-peak R² now appear only when they carry information. Equilibrium solver
+  counts are also labelled instead of showing their internal key names. The executive summary,
+  methods sections, warnings, model comparison table and figures are unchanged.
 - Dropped guards that re-checked what their callers already guarantee: bootstrap
   raw-distribution reporting now decides only the policy (enough draws requested, all of them
   successful), and directory tokens and HTML anchors are sanitized and bounded without a hash
