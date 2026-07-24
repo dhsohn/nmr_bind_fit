@@ -76,6 +76,36 @@ def test_binding_fit_rejects_dataset_without_positive_guest():
     assert result.logk_bounds == (0.0, 12.0)
 
 
+def test_fit_rejects_nonpositive_host_concentration():
+    # Physically impossible input (a mistyped CSV) is rejected at the fit
+    # boundary; the loader no longer repeats this check.
+    ds = _named_dataset(
+        "bad_host",
+        np.array([1e-3, -1e-3, 0.0]),
+        np.array([0.0, 5e-4, 1e-3]),
+        np.array([[7.0], [7.1], [7.2]]),
+    )
+
+    result = fit_models([ds], ["11"], logk_starts=[4.0], logk_bounds=(0.0, 12.0))[0]
+
+    assert result.success is False
+    assert "invalid host concentrations" in result.message
+
+
+def test_fit_rejects_negative_guest_concentration():
+    ds = _named_dataset(
+        "bad_guest",
+        np.full(3, 1e-3),
+        np.array([0.0, -5e-4, 1e-3]),
+        np.array([[7.0], [7.1], [7.2]]),
+    )
+
+    result = fit_models([ds], ["11"], logk_starts=[4.0], logk_bounds=(0.0, 12.0))[0]
+
+    assert result.success is False
+    assert "invalid guest concentrations" in result.message
+
+
 def test_fit_rejects_nonpositive_residual_degrees_of_freedom():
     ds = _named_dataset(
         "two_points",

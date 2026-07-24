@@ -181,14 +181,6 @@ def _drop_incomplete_ppm_columns(
     return ppm_view.loc[:, kept_ppm].copy(), kept_ppm, dropped_ppm
 
 
-def _validate_concentration_arrays(h_tot: np.ndarray, g_tot: np.ndarray) -> None:
-    # Validate concentration arrays prior to model fitting.
-    if not np.all(np.isfinite(h_tot)) or np.any(h_tot <= 0):
-        raise ValueError("Host concentration values must be positive and finite.")
-    if not np.all(np.isfinite(g_tot)) or np.any(g_tot < 0):
-        raise ValueError("Guest concentration values must be non-negative and finite.")
-
-
 def _compute_equivalents(h_tot: np.ndarray, g_tot: np.ndarray) -> np.ndarray:
     # Compute equivalents (G/H) for plotting and x-axis usage.
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -219,10 +211,11 @@ def load_dataset(
     use_cols = [host_col, guest_col] + ppm_cols
     data = data.loc[:, use_cols].copy()
 
-    # Extract numeric arrays and validate concentrations.
+    # Physically impossible concentrations (non-positive host, negative guest)
+    # are rejected once, at the fit boundary, by fit._validate_fit_design; the
+    # loader does not repeat that check.
     h_tot = np.asarray(data.loc[:, host_col], dtype=float)
     g_tot = np.asarray(data.loc[:, guest_col], dtype=float)
-    _validate_concentration_arrays(h_tot, g_tot)
 
     # Every retained ppm column is fully finite: _drop_incomplete_ppm_columns
     # drops any column holding a missing or non-finite value, and raises when

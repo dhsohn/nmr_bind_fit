@@ -82,6 +82,11 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
   missing or non-finite value is dropped, and a file whose columns are all dropped is rejected.
   With `mask` gone, `_validate_ppm_array` became unreachable — every retained column is finite
   by construction — and went with it.
+- Removed the concentration validation from `load_dataset`. Non-positive host and negative
+  guest concentrations are physically impossible and were already rejected at the fit boundary
+  by `fit._validate_fit_design`, which checks the same thing; the loader no longer repeats it.
+  Malformed input is still rejected with a clear error and a non-zero exit, now raised when the
+  fit runs rather than at load time.
 - Removed the `nmr_bind_fit.fit_bootstrap` module and everything specific to bootstrap
   resampling: `BootstrapResult`, BCa intervals and their delete-one jackknife refits, the
   residual, parametric and case resampling schemes, the censored-draw and
