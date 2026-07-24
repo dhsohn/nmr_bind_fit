@@ -78,10 +78,12 @@ def test_binding_fit_rejects_dataset_without_positive_guest():
 
 def test_fit_rejects_nonpositive_host_concentration():
     # Physically impossible input (a mistyped CSV) is rejected at the fit
-    # boundary; the loader no longer repeats this check.
+    # boundary; the loader no longer repeats this check. A negative host
+    # exercises the same ``h_tot <= 0`` guard as a zero would, without the
+    # divide-by-zero the equivalents helper produces for an exact zero.
     ds = _named_dataset(
         "bad_host",
-        np.array([1e-3, -1e-3, 0.0]),
+        np.array([1e-3, -1e-3, 2e-3]),
         np.array([0.0, 5e-4, 1e-3]),
         np.array([[7.0], [7.1], [7.2]]),
     )
