@@ -77,31 +77,6 @@ def test_load_dataset_rejects_missing_explicit_ppm_column(tmp_path):
         load_dataset(path, ppm_cols=["missing"])
 
 
-def test_load_dataset_masks_missing_ppm_values_when_requested(tmp_path):
-    path = tmp_path / "sample.csv"
-    df = pd.DataFrame(
-        {
-            "[H]t": [1e-3, 1e-3, 1e-3],
-            "[G]t": [0.0, 5e-4, 1e-3],
-            "ppm1": [7.1, np.nan, 7.3],
-            "ppm2": [8.1, 8.2, 8.3],
-        }
-    )
-    df.to_csv(path, index=False)
-
-    ds = load_dataset(
-        path,
-        ppm_cols=["ppm1", "ppm2"],
-        missing_policy="mask",
-    )
-
-    assert ds.y_cols == ["ppm1", "ppm2"]
-    assert ds.dropped_peaks == []
-    assert ds.dropped_rows == 0
-    assert ds.y.shape == (3, 2)
-    assert np.isnan(ds.y[1, 0])
-
-
 def test_load_dataset_drops_ppm_column_with_inf(tmp_path):
     path = tmp_path / "sample.csv"
     df = pd.DataFrame(
@@ -200,8 +175,10 @@ def test_load_dataset_rejects_ppm_columns_without_finite_observations(tmp_path):
         }
     ).to_csv(path, index=False)
 
-    with pytest.raises(ValueError, match="No finite ppm observations remain"):
-        load_dataset(path, missing_policy="mask")
+    with pytest.warns(RuntimeWarning, match="Dropping ppm columns"), pytest.raises(
+        ValueError, match="No ppm columns remain"
+    ):
+        load_dataset(path)
 
 
 def test_load_dataset_reports_missing_explicit_ppm_columns(tmp_path):
