@@ -16,9 +16,3 @@ nmr_bind_fit --input examples/synthetic_11.csv
 ```
 
 The datasets are deterministic and are not experimental measurements. They are intended for smoke tests, documentation, tutorials, and JOSS-readiness examples. Use real experimental data only when you have permission to share it publicly.
-
-Regenerate the CSV files with:
-
-```bash
-python examples/generate_synthetic_examples.py
-```

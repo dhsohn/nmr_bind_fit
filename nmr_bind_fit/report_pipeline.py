@@ -294,22 +294,19 @@ def _format_k_ci(k_ci_low: np.ndarray, k_ci_high: np.ndarray, n_logk: int) -> st
 def _logk_bound_warnings(res: FitResult) -> list[str]:
     if res.model.n_logk == 0:
         return []
-    # Compare against the bounds the fit actually used; when they are unknown
-    # (e.g. an unbounded programmatic fit) no bound was active, so pinning a
-    # valid estimate such as K=1 or K=1e12 would be misleading.
+    # Leave lower-limit estimates for chemical interpretation and warn only at
+    # the upper search limit actually used by the fit.
     bounds = res.logk_bounds
     if bounds is None:
         return []
-    low, high = float(bounds[0]), float(bounds[1])
+    high = float(bounds[1])
     logk_vals = np.asarray(res.params[: res.model.n_logk], dtype=float)
     names = _logk_names(res.model.n_logk)
     warnings: list[str] = []
     for name, value in zip(names, logk_vals):
         if not np.isfinite(value):
             continue
-        if np.isclose(value, low, atol=LOGK_BOUND_ATOL, rtol=0.0):
-            warnings.append(f"{name} is pinned at the lower log10(K) bound ({low:g})")
-        elif np.isclose(value, high, atol=LOGK_BOUND_ATOL, rtol=0.0):
+        if np.isclose(value, high, atol=LOGK_BOUND_ATOL, rtol=0.0):
             warnings.append(f"{name} is pinned at the upper log10(K) bound ({high:g})")
     return warnings
 
