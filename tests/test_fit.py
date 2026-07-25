@@ -11,7 +11,6 @@ from scipy.stats import t as student_t
 
 from nmr_bind_fit import fit
 from nmr_bind_fit.fit import _param_names_multi, fit_models
-from nmr_bind_fit.fit_criteria import information_criteria
 from nmr_bind_fit.fit_optimizer import param_bounds, select_best_multistart
 from nmr_bind_fit.fit_uncertainty import CONFIDENCE_LEVEL, parameter_uncertainty
 from nmr_bind_fit.io import Dataset, load_dataset
@@ -25,6 +24,7 @@ from nmr_bind_fit.stats import (
     aicc_from_loglik,
     bic_from_loglik,
     gaussian_loglik,
+    information_criteria,
     residual_diagnostics,
 )
 

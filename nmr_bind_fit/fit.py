@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from .fit_criteria import information_criteria
+from .equilibrium import SpeciesResult
 from .fit_optimizer import (
     MAX_JACOBIAN_CONDITION,
     MIN_LOGK_RMS_SENSITIVITY,
@@ -22,6 +22,7 @@ from .fit_optimizer import fit_with_initial as _optimizer_fit_with_initial
 from .fit_uncertainty import Uncertainty, parameter_uncertainty
 from .io import Dataset
 from .models import MODEL_SPECS, ModelSpec, predict_dataset, split_params_multi
+from .stats import information_criteria
 from .stats import residual_diagnostics as _residual_diagnostics_impl
 
 
@@ -46,7 +47,7 @@ class FitResult:
     jacobian_condition: float
     jacobian_logk_sensitivity: float
     y_pred: list[np.ndarray]
-    species: list
+    species: list[SpeciesResult]
     residuals: list[np.ndarray]
     residual_diagnostics: dict[str, float]
     uncertainty: Uncertainty | None
@@ -200,10 +201,10 @@ def _predict_all(
     model: ModelSpec,
     datasets: list[Dataset],
     solver_failure_mode: str = "fail-fast",
-) -> tuple[list[np.ndarray], list, list[np.ndarray]]:
+) -> tuple[list[np.ndarray], list[SpeciesResult], list[np.ndarray]]:
     logk, deltas = split_params_multi(params, model, datasets)
     y_pred_list = []
-    species_list = []
+    species_list: list[SpeciesResult] = []
     residuals = []
     for ds, delta in zip(datasets, deltas):
         y_pred, species = predict_dataset(model, ds, logk, delta, solver_failure_mode=solver_failure_mode)
@@ -382,7 +383,7 @@ def _failed_fit_result(
     params: np.ndarray,
     param_names: list[str],
     message: str,
-    species: list | None = None,
+    species: list[SpeciesResult] | None = None,
     jacobian_rank: int = 0,
     jacobian_condition: float = float("inf"),
     jacobian_logk_sensitivity: float = float("nan"),
@@ -420,14 +421,14 @@ def _failed_fit_result(
     )
 
 
-def _nonfinite_prediction_message(datasets: list[Dataset], species_list: list[object]) -> str:
+def _nonfinite_prediction_message(species_list: list[SpeciesResult]) -> str:
     fail_points = 0
     total_points = 0
-    for ds, species in zip(datasets, species_list):
-        stats = getattr(species, "solver_stats", None)
+    for species in species_list:
+        stats = species.solver_stats
         if stats is not None:
-            fail_points += int(getattr(stats, "fail", 0))
-            total_points += int(getattr(stats, "points", ds.n_points))
+            fail_points += int(stats.fail)
+            total_points += int(stats.points)
     message = "Equilibrium solver produced non-finite predictions."
     if total_points > 0:
         message = f"{message} Failed points: {fail_points}/{total_points}."
@@ -456,7 +457,7 @@ def _build_successful_fit_result(
             datasets=datasets,
             params=best_params,
             param_names=param_names,
-            message=_nonfinite_prediction_message(datasets, species_list),
+            message=_nonfinite_prediction_message(species_list),
             species=species_list,
             logk_bounds=logk_bounds,
         )

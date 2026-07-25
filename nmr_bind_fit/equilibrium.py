@@ -284,18 +284,18 @@ def _scale_species_from_logs(
     log_species: np.ndarray,
     h_tot: float,
     stoich: tuple[float, ...],
-) -> tuple[float, ...]:
+) -> tuple[float, float, float]:
     """Scale log-populations so that weighted host total matches h_tot."""
     # Rescale log-populations so stoichiometric totals match the host mass balance.
     if h_tot <= 0 or not math.isfinite(h_tot):
-        return tuple(0.0 for _ in log_species)
+        return 0.0, 0.0, 0.0
     log_stoich = np.log(np.asarray(stoich, dtype=float))
     log_total = _logsumexp(log_species + log_stoich)
     if not math.isfinite(log_total):
-        return tuple(0.0 for _ in log_species)
+        return 0.0, 0.0, 0.0
     log_scale = math.log(h_tot) - log_total
     values = np.exp(log_species + log_scale)
-    return tuple(float(v) for v in values)
+    return float(values[0]), float(values[1]), float(values[2])
 
 
 def solve_12_point(
@@ -341,7 +341,7 @@ def solve_12_point(
     )
     tolerance_scale = _free_guest_tolerance_scale(g_tot, log_capacity)
     smallest = float(np.nextafter(0.0, 1.0))
-    use_log_root = tolerance_scale < np.finfo(float).tiny
+    use_log_root = bool(tolerance_scale < np.finfo(float).tiny)
     if g_tot > smallest and residual(smallest) >= 0.0:
         use_log_root = True
     if use_log_root:
@@ -415,7 +415,7 @@ def solve_21_point(
     )
     tolerance_scale = _free_guest_tolerance_scale(g_tot, log_capacity)
     smallest = float(np.nextafter(0.0, 1.0))
-    use_log_root = tolerance_scale < np.finfo(float).tiny
+    use_log_root = bool(tolerance_scale < np.finfo(float).tiny)
     if g_tot > smallest and residual(smallest) >= 0.0:
         use_log_root = True
     if use_log_root:

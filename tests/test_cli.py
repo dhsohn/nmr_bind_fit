@@ -295,12 +295,12 @@ def test_index_results_groups_success_and_failures_by_dataset():
         SimpleNamespace(datasets=[ds2], success=True, message="ok", model=SimpleNamespace(name="11")),
     ]
 
-    result_map, failures = _index_results(results, labels)
+    result_map = _index_results(results, labels)
 
     assert list(result_map) == ["Dataset A", "Dataset B"]
-    assert set(result_map["Dataset A"].keys()) == {"11"}
+    assert set(result_map["Dataset A"].keys()) == {"11", "12"}
     assert set(result_map["Dataset B"].keys()) == {"11"}
-    assert failures["Dataset A"] == [("12", "fail")]
+    assert result_map["Dataset A"]["12"].message == "fail"
 
 
 def test_resolve_inputs_rejects_duplicate_glob_and_explicit_path(tmp_path):

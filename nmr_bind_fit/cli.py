@@ -15,20 +15,13 @@ import numpy as np
 
 from .fit import FitResult, fit_models
 from .io import Dataset, load_datasets
+from .models import display_model_name
 from .report import write_report_html
 from .report_pipeline import (
     build_decisions,
     build_methods_sections,
-    build_methods_text,
     build_report_artifacts,
 )
-
-MODEL_LABELS = {
-    "11": "H : G = 1 : 1",
-    "12": "H : G = 1 : 2",
-    "21": "H : G = 2 : 1",
-    "nb": "non-binding",
-}
 
 DEFAULT_MODEL_NAMES = ["11", "12", "21", "nb"]
 STRICT_SOLVER_FAILURE_MODE = "fail-fast"
@@ -155,28 +148,16 @@ def _resolve_logk_config(
 def _index_results(
     results: Sequence[FitResult],
     dataset_labels: dict[int, str],
-) -> tuple[
-    dict[str, dict[str, FitResult]],
-    dict[str, list[tuple[str, str]]],
-]:
+) -> dict[str, dict[str, FitResult]]:
     results_by_key: dict[str, dict[str, FitResult]] = {}
-    failures_by_key: dict[str, list[tuple[str, str]]] = {}
     for result in results:
         if len(result.datasets) > 1:
             key = SIMULTANEOUS_FIT_LABEL
         else:
             key = dataset_labels[id(result.datasets[0])]
         model_results = results_by_key.setdefault(key, {})
-        if result.success:
-            model_results[result.model.name] = result
-        else:
-            failures_by_key.setdefault(key, []).append((result.model.name, result.message))
-    return results_by_key, failures_by_key
-
-
-def _display_model_name(name: str) -> str:
-    # Map internal model codes to friendly labels.
-    return MODEL_LABELS.get(name, name)
+        model_results[result.model.name] = result
+    return results_by_key
 
 
 def run_fit(args: argparse.Namespace) -> None:
@@ -201,14 +182,15 @@ def run_fit(args: argparse.Namespace) -> None:
         residual_diagnostics=args.residual_diagnostics,
     )
 
-    # Index results by dataset key and collect failures.
-    results_by_key, failures_by_key = _index_results(results, dataset_labels)
+    # Index every result by its report dataset and model keys.
+    results_by_key = _index_results(results, dataset_labels)
     ordered_keys = list(results_by_key)
-    if not any(results_by_key.values()):
+    if not any(result.success for model_map in results_by_key.values() for result in model_map.values()):
         failure_details = [
-            f"{key} / {_display_model_name(model)}: {message}"
+            f"{key} / {display_model_name(model_name)}: {result.message}"
             for key in ordered_keys
-            for model, message in failures_by_key.get(key, [])
+            for model_name, result in results_by_key[key].items()
+            if not result.success
         ]
         detail_text = "; ".join(failure_details)
         message = "All model fits failed; no report was generated."
@@ -224,25 +206,20 @@ def run_fit(args: argparse.Namespace) -> None:
         args,
         ordered_keys,
         results_by_key,
-        failures_by_key,
         out_dir,
-        display_model_name=_display_model_name,
     )
 
-    methods_text = build_methods_text(args, datasets)
     methods_sections = build_methods_sections(args, datasets)
     decision_entries = build_decisions(
         args,
         ordered_keys,
         results_by_key,
-        display_model_name=_display_model_name,
     )
 
     write_report_html(
         summary_rows,
         model_entries,
         decision_entries=decision_entries,
-        methods_text=methods_text,
         warnings=report_warnings,
         output_path=out_dir / "report.html",
         methods_sections=methods_sections,

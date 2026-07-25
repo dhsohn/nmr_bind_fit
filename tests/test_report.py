@@ -11,8 +11,9 @@ from nmr_bind_fit import report_pipeline
 from nmr_bind_fit.io import Dataset
 from nmr_bind_fit.models import MODEL_SPECS
 from nmr_bind_fit.plots import plot_residuals
-from nmr_bind_fit.report import DecisionEntry, _decision_paragraphs
-from nmr_bind_fit.report_html_renderer import (
+from nmr_bind_fit.report import (
+    DecisionEntry,
+    _decision_paragraphs,
     _fig_caption,
     _FigCounter,
     _render_summary_table,
@@ -74,6 +75,8 @@ def _fit_result(
         aicc=2.0,
         penalty_count=0,
         residual_diagnostics={},
+        success=True,
+        message="ok",
         n=3,
         p=3,
         dof=0,
@@ -103,9 +106,7 @@ def test_independent_results_use_collision_free_dataset_scopes(tmp_path, monkeyp
         args=SimpleNamespace(ci_width=None),
         ordered_keys=keys,
         results_by_key={key: {"11": _fit_result(ds)} for key, ds in zip(keys, datasets)},
-        failures_by_key={},
         out_dir=tmp_path,
-        display_model_name=lambda name: name,
     )
 
     isotherms = [
@@ -156,9 +157,7 @@ def test_nonbinding_model_reports_parameter_errors_but_no_k_interval(
         args=SimpleNamespace(ci_width=None),
         ordered_keys=["sample"],
         results_by_key={"sample": {"nb": result}},
-        failures_by_key={},
         out_dir=tmp_path,
-        display_model_name=lambda name: name,
     )
 
     assert report_warnings == []
@@ -271,6 +270,8 @@ def _result(**overrides):
         "jacobian_condition": 100.0,
         "jacobian_logk_sensitivity": 0.5,
         "logk_bounds": None,
+        "success": True,
+        "message": "ok",
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -289,11 +290,10 @@ def test_build_decisions_uses_provisional_language():
         args,
         ordered_keys,
         results_by_key,
-        display_model_name=lambda name: name,
     )
 
     assert len(entries) == 1
-    assert entries[0].recommended_model == "11"
+    assert entries[0].recommended_model == "H : G = 1 : 1"
     assert "relative support only" in entries[0].reasons[0]
     # The two candidates are 0.9 apart, so discrimination is flagged as weak.
     assert any("discrimination is weak" in reason for reason in entries[0].reasons)
@@ -313,17 +313,24 @@ def test_build_report_artifacts_uses_fit_failed_wording_for_exclusions(tmp_path)
     summary_rows, model_entries, warnings = build_report_artifacts(
         args=argparse.Namespace(),
         ordered_keys=["dataset_a"],
-        results_by_key={"dataset_a": {}},
-        failures_by_key={"dataset_a": [("11", "ModelFitError: forced model crash")]},
+        results_by_key={
+            "dataset_a": {
+                "11": _result(
+                    success=False,
+                    message="ModelFitError: forced model crash",
+                )
+            }
+        },
         out_dir=tmp_path,
-        display_model_name=lambda name: name,
     )
 
     assert len(summary_rows) == 1
     assert summary_rows[0]["Status"] == "failed"
     assert "Notes" not in summary_rows[0]
     assert model_entries == []
-    assert warnings == ["dataset_a: excluded 11 (fit failed: ModelFitError: forced model crash)"]
+    assert warnings == [
+        "dataset_a: excluded H : G = 1 : 1 (fit failed: ModelFitError: forced model crash)"
+    ]
 
 
 def test_build_methods_sections_uses_brent_and_molar_k_units():
@@ -501,7 +508,6 @@ def test_build_decisions_excludes_nonfinite_bic_from_ranking():
         args,
         ordered_keys,
         results_by_key,
-        display_model_name=lambda name: name,
     )
 
     # No finitely ranked candidate yields no recommendation; the reason reaches
