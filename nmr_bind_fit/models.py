@@ -53,6 +53,19 @@ MODEL_SPECS = {
 }
 
 
+MODEL_LABELS = {
+    "11": "H : G = 1 : 1",
+    "12": "H : G = 1 : 2",
+    "21": "H : G = 2 : 1",
+    "nb": "non-binding",
+}
+
+
+def display_model_name(name: str) -> str:
+    """Return the report label for a model code."""
+    return MODEL_LABELS.get(name, name)
+
+
 def split_params_multi(
     params: np.ndarray,
     model: ModelSpec,

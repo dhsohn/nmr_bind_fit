@@ -6,7 +6,6 @@ import argparse
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Callable, cast
 
 import numpy as np
 
@@ -14,7 +13,7 @@ from .equilibrium import SpeciesResult
 from .fit import FitResult
 from .fit_uncertainty import CONFIDENCE_LEVEL
 from .io import Dataset
-from .models import ModelSpec, split_params_multi
+from .models import display_model_name, split_params_multi
 from .plots import (
     plot_fraction_bound,
     plot_isotherms,
@@ -204,7 +203,7 @@ def _collect_plot_artifacts(
     plot_paths: list[str] = []
     plot_labels: dict[str, str] = {}
     replicate_dir_labels = _replicate_dataset_dir_labels(res.datasets) if len(res.datasets) > 1 else []
-    model_spec = cast(ModelSpec, res.model)
+    model_spec = res.model
     logk, deltas = split_params_multi(res.params, model_spec, res.datasets)
     for idx, (ds, delta, residual) in enumerate(zip(res.datasets, deltas, res.residuals)):
         ds_dir = model_dir
@@ -477,7 +476,6 @@ def _build_model_entry(
     model_name: str,
     res: FitResult,
     out_dir: Path,
-    display_model_name: Callable[[str], str],
     dataset_dir_token: str | None = None,
 ) -> tuple[ModelEntry, dict[str, str]]:
     # Build one report model section and its matching summary row.
@@ -510,9 +508,7 @@ def build_report_artifacts(
     args: argparse.Namespace,
     ordered_keys: list[str],
     results_by_key: dict[str, dict[str, FitResult]],
-    failures_by_key: dict[str, list[tuple[str, str]]],
     out_dir: Path,
-    display_model_name: Callable[[str], str],
 ) -> tuple[list[dict[str, str]], list[ModelEntry], list[str]]:
     # Convert fit results into summary rows, model entries, and top-level warnings.
     summary_rows: list[dict[str, str]] = []
@@ -521,23 +517,23 @@ def build_report_artifacts(
     dataset_dir_tokens = _dataset_dir_tokens(ordered_keys)
 
     for key in ordered_keys:
-        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
-        failures = failures_by_key.get(key, [])
-        for model_name, message in failures:
+        model_map = results_by_key.get(key, {})
+        for model_name, res in model_map.items():
+            if res.success:
+                continue
             report_warnings.append(
-                f"{key}: excluded {display_model_name(model_name)} (fit failed: {message})"
+                f"{key}: excluded {display_model_name(model_name)} (fit failed: {res.message})"
             )
             summary_rows.append(_build_failure_summary_row(key, display_model_name(model_name)))
-        if not model_map:
-            continue
         for model_name, res in model_map.items():
+            if not res.success:
+                continue
             model_entry, summary_row = _build_model_entry(
                 args,
                 key,
                 model_name,
                 res,
                 out_dir,
-                display_model_name,
                 dataset_dir_tokens.get(key),
             )
             model_entries.append(model_entry)
@@ -547,7 +543,7 @@ def build_report_artifacts(
 
 
 def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Dataset]) -> list[dict[str, str]]:
-    # Shared source for both structured methods sections and plain-text methods summary.
+    # Canonical structured methods content for the HTML report.
     sections: list[dict[str, str]] = []
     # K is reported in M⁻¹ (molar inputs).
     k_unit = "M⁻¹"
@@ -662,12 +658,6 @@ def _compose_methods_sections(args: argparse.Namespace, datasets: Sequence[Datas
     return sections
 
 
-def build_methods_text(args: argparse.Namespace, datasets: Sequence[Dataset]) -> str:
-    # Flatten structured methods sections into one text block.
-    sections = _compose_methods_sections(args, datasets)
-    return " ".join(section["content"] for section in sections)
-
-
 def build_methods_sections(
     args: argparse.Namespace, datasets: Sequence[Dataset]
 ) -> list[dict[str, str]]:
@@ -679,7 +669,6 @@ def build_decisions(
     args: argparse.Namespace,
     ordered_keys: list[str],
     results_by_key: dict[str, dict[str, FitResult]],
-    display_model_name: Callable[[str], str],
 ) -> list[DecisionEntry]:
     """Rank each dataset's candidates and record why the leader was chosen.
 
@@ -689,8 +678,11 @@ def build_decisions(
     decision_entries: list[DecisionEntry] = []
 
     for key in ordered_keys:
-        model_map = cast(dict[str, FitResult], results_by_key.get(key, {}))
-        bic_sorted = sorted((res for res in model_map.values() if np.isfinite(res.bic)), key=lambda r: r.bic)
+        model_map = results_by_key.get(key, {})
+        bic_sorted = sorted(
+            (res for res in model_map.values() if res.success and np.isfinite(res.bic)),
+            key=lambda r: r.bic,
+        )
         if not bic_sorted:
             continue
 

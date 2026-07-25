@@ -167,7 +167,7 @@ between candidates.
 
 ### 4.3 Likelihood, n, and k — exact definitions
 
-(Implementation: `nmr_bind_fit/stats.py`, `nmr_bind_fit/fit_criteria.py`.)
+(Implementation: `nmr_bind_fit/stats.py`.)
 
 - **One shared variance is estimated.** Residuals from all datasets, points, and peaks are
   pooled to estimate a single residual variance $\sigma^2$ (Gaussian likelihood). This shared
