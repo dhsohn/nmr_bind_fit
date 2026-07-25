@@ -450,6 +450,15 @@ def test_bound_pinned_k_is_reported_in_warnings():
     assert any("upper log10(K) bound" in warning for warning in warnings)
 
 
+def test_lower_bound_pinned_k_is_not_reported_in_warnings():
+    res = _pinned_k_result((0.0, 12.0))
+    res.params[0] = 0.0
+
+    warnings = _build_model_warnings(argparse.Namespace(ci_width=None), res, None)
+
+    assert not any("log10(K) bound" in warning for warning in warnings)
+
+
 def test_bound_pinned_warning_uses_actual_bounds_not_cli_constants():
     # A logK of 12 is only "pinned" if 12 was the active upper bound. With no
     # bounds (a programmatic fit) or a wider bound, K=1e12 is a valid estimate
