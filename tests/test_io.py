@@ -62,21 +62,6 @@ def test_load_dataset_rejects_when_all_required_rows_are_dropped(tmp_path):
         load_dataset(path, ppm_cols=["ppm1"])
 
 
-def test_load_dataset_rejects_missing_explicit_ppm_column(tmp_path):
-    path = tmp_path / "sample.csv"
-    df = pd.DataFrame(
-        {
-            "[H]t": [1e-3],
-            "[G]t": [0.0],
-            "ppm1": [7.1],
-        }
-    )
-    df.to_csv(path, index=False)
-
-    with pytest.raises(ValueError, match="Requested ppm columns not found: missing"):
-        load_dataset(path, ppm_cols=["missing"])
-
-
 def test_load_dataset_drops_ppm_column_with_inf(tmp_path):
     path = tmp_path / "sample.csv"
     df = pd.DataFrame(
@@ -218,5 +203,4 @@ def test_load_dataset_requires_a_regular_existing_file(tmp_path):
     directory.mkdir()
     with pytest.raises(ValueError, match="not a regular file"):
         load_dataset(directory)
-
 

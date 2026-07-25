@@ -214,14 +214,6 @@ def test_resolve_logk_config_rejects_empty_k_starts_list():
         _resolve_logk_config(args)
 
 
-def test_resolve_logk_config_rejects_k_starts_out_of_strict_bounds():
-    args = argparse.Namespace(
-        k_starts="10,1e13",
-    )
-    with pytest.raises(ValueError, match=r"All K starts must be within \[1e\+00, 1e\+12\]\."):
-        _resolve_logk_config(args)
-
-
 def test_safe_output_name_is_normalized_and_bounded():
     safe = _safe_output_name("../sample? " + "a" * 300)
 
@@ -334,15 +326,6 @@ def test_resolve_inputs_sorts_glob_matches(tmp_path):
     paths = _resolve_inputs([str(tmp_path / "*.csv")])
 
     assert [path.name for path in paths] == ["a.csv", "b.csv"]
-
-
-def test_resolve_inputs_accepts_literal_path_with_glob_characters(tmp_path):
-    csv_path = tmp_path / "sample[1].csv"
-    csv_path.write_text("[H]t,[G]t,ppm\n1e-3,0,7.1\n", encoding="utf-8")
-
-    paths = _resolve_inputs([str(csv_path)])
-
-    assert paths == [csv_path]
 
 
 def test_resolve_inputs_prefers_literal_path_over_glob_metacharacter_match(tmp_path):

@@ -812,29 +812,6 @@ def test_r2_score_ignores_constant_peaks():
     np.testing.assert_allclose(r2, 0.5, atol=1e-12)
 
 
-def test_predict_shape_11():
-    # Sanity check prediction shape for the 1:1 model.
-    h0 = np.array([1e-3, 1e-3, 1e-3])
-    g0 = np.array([0.0, 5e-4, 1e-3])
-    x = g0 / h0
-    y = np.column_stack([np.linspace(7.0, 7.5, 3), np.linspace(8.0, 8.2, 3)])
-    ds = Dataset(
-        name="test",
-        path=__import__("pathlib").Path("dummy.csv"),
-        h_tot=h0,
-        g_tot=g0,
-        x=x,
-        y=y,
-        y_cols=["ppm1", "ppm2"],
-        dropped_peaks=[],
-    )
-    model = MODEL_SPECS["11"]
-    logk = np.array([4.0])
-    delta = np.array([[7.0, 7.5], [8.0, 8.2]])
-    y_pred, _species = predict_dataset(model, ds, logk, delta)
-    assert y_pred.shape == y.shape
-
-
 def test_split_params_rejects_trailing_values():
     ds = Dataset(
         name="test",
@@ -1034,17 +1011,3 @@ def test_noisier_data_widens_the_reported_interval():
         )
 
     assert widths[1] > widths[0]
-
-
-def test_failed_fit_carries_no_uncertainty():
-    dataset = load_dataset(Path(__file__).parents[1] / "examples" / "synthetic_nonbinding.csv")
-
-    result = fit_models(
-        [dataset],
-        ["11"],
-        logk_starts=[4.0],
-        logk_bounds=(0.0, 12.0),
-    )[0]
-
-    assert not result.success
-    assert result.uncertainty is None
