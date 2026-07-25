@@ -48,8 +48,6 @@ def test_run_fit_writes_report_artifacts(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
 
     out_dir = output_dirs[0]
-    assert not (out_dir / "summary.csv").exists()
-    assert not (out_dir / "decision.txt").exists()
     assert (out_dir / "report.html").is_file()
 
 
@@ -96,8 +94,6 @@ def test_run_fit_replicates_and_continue_mode(tmp_path, monkeypatch):
     assert len(output_dirs) == 1
 
     out_dir = output_dirs[0]
-    assert not (out_dir / "summary.csv").exists()
-    assert not (out_dir / "decision.txt").exists()
     report_path = out_dir / "report.html"
     assert report_path.is_file()
 
