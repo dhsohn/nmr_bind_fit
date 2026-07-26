@@ -38,7 +38,16 @@ Binding constants in supramolecular chemistry are most useful when they are acco
 
 Software-assisted determination of equilibrium constants from NMR chemical-shift data predates modern web and desktop workflows. EQNMR provided model-independent specification of equilibria, parameter constraints, and nonlinear least-squares fitting for fast-exchange NMR data [@Hynes1993]. Bindfit subsequently made fitting of common supramolecular binding models accessible through a web interface [@Hibbert2016]. More recent open-source tools offer substantially broader analysis environments. SupraFit supports NMR and isothermal titration calorimetry data, common 1:1, 1:2, and 2:1 binding systems, global and local fitting, and several uncertainty-analysis methods through graphical and command-line interfaces [@Huebler2022]. Musketeer provides a cross-platform graphical workflow for NMR, UV--visible, and fluorescence titrations and supports user-defined, multicomponent equilibrium models [@Soloviev2024].
 
-`nmr_bind_fit` complements these broader, flexible analysis environments with a standardized decision-support workflow for host-resonance NMR chemical-shift titrations. Each dataset is evaluated using the same fixed and inspectable candidate set—1:1 binding, sequential 1:2 binding, sequential 2:1 binding, and a non-binding linear-drift control—and the same estimation, uncertainty, diagnostic, and reporting procedures. This design makes two linked questions explicit: which tested stoichiometric model is best supported by the binding isotherm, and whether the observed trend warrants a binding interpretation rather than a non-binding explanation.
+The comparison below summarizes the standard workflow documented for each tool rather than every model that could be constructed through customization.
+
+| Tool | Data | Standard workflow | Model evaluation |
+| --- | --- | --- | --- |
+| Bindfit | NMR; UV--visible; fluorescence | Web; selected 1:1, 1:2, or 2:1 model | Fit and residuals |
+| SupraFit | NMR; ITC | GUI and CLI; common models; global/local fits | Monte Carlo; F tests |
+| Musketeer | NMR; UV--visible; fluorescence | GUI; predefined/custom multicomponent equilibria | RMSE; visual and physical checks |
+| `nmr_bind_fit` | NMR chemical shifts | CLI; fixed 1:1, 1:2, 2:1, and non-binding (NB) set | BIC/AICc; uncertainty/identifiability; stoichiometry and binding/NB screening |
+
+`nmr_bind_fit` complements these broader, flexible analysis environments by making model comparison part of the standard analysis rather than a separate user-directed step. Every candidate is processed using the same estimation, uncertainty, diagnostic, and reporting procedures. The included non-binding linear-drift model asks whether a systematic trend can explain the data without invoking a binding equilibrium. Together, these features make two linked questions explicit: which tested stoichiometric model is best supported by the binding isotherm, and whether the observed trend warrants a binding interpretation rather than a non-binding explanation.
 
 The contribution of `nmr_bind_fit` is therefore not a new equilibrium model or a replacement for tools that support arbitrary chemical systems. It is the integration of stoichiometric model discrimination, an explicit non-binding negative control, identifiability and uncertainty checks, provisional interpretation, and self-contained reporting into a single reproducible command-line workflow.
 
