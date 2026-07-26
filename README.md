@@ -13,7 +13,7 @@ For the detailed rationale behind model selection, including BIC/AICc, ΔBIC, co
 
 ## Statement of need
 
-NMR chemical-shift titration is widely used to estimate binding constants, but ambiguous titration curves can be overinterpreted when a single binding stoichiometry is assumed in advance or when uncertainty and non-binding controls are not reported. `nmr_bind_fit` provides a reproducible workflow that compares plausible binding stoichiometries and a non-binding linear drift model under the same input/output pipeline. The goal is to make binding-model selection more transparent and to reduce false-positive or overconfident binding-constant reports.
+NMR chemical-shift titration curves can be overinterpreted when a single binding stoichiometry is assumed in advance or when non-binding alternatives and parameter uncertainty are not examined. `nmr_bind_fit` provides a reproducible workflow that asks two linked questions: which tested stoichiometry is best supported by the isotherm, and whether the data support binding over a non-binding trend. This statistical ranking is reported as a provisional working model to be evaluated together with independent experimental evidence, reducing the risk of false-positive or overconfident binding assignments.
 
 ## Installation
 
