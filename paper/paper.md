@@ -42,10 +42,10 @@ The comparison below summarizes the standard workflow documented for each tool r
 
 | Tool | Data | Standard workflow | Model evaluation |
 | --- | --- | --- | --- |
-| Bindfit | NMR; UV--visible; fluorescence | Web; selected 1:1, 1:2, or 2:1 model | Fit and residuals |
-| SupraFit | NMR; ITC | GUI and CLI; common models; global/local fits | Monte Carlo; F tests |
-| Musketeer | NMR; UV--visible; fluorescence | GUI; predefined/custom multicomponent equilibria | RMSE; visual and physical checks |
-| `nmr_bind_fit` | NMR chemical shifts | CLI; fixed 1:1, 1:2, 2:1, and non-binding (NB) set | BIC/AICc; uncertainty/identifiability; stoichiometry and binding/NB screening |
+| Bindfit | NMR; UV-vis; fluorescence | selected 1:1, 1:2, or 2:1 model | Fit and residuals |
+| SupraFit | NMR; ITC | common models; global/local fits | Monte Carlo; F tests |
+| Musketeer | NMR; UV-vis; fluorescence | predefined/custom multicomponent equilibria | RMSE; visual and physical checks |
+| `nmr_bind_fit` | NMR | stoichiometry/NB inference; global/local fits; replicates | BIC/AICc; uncertainty/identifiability |
 
 `nmr_bind_fit` complements these broader, flexible analysis environments by making model comparison part of the standard analysis rather than a separate user-directed step. Every candidate is processed using the same estimation, uncertainty, diagnostic, and reporting procedures. The included non-binding linear-drift model asks whether a systematic trend can explain the data without invoking a binding equilibrium. Together, these features make two linked questions explicit: which tested stoichiometric model is best supported by the binding isotherm, and whether the observed trend warrants a binding interpretation rather than a non-binding explanation.
 
@@ -79,4 +79,4 @@ Generative AI tools were used during both the development of this software and t
 - **Code review.** Automated review tools, including OpenAI Codex, were used to review pull requests during development.
 - **Paper.** Claude Opus 4.8 and OpenAI GPT-5.5 were used to review and refine drafts of this paper.
 
-All AI-assisted output was reviewed, edited, tested, and verified by the author. The author made the scientific and software-design decisions — including the choice of binding models, the equilibrium formulations, and the statistical methodology — and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted software and paper.
+All AI-assisted output was reviewed, edited, tested, and verified by the author. The author made the scientific and software-design decisions including the choice of binding models, the equilibrium formulations, and the statistical methodology and remains responsible for the correctness, originality, licensing, and ethical compliance of the submitted software and paper.
