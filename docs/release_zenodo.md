@@ -1,6 +1,6 @@
 # Release and Zenodo DOI checklist
 
-Archived v0.1.0 DOI: [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370). That DOI identifies the v0.1.0 archive only. The source tree now declares 0.2.0, which has no archive and no DOI yet, so `CITATION.cff` and `paper/paper.bib` carry no `doi` field until the v0.2.0 release is minted.
+Zenodo mints two kinds of DOI for this repository. The concept DOI [10.5281/zenodo.21071369](https://doi.org/10.5281/zenodo.21071369) resolves to the most recent release and never changes; the README badge uses it. Each release also gets its own version DOI, which is what `CITATION.cff` and `paper/paper.bib` carry so that a citation names the exact archived code. Current archives: v0.2.0 at [10.5281/zenodo.21767384](https://doi.org/10.5281/zenodo.21767384), v0.1.0 at [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370).
 
 This checklist prepares `nmr_bind_fit` for a JOSS-facing archived release. Do not invent a DOI: Zenodo creates the DOI only after the GitHub repository is connected to Zenodo and a GitHub release is published.
 
@@ -54,11 +54,11 @@ After the GitHub release is published, Zenodo should archive the release and min
 
 ## After Zenodo mints the DOI
 
-Update these files with the real Zenodo DOI:
+Update these files with the new version DOI:
 
-- `CITATION.cff`: add `doi: <zenodo-doi>` and drop the `identifiers` entry that records the superseded v0.1.0 archive.
-- `paper/paper.bib`: add `doi = {<zenodo-doi>}` to `nmrbindfit2026`, point `url` at the DOI, and remove the DOI-pending note.
-- `README.md`: update the DOI badge and the citation section to the new archive.
+- `CITATION.cff`: set `doi:` to the new version DOI. Leave the `identifiers` entry alone; it holds the concept DOI, which is the same for every release.
+- `paper/paper.bib`: set `doi` and `url` on `nmrbindfit2026` to the new version DOI.
+- `README.md`: update the citation section to name the new release and its version DOI. The badge already points at the concept DOI and needs no change.
 
 Then commit the DOI update:
 
