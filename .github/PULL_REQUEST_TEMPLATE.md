@@ -20,7 +20,7 @@ For docs-only changes, note "No functional change" and how the text was checked.
 
 <!--
 Please also:
-- Update CHANGELOG.md under [Unreleased] if user-facing behavior changed.
+- Update CHANGELOG.md under the topmost unreleased version heading if user-facing behavior changed.
 - Keep model-selection language transparent (lowest-BIC is a provisional working
   model, not an automatic chemical-truth claim).
 - Preserve fail-fast behavior for numerical solver failures unless documented.
