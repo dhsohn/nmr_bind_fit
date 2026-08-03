@@ -3,7 +3,7 @@
 [![CI](https://github.com/dhsohn/nmr_bind_fit/actions/workflows/ci.yml/badge.svg)](https://github.com/dhsohn/nmr_bind_fit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21071370.svg)](https://doi.org/10.5281/zenodo.21071370)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21071369.svg)](https://doi.org/10.5281/zenodo.21071369)
 
 `nmr_bind_fit` is a Python command-line workflow for NMR chemical-shift titration binding analysis. It fits 1:1, sequential 1:2, sequential 2:1, and non-binding candidate models, then reports information-criterion model comparisons, parameter uncertainty, diagnostic warnings, and publication-oriented HTML summaries.
 
@@ -151,7 +151,7 @@ NMR chemical-shift titration data are interpreted under a fast-exchange assumpti
 
 ## Citation
 
-If you use `nmr_bind_fit` in research, please cite the archived release used for your analysis. Citation metadata are provided in [CITATION.cff](CITATION.cff). The first archived release is available at DOI [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370).
+If you use `nmr_bind_fit` in research, please cite the archived release used for your analysis rather than the repository alone, so the cited code matches the results. Citation metadata are provided in [CITATION.cff](CITATION.cff). The current release, v0.2.0, is archived at DOI [10.5281/zenodo.21767384](https://doi.org/10.5281/zenodo.21767384). The badge above and DOI [10.5281/zenodo.21071369](https://doi.org/10.5281/zenodo.21071369) resolve to the most recent release across all versions.
 
 ## Contributing and license
 

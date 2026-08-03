@@ -2,10 +2,11 @@ cff-version: 1.2.0
 message: "If you use nmr_bind_fit in your research, please cite the software repository and the archived release used for your analysis."
 title: "nmr_bind_fit: transparent model comparison and uncertainty reporting for NMR host-guest titrations"
 version: 0.2.0
+doi: 10.5281/zenodo.21767384
 identifiers:
   - type: doi
-    value: 10.5281/zenodo.21071370
-    description: Archived v0.1.0 release. Version 0.2.0 has not been archived yet.
+    value: 10.5281/zenodo.21071369
+    description: Concept DOI resolving to the most recent archived release.
 authors:
   - family-names: Sohn
     given-names: Dae Hyup
