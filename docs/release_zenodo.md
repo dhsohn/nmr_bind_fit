@@ -1,6 +1,6 @@
 # Release and Zenodo DOI checklist
 
-Archived v0.1.0 DOI: [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370).
+Archived v0.1.0 DOI: [10.5281/zenodo.21071370](https://doi.org/10.5281/zenodo.21071370). That DOI identifies the v0.1.0 archive only. The source tree now declares 0.2.0, which has no archive and no DOI yet, so `CITATION.cff` and `paper/paper.bib` carry no `doi` field until the v0.2.0 release is minted.
 
 This checklist prepares `nmr_bind_fit` for a JOSS-facing archived release. Do not invent a DOI: Zenodo creates the DOI only after the GitHub repository is connected to Zenodo and a GitHub release is published.
 
@@ -10,7 +10,8 @@ This checklist prepares `nmr_bind_fit` for a JOSS-facing archived release. Do no
 - The repository is public and issues are enabled.
 - GitHub Actions CI is green on the commit to be released.
 - The working tree is clean.
-- The version in `pyproject.toml`, `nmr_bind_fit/__init__.py`, `CITATION.cff`, and `CHANGELOG.md` is consistent.
+- The version in `pyproject.toml`, `nmr_bind_fit/__init__.py`, `CITATION.cff`, `CHANGELOG.md`, and `paper/paper.bib` is consistent.
+- The `CHANGELOG.md` heading for the version being released carries the release date instead of `- unreleased`, and its link reference points at the release tag rather than the `compare` range.
 - The release is made after the repository satisfies the public-development-history requirement for the intended JOSS submission.
 
 ## Local verification before tagging
@@ -39,14 +40,14 @@ Remove generated smoke-test output directories and build artifacts before commit
 
 ## GitHub release
 
-For the first JOSS-readiness release, use the version already declared in the project metadata unless intentionally bumping it first.
+Use the version already declared in the project metadata unless intentionally bumping it first.
 
 ```bash
-git tag -a v0.1.0 -m "nmr_bind_fit v0.1.0"
-git push origin v0.1.0
-gh release create v0.1.0 \
-  --title "nmr_bind_fit v0.1.0" \
-  --notes "Initial JOSS-readiness release with package namespace cleanup, CI, examples, tutorial documentation, citation metadata, and MIT license."
+git tag -a v0.2.0 -m "nmr_bind_fit v0.2.0"
+git push origin v0.2.0
+gh release create v0.2.0 \
+  --title "nmr_bind_fit v0.2.0" \
+  --notes "Replaces bootstrap resampling with asymptotic covariance uncertainty and Student-t intervals on log10 K, removes the bootstrap CLI flags and API arguments, and slims the report and CLI surfaces. See CHANGELOG.md for the full list."
 ```
 
 After the GitHub release is published, Zenodo should archive the release and mint a DOI.
@@ -55,19 +56,18 @@ After the GitHub release is published, Zenodo should archive the release and min
 
 Update these files with the real Zenodo DOI:
 
-- `CITATION.cff`: add `doi: <zenodo-doi>`.
-- `paper/paper.bib`: add `doi = {<zenodo-doi>}` to `nmrbindfit2026` and replace the DOI-pending note.
-- `README.md`: update the citation section if desired.
-- Optionally add a DOI badge to `README.md`.
+- `CITATION.cff`: add `doi: <zenodo-doi>` and drop the `identifiers` entry that records the superseded v0.1.0 archive.
+- `paper/paper.bib`: add `doi = {<zenodo-doi>}` to `nmrbindfit2026`, point `url` at the DOI, and remove the DOI-pending note.
+- `README.md`: update the DOI badge and the citation section to the new archive.
 
 Then commit the DOI update:
 
 ```bash
-git checkout -b release/zenodo-doi-v0.1.0
+git checkout -b release/zenodo-doi-v0.2.0
 # edit citation files with the real DOI
 git add CITATION.cff paper/paper.bib README.md
-git commit -m "Add Zenodo DOI for v0.1.0 release"
-git push -u origin release/zenodo-doi-v0.1.0
+git commit -m "Add Zenodo DOI for v0.2.0 release"
+git push -u origin release/zenodo-doi-v0.2.0
 ```
 
 ## JOSS submission notes
